@@ -144,6 +144,9 @@ pub enum EditVerifier {
     /// the only correct check.
     Structured {
         format: crate::structured_format::Format,
+        /// When `true` and `format == Format::Json`, verify the post-edit bytes
+        /// under strict RFC 8259 JSON parsing (ADR-0050 D7).
+        strict: bool,
         query: String,
         expect: ExpectedValue,
     },

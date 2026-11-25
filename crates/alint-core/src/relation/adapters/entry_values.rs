@@ -118,7 +118,12 @@ impl EntryValuesAdapter {
                 )));
             }
         };
-        let strict_json = strict_json && format == Format::Json;
+        if strict_json && format != Format::Json {
+            return Err(AdapterError::Parse(format!(
+                "`strict: true` is only supported for JSON, not {}",
+                format.label()
+            )));
+        }
         let parse = |query: &String| {
             JsonPath::parse(query)
                 .map_err(|error| AdapterError::Parse(format!("bad JSONPath {query:?}: {error}")))

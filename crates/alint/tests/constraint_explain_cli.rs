@@ -1376,6 +1376,11 @@ rules:
     input: strict-read
     assert: { satisfies: { version: version, range_literal: "^1.0.0", dialect: node, include_prerelease: true } }
     level: error
+  - id: strict-semver-compare
+    kind: constraint
+    input: strict-read
+    assert: { compare: { field: version, op: ge, order: semver, to: { value: "1.0.0" } } }
+    level: error
   - id: strict-rec-count
     kind: constraint
     input: strict-records
@@ -1415,6 +1420,7 @@ fn every_plan_shape() -> Vec<(&'static str, serde_json::Value)> {
         "hidden-rec-count",
         "mixed-compare",
         "strict-satisfies",
+        "strict-semver-compare",
         "strict-rec-count",
     ]
     .into_iter()
@@ -1660,4 +1666,45 @@ fn an_optional_bound_field_shows_its_mode_and_redacts_when_env_driven() {
     assert_eq!(env_field["source"], "bound: <redacted>");
     assert!(env_field.get("optional").is_none(), "{env_field}");
     assert!(env_field.get("on_missing").is_none(), "{env_field}");
+}
+
+#[test]
+fn satisfies_and_compare_semver_redact_sensitive_literals_in_explain() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".alint.yml",
+        "version: 2\n\
+         relations:\n\
+         \x20 pins:\n\
+         \x20   from: { paths: 'pins.json' }\n\
+         \x20   records: { format: json, at: '$.pins[*]' }\n\
+         \x20   fields:\n\
+         \x20     ver: { source: 'record: $.ver', sensitive: true }\n\
+         \x20     rng: { source: 'record: $.rng', sensitive: true }\n\
+         rules:\n\
+         \x20 - id: sat-range-lit\n\
+         \x20   kind: constraint\n\
+         \x20   input: pins\n\
+         \x20   assert: { satisfies: { version: ver, range_literal: '^9.8.7-secret', dialect: cargo } }\n\
+         \x20   level: error\n\
+         \x20 - id: sat-ver-lit\n\
+         \x20   kind: constraint\n\
+         \x20   input: pins\n\
+         \x20   assert: { satisfies: { version_literal: '9.8.7-secret', range: rng, dialect: node } }\n\
+         \x20   level: error\n\
+         \x20 - id: cmp-semver\n\
+         \x20   kind: constraint\n\
+         \x20   input: pins\n\
+         \x20   assert: { compare: { field: ver, op: ge, order: semver, to: { value: '9.8.7-secret' } } }\n\
+         \x20   level: error\n",
+    );
+    for id in ["sat-range-lit", "sat-ver-lit", "cmp-semver"] {
+        let (human, json) = explain(root, id, &[]);
+        let json_str = json.to_string();
+        assert!(!human.contains("9.8.7-secret"), "{id} human:\n{human}");
+        assert!(!json_str.contains("9.8.7-secret"), "{id} json:\n{json_str}");
+        assert!(human.contains("<redacted>"), "{id} human:\n{human}");
+    }
 }

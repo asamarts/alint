@@ -912,6 +912,11 @@
                         "oneOf": [
                           {
                             "additionalProperties": false,
+                            "if": {
+                              "required": [
+                                "strict"
+                              ]
+                            },
                             "properties": {
                               "at": {
                                 "items": {
@@ -938,6 +943,13 @@
                               "at",
                               "leaves"
                             ],
+                            "then": {
+                              "properties": {
+                                "format": {
+                                  "const": "json"
+                                }
+                              }
+                            },
                             "type": "object"
                           },
                           {
@@ -1252,6 +1264,11 @@
                         "oneOf": [
                           {
                             "additionalProperties": false,
+                            "if": {
+                              "required": [
+                                "strict"
+                              ]
+                            },
                             "properties": {
                               "at": {
                                 "items": {
@@ -1274,6 +1291,13 @@
                               "format",
                               "at"
                             ],
+                            "then": {
+                              "properties": {
+                                "format": {
+                                  "const": "json"
+                                }
+                              }
+                            },
                             "type": "object"
                           },
                           {
@@ -1333,6 +1357,11 @@
                               "oneOf": [
                                 {
                                   "additionalProperties": false,
+                                  "if": {
+                                    "required": [
+                                      "strict"
+                                    ]
+                                  },
                                   "properties": {
                                     "at": {
                                       "items": {
@@ -1359,6 +1388,13 @@
                                     "at",
                                     "leaves"
                                   ],
+                                  "then": {
+                                    "properties": {
+                                      "format": {
+                                        "const": "json"
+                                      }
+                                    }
+                                  },
                                   "type": "object"
                                 },
                                 {
@@ -1611,6 +1647,11 @@
                               "oneOf": [
                                 {
                                   "additionalProperties": false,
+                                  "if": {
+                                    "required": [
+                                      "strict"
+                                    ]
+                                  },
                                   "properties": {
                                     "at": {
                                       "items": {
@@ -1633,6 +1674,13 @@
                                     "format",
                                     "at"
                                   ],
+                                  "then": {
+                                    "properties": {
+                                      "format": {
+                                        "const": "json"
+                                      }
+                                    }
+                                  },
                                   "type": "object"
                                 },
                                 {

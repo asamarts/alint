@@ -185,20 +185,34 @@ enum Comparator {
         /// True when the comparator in the range explicitly carried a
         /// prerelease tag (controls strict `node-semver` prerelease opt-in).
         explicit_pre: bool,
+        /// When `true` and `include_prerelease` is enabled at match time,
+        /// lower-bound `Ge` compares against `prerelease_floor(major, minor, patch)`
+        /// so partial/wildcard/hyphen lower bounds include prereleases of the
+        /// lower tuple (matching `node-semver`, Cargo, and PEP 440 `==X.*`).
+        pre_floor_when_included: bool,
     },
     /// PEP 440 negated wildcard (`!=3.*` or `!=3.10.*`).
     NotPrefix { major: u64, minor: Option<u64> },
 }
 
 impl Comparator {
-    fn matches(&self, version: &SemverVersion) -> bool {
+    fn matches(&self, version: &SemverVersion, include_prerelease: bool) -> bool {
         match self {
             Self::Any => true,
             Self::Never => false,
             Self::Rel {
-                op, version: bound, ..
+                op,
+                version: bound,
+                pre_floor_when_included,
+                ..
             } => {
-                let ord = version.cmp(bound);
+                let ord = if *pre_floor_when_included && include_prerelease {
+                    let floor =
+                        SemverVersion::prerelease_floor(bound.major, bound.minor, bound.patch);
+                    version.cmp(&floor)
+                } else {
+                    version.cmp(bound)
+                };
                 match op {
                     CompOp::Eq => ord == Ordering::Equal,
                     CompOp::Ne => ord != Ordering::Equal,
@@ -252,7 +266,10 @@ impl SemverRange {
     #[must_use]
     pub fn matches(&self, version: &SemverVersion, include_prerelease: bool) -> bool {
         self.clauses.iter().any(|clause| {
-            if !clause.iter().all(|comp| comp.matches(version)) {
+            if !clause
+                .iter()
+                .all(|comp| comp.matches(version, include_prerelease))
+            {
                 return false;
             }
             if !version.is_prerelease() || include_prerelease {
@@ -271,8 +288,8 @@ impl SemverRange {
 /// # Errors
 ///
 /// Returns a descriptive error string when `raw` is empty, exceeds
-/// [`MAX_VERSION_BYTES`], carries unsupported PEP 440 markers (`!`, `.post`,
-/// `.dev`), or is not valid `MAJOR[.MINOR[.PATCH[-PRE][+BUILD]]]`.
+/// [`MAX_VERSION_BYTES`], carries unsupported PEP 440 core markers (`!`,
+/// `.post`, `.dev`), or is not valid `MAJOR[.MINOR[.PATCH[-PRE][+BUILD]]]`.
 pub fn parse_version(raw: &str) -> Result<SemverVersion, String> {
     if raw.is_empty() {
         return Err("empty version string".to_string());
@@ -285,7 +302,22 @@ pub fn parse_version(raw: &str) -> Result<SemverVersion, String> {
     if raw.bytes().any(|b| b.is_ascii_whitespace()) {
         return Err("version must not contain whitespace".to_string());
     }
-    reject_unsupported_pep440_markers(raw)?;
+    // Check PEP 440 markers only on the core segment (before `-pre` and `+build`)
+    // so valid SemVer 2.0.0 tags like `1.0.0-alpha.dev.1` or `1.0.0+build.postcss`
+    // are accepted while `1!2.0.0`, `3.10.post1`, and `3.10.dev0` fail loudly.
+    let without_v = match raw.as_bytes().first() {
+        Some(b'v' | b'V') if raw.len() > 1 => &raw[1..],
+        _ => raw,
+    };
+    let core_part = without_v
+        .split_once('+')
+        .map_or(without_v, |(h, _)| h)
+        .split_once('-')
+        .map_or_else(
+            || without_v.split_once('+').map_or(without_v, |(h, _)| h),
+            |(h, _)| h,
+        );
+    reject_unsupported_pep440_core_markers(core_part, raw)?;
     let partial = parse_partial(raw, false)?;
     let Some(major) = partial.major else {
         return Err("concrete version cannot be a wildcard".to_string());
@@ -396,11 +428,19 @@ fn parse_prerelease(pre: &str) -> Result<Vec<PrereleaseId>, String> {
 }
 
 fn parse_partial(raw: &str, allow_wildcards: bool) -> Result<PartialVersion, String> {
+    parse_partial_with(raw, allow_wildcards, true)
+}
+
+fn parse_partial_with(
+    raw: &str,
+    allow_wildcards: bool,
+    allow_leading_v: bool,
+) -> Result<PartialVersion, String> {
     if raw.is_empty() {
         return Err("expected a version".to_string());
     }
     let stripped = match raw.as_bytes().first() {
-        Some(b'v' | b'V') if raw.len() > 1 => &raw[1..],
+        Some(b'v' | b'V') if allow_leading_v && raw.len() > 1 => &raw[1..],
         _ => raw,
     };
     let (without_build, build) = match stripped.split_once('+') {
@@ -484,6 +524,7 @@ fn upper_exclusive(major: u64, minor: u64, patch: u64) -> Comparator {
         op: CompOp::Lt,
         version: SemverVersion::prerelease_floor(major, minor, patch),
         explicit_pre: false,
+        pre_floor_when_included: false,
     }
 }
 
@@ -492,6 +533,16 @@ fn rel(op: CompOp, version: SemverVersion, explicit_pre: bool) -> Comparator {
         op,
         version,
         explicit_pre,
+        pre_floor_when_included: false,
+    }
+}
+
+fn rel_ge_pre_floor(major: u64, minor: u64, patch: u64) -> Comparator {
+    Comparator::Rel {
+        op: CompOp::Ge,
+        version: SemverVersion::release(major, minor, patch),
+        explicit_pre: false,
+        pre_floor_when_included: true,
     }
 }
 
@@ -517,7 +568,7 @@ fn parse_node_range(raw: &str) -> Result<Vec<Vec<Comparator>>, String> {
                 .to_string(),
         );
     }
-    let trimmed = raw.trim();
+    let trimmed = raw.trim_ascii();
     if trimmed.is_empty() {
         return Ok(vec![vec![Comparator::Any]]);
     }
@@ -528,7 +579,7 @@ fn parse_node_range(raw: &str) -> Result<Vec<Vec<Comparator>>, String> {
                 "range exceeds maximum of {MAX_CLAUSES} `||` clauses"
             ));
         }
-        let clause_trimmed = clause_src.trim();
+        let clause_trimmed = clause_src.trim_ascii();
         if clause_trimmed.is_empty() {
             return Err("empty clause around `||` in semver range".to_string());
         }
@@ -589,7 +640,15 @@ fn desugar_hyphen(lhs_raw: &str, rhs_raw: &str) -> Result<Vec<Comparator>, Strin
             patch: lhs.patch.unwrap_or(0),
             pre: lhs.pre,
         };
-        push_bounded(&mut out, rel(CompOp::Ge, ver, explicit_pre))?;
+        push_bounded(
+            &mut out,
+            Comparator::Rel {
+                op: CompOp::Ge,
+                version: ver,
+                explicit_pre,
+                pre_floor_when_included: !explicit_pre,
+            },
+        )?;
     } else {
         push_bounded(&mut out, Comparator::Any)?;
     }
@@ -633,17 +692,11 @@ fn desugar_node_eq(p: PartialVersion, out: &mut Vec<Comparator>) -> Result<(), S
     match (p.major, p.minor, p.patch) {
         (None, _, _) => push_bounded(out, Comparator::Any),
         (Some(maj), None, _) => {
-            push_bounded(
-                out,
-                rel(CompOp::Ge, SemverVersion::release(maj, 0, 0), false),
-            )?;
+            push_bounded(out, rel_ge_pre_floor(maj, 0, 0))?;
             push_bounded(out, upper_exclusive(checked_inc(maj, "major")?, 0, 0))
         }
         (Some(maj), Some(min), None) => {
-            push_bounded(
-                out,
-                rel(CompOp::Ge, SemverVersion::release(maj, min, 0), false),
-            )?;
+            push_bounded(out, rel_ge_pre_floor(maj, min, 0))?;
             push_bounded(out, upper_exclusive(maj, checked_inc(min, "minor")?, 0))
         }
         (Some(maj), Some(min), Some(pat)) => push_bounded(
@@ -662,33 +715,24 @@ fn desugar_node_ordered(
     match (op, p.major, p.minor, p.patch) {
         (">" | "<", None, _, _) => push_bounded(out, Comparator::Never),
         (">=" | "<=", None, _, _) => push_bounded(out, Comparator::Any),
-        (">", Some(maj), None, _) => push_bounded(
-            out,
-            rel(
-                CompOp::Ge,
-                SemverVersion::release(checked_inc(maj, "major")?, 0, 0),
-                false,
-            ),
-        ),
-        (">", Some(maj), Some(min), None) => push_bounded(
-            out,
-            rel(
-                CompOp::Ge,
-                SemverVersion::release(maj, checked_inc(min, "minor")?, 0),
-                false,
-            ),
-        ),
+        (">", Some(maj), None, _) => {
+            push_bounded(out, rel_ge_pre_floor(checked_inc(maj, "major")?, 0, 0))
+        }
+        (">", Some(maj), Some(min), None) => {
+            push_bounded(out, rel_ge_pre_floor(maj, checked_inc(min, "minor")?, 0))
+        }
         (">", Some(maj), Some(min), Some(pat)) => push_bounded(
             out,
             rel(CompOp::Gt, full_version(maj, min, pat, p.pre), explicit_pre),
         ),
         (">=", Some(maj), min, pat) => push_bounded(
             out,
-            rel(
-                CompOp::Ge,
-                full_version(maj, min.unwrap_or(0), pat.unwrap_or(0), p.pre),
+            Comparator::Rel {
+                op: CompOp::Ge,
+                version: full_version(maj, min.unwrap_or(0), pat.unwrap_or(0), p.pre),
                 explicit_pre,
-            ),
+                pre_floor_when_included: pat.is_none() && !explicit_pre,
+            },
         ),
         ("<", Some(maj), None, _) => push_bounded(out, upper_exclusive(maj, 0, 0)),
         ("<", Some(maj), Some(min), None) => push_bounded(out, upper_exclusive(maj, min, 0)),
@@ -759,17 +803,11 @@ fn desugar_caret(p: PartialVersion, out: &mut Vec<Comparator>) -> Result<(), Str
     match (p.major, p.minor, p.patch) {
         (None, _, _) => push_bounded(out, Comparator::Any),
         (Some(maj), None, _) => {
-            push_bounded(
-                out,
-                rel(CompOp::Ge, SemverVersion::release(maj, 0, 0), false),
-            )?;
+            push_bounded(out, rel_ge_pre_floor(maj, 0, 0))?;
             push_bounded(out, upper_exclusive(checked_inc(maj, "major")?, 0, 0))
         }
         (Some(maj), Some(min), None) => {
-            push_bounded(
-                out,
-                rel(CompOp::Ge, SemverVersion::release(maj, min, 0), false),
-            )?;
+            push_bounded(out, rel_ge_pre_floor(maj, min, 0))?;
             if maj > 0 {
                 push_bounded(out, upper_exclusive(checked_inc(maj, "major")?, 0, 0))
             } else {
@@ -813,43 +851,60 @@ fn parse_cargo_range(raw: &str) -> Result<Vec<Vec<Comparator>>, String> {
                 .to_string(),
         );
     }
-    let trimmed = raw.trim();
+    let trimmed = raw.trim_ascii();
     if trimmed.is_empty() {
         return Err("empty `cargo` version requirement".to_string());
     }
+    let segments: Vec<&str> = trimmed.split(',').collect();
     let mut out = Vec::new();
-    for segment in trimmed.split(',') {
-        let item = segment.trim();
+    for segment in &segments {
+        let item = segment.trim_ascii();
         if item.is_empty() {
             return Err(format!("empty comparator in `cargo` range `{raw}`"));
         }
         let (op, rest) = split_node_operator(item);
-        let version_str = rest.trim_start();
+        let version_str = rest.trim_ascii_start();
         if version_str.is_empty() || version_str.bytes().any(|b| b.is_ascii_whitespace()) {
             return Err(format!(
                 "invalid comparator `{item}` in `cargo` range `{raw}`"
             ));
         }
-        let p = parse_partial(version_str, true)?;
+        let p = parse_partial_with(version_str, true, false)?;
+        if p.major.is_none() {
+            if version_str.contains('.') {
+                return Err(format!(
+                    "invalid wildcard `{version_str}` in `cargo` range `{raw}`"
+                ));
+            }
+            if op.is_some() {
+                return Err(format!(
+                    "wildcard `{version_str}` cannot be combined with operator in `cargo` range \
+                     `{raw}`"
+                ));
+            }
+            if segments.len() > 1 {
+                return Err(format!(
+                    "wildcard `*` must be the sole comparator in `cargo` range `{raw}`"
+                ));
+            }
+            push_bounded(&mut out, Comparator::Any)?;
+            continue;
+        }
         match op {
             None => {
                 // In Cargo `VersionReq`, a bare version without wildcard is
-                // caret (`1.2.3` == `^1.2.3`), whereas a wildcard (`*`, `1.*`,
+                // caret (`1.2.3` == `^1.2.3`), whereas a wildcard (`1.*`,
                 // `1.2.*`) matches that prefix.
                 if p.had_wildcard {
-                    desugar_node_comparator(Some("="), version_str, &mut out)?;
+                    desugar_node_eq(p, &mut out)?;
                 } else {
                     desugar_caret(p, &mut out)?;
                 }
             }
-            Some(op) => {
-                if p.had_wildcard {
-                    return Err(format!(
-                        "wildcard cannot be combined with operator `{op}` in `cargo` range `{raw}`"
-                    ));
-                }
-                desugar_node_comparator(Some(op), version_str, &mut out)?;
-            }
+            Some("=") => desugar_node_eq(p, &mut out)?,
+            Some("~") => desugar_tilde(p, &mut out)?,
+            Some("^") => desugar_caret(p, &mut out)?,
+            Some(other) => desugar_node_ordered(other, p, &mut out)?,
         }
     }
     Ok(vec![out])
@@ -859,7 +914,36 @@ fn parse_cargo_range(raw: &str) -> Result<Vec<Vec<Comparator>>, String> {
 // PEP 440 `requires-python` basic dialect
 // ---------------------------------------------------------------------------
 
-fn reject_unsupported_pep440_markers(token: &str) -> Result<(), String> {
+fn reject_unsupported_pep440_core_markers(core: &str, full: &str) -> Result<(), String> {
+    if core.contains('!') {
+        return Err(format!(
+            "unsupported PEP 440 epoch in `{full}` (epochs `N!` are not supported in \
+             `pep440-basic`)"
+        ));
+    }
+    let lower = core.to_ascii_lowercase();
+    if lower.contains(".post") {
+        return Err(format!(
+            "unsupported PEP 440 post-release in `{full}` (`.post` releases are not supported in \
+             `pep440-basic`)"
+        ));
+    }
+    if lower.contains(".dev") {
+        return Err(format!(
+            "unsupported PEP 440 dev-release in `{full}` (`.dev` releases are not supported in \
+             `pep440-basic`)"
+        ));
+    }
+    Ok(())
+}
+
+fn reject_unsupported_pep440_range_token(token: &str) -> Result<(), String> {
+    if token.contains('+') {
+        return Err(format!(
+            "unsupported PEP 440 local version `+` in `{token}` (`+local` versions are not \
+             supported in `pep440-basic`)"
+        ));
+    }
     if token.contains('!') {
         return Err(format!(
             "unsupported PEP 440 epoch in `{token}` (epochs `N!` are not supported in \
@@ -867,15 +951,15 @@ fn reject_unsupported_pep440_markers(token: &str) -> Result<(), String> {
         ));
     }
     let lower = token.to_ascii_lowercase();
-    if lower.contains(".post") {
+    if lower.contains(".post") || lower.contains("-post") {
         return Err(format!(
-            "unsupported PEP 440 post-release in `{token}` (`.post` releases are not supported in \
+            "unsupported PEP 440 post-release in `{token}` (post-releases are not supported in \
              `pep440-basic`)"
         ));
     }
-    if lower.contains(".dev") {
+    if lower.contains(".dev") || lower.contains("-dev") {
         return Err(format!(
-            "unsupported PEP 440 dev-release in `{token}` (`.dev` releases are not supported in \
+            "unsupported PEP 440 dev-release in `{token}` (dev-releases are not supported in \
              `pep440-basic`)"
         ));
     }
@@ -890,13 +974,13 @@ fn parse_pep440_range(raw: &str) -> Result<Vec<Vec<Comparator>>, String> {
                 .to_string(),
         );
     }
-    let trimmed = raw.trim();
+    let trimmed = raw.trim_ascii();
     if trimmed.is_empty() {
         return Err("empty `pep440-basic` version specifier".to_string());
     }
     let mut out = Vec::new();
     for segment in trimmed.split(',') {
-        let item = segment.trim();
+        let item = segment.trim_ascii();
         if item.is_empty() {
             return Err(format!("empty comparator in `pep440-basic` range `{raw}`"));
         }
@@ -911,13 +995,13 @@ fn parse_pep440_range(raw: &str) -> Result<Vec<Vec<Comparator>>, String> {
                  one of `>=`, `<=`, `>`, `<`, `==`, `!=`, `~=`"
             )
         })?;
-        let version_str = rest.trim_start();
+        let version_str = rest.trim_ascii_start();
         if version_str.is_empty() || version_str.bytes().any(|b| b.is_ascii_whitespace()) {
             return Err(format!(
                 "invalid version `{version_str}` in `pep440-basic` comparator `{item}`"
             ));
         }
-        reject_unsupported_pep440_markers(version_str)?;
+        reject_unsupported_pep440_range_token(version_str)?;
         desugar_pep440_comparator(op, version_str, &mut out)?;
     }
     Ok(vec![out])
@@ -932,12 +1016,45 @@ fn split_pep440_operator(item: &str) -> Option<(&'static str, &str)> {
     None
 }
 
+fn validate_pep440_wildcard_syntax(version_str: &str, allow_wildcards: bool) -> Result<(), String> {
+    let stripped = match version_str.as_bytes().first() {
+        Some(b'v' | b'V') if version_str.len() > 1 => &version_str[1..],
+        _ => version_str,
+    };
+    let core = stripped.split_once('-').map_or(stripped, |(h, _)| h);
+    let parts: Vec<&str> = core.split('.').collect();
+    for (idx, part) in parts.iter().enumerate() {
+        if matches!(*part, "x" | "X") {
+            return Err(format!(
+                "invalid wildcard `{part}` in `pep440-basic` version `{version_str}`; PEP 440 \
+                 uses trailing `.*` only"
+            ));
+        }
+        if *part == "*" {
+            if !allow_wildcards {
+                return Err(format!(
+                    "wildcard `*` is only allowed with `==` and `!=` in `pep440-basic` \
+                     (`{version_str}`)"
+                ));
+            }
+            if idx == 0 || idx + 1 != parts.len() {
+                return Err(format!(
+                    "invalid wildcard placement in `pep440-basic` version `{version_str}`; \
+                     expected `MAJOR.*` or `MAJOR.MINOR.*`"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn desugar_pep440_comparator(
     op: &str,
     version_str: &str,
     out: &mut Vec<Comparator>,
 ) -> Result<(), String> {
     let allow_wildcards = matches!(op, "==" | "!=");
+    validate_pep440_wildcard_syntax(version_str, allow_wildcards)?;
     let p = parse_partial(version_str, allow_wildcards)?;
     let explicit_pre = !p.pre.is_empty();
     match op {
@@ -963,20 +1080,14 @@ fn desugar_pep440_comparator(
         }
         "==" => {
             if p.had_wildcard {
-                match (p.major, p.minor) {
-                    (None, _) => push_bounded(out, Comparator::Any),
-                    (Some(maj), None) => {
-                        push_bounded(
-                            out,
-                            rel(CompOp::Ge, SemverVersion::release(maj, 0, 0), false),
-                        )?;
+                let maj = p.major.expect("PEP 440 wildcard requires numeric major");
+                match p.minor {
+                    None => {
+                        push_bounded(out, rel_ge_pre_floor(maj, 0, 0))?;
                         push_bounded(out, upper_exclusive(checked_inc(maj, "major")?, 0, 0))
                     }
-                    (Some(maj), Some(min)) => {
-                        push_bounded(
-                            out,
-                            rel(CompOp::Ge, SemverVersion::release(maj, min, 0), false),
-                        )?;
+                    Some(min) => {
+                        push_bounded(out, rel_ge_pre_floor(maj, min, 0))?;
                         push_bounded(out, upper_exclusive(maj, checked_inc(min, "minor")?, 0))
                     }
                 }
@@ -993,12 +1104,14 @@ fn desugar_pep440_comparator(
         }
         "!=" => {
             if p.had_wildcard {
-                match (p.major, p.minor) {
-                    (None, _) => push_bounded(out, Comparator::Never),
-                    (Some(maj), minor) => {
-                        push_bounded(out, Comparator::NotPrefix { major: maj, minor })
-                    }
-                }
+                let maj = p.major.expect("PEP 440 wildcard requires numeric major");
+                push_bounded(
+                    out,
+                    Comparator::NotPrefix {
+                        major: maj,
+                        minor: p.minor,
+                    },
+                )
             } else {
                 let maj = p.major.expect("no wildcard means major is present");
                 let ver = SemverVersion {
@@ -1018,6 +1131,11 @@ fn desugar_pep440_comparator(
                 patch: p.patch.unwrap_or(0),
                 pre: p.pre,
             };
+            if op == "<" && !explicit_pre {
+                // PEP 440 exclusive ordered `< V` must not match prereleases of V
+                // even when prereleases are enabled.
+                return push_bounded(out, upper_exclusive(ver.major, ver.minor, ver.patch));
+            }
             let comp_op = match op {
                 ">=" => CompOp::Ge,
                 "<=" => CompOp::Le,
@@ -1225,5 +1343,144 @@ mod tests {
         // u64::MAX overflow safety
         let max_ver = format!("^{}.0.0", u64::MAX);
         assert!(parse_range(&max_ver, SemverDialect::Node).is_err());
+    }
+
+    #[test]
+    fn audit_regression_semver_prerelease_bounds() {
+        // D5-H1: valid SemVer 2.0.0 with `.dev`/`.post` in prerelease or build metadata.
+        for valid in [
+            "1.0.0-alpha.dev.1",
+            "1.0.0-0.dev",
+            "1.0.0+build.dev",
+            "1.0.0+build.postcss",
+            "1.0.0-canary.devops",
+            "1.0.0-rc.1+2026.post.3",
+        ] {
+            assert!(
+                parse_version(valid).is_ok(),
+                "valid SemVer 2.0.0 rejected: {valid}"
+            );
+        }
+        // D5-H2: include_prerelease: true on partial/wildcard/caret/hyphen lower bounds.
+        for (ver, range, dialect, pre, want) in [
+            ("2.0.0-alpha.1", "^2", SemverDialect::Node, true, true),
+            ("2.0.0-alpha.1", "^2.0", SemverDialect::Node, true, true),
+            ("0.0.0-alpha", "^0", SemverDialect::Node, true, true),
+            ("0.0.0-alpha", "^0.0", SemverDialect::Node, true, true),
+            ("2.0.0-alpha.1", "2.x", SemverDialect::Node, true, true),
+            ("2.0.0-alpha.1", "2", SemverDialect::Node, true, true),
+            ("2.0.0-alpha.1", ">=2", SemverDialect::Node, true, true),
+            ("2.0.0-alpha.1", ">1", SemverDialect::Node, true, true),
+            (
+                "1.2.0-alpha.1",
+                "1.2 - 2.3",
+                SemverDialect::Node,
+                true,
+                true,
+            ),
+            (
+                "1.2.3-alpha.1",
+                "1.2.3 - 2.3.4",
+                SemverDialect::Node,
+                true,
+                true,
+            ),
+            // Tilde stays >=2.0.0 even with include_prerelease (node-semver parity).
+            ("2.0.0-alpha.1", "~2", SemverDialect::Node, true, false),
+            // Cargo wildcard lower-tuple prerelease consistency.
+            ("1.2.0-alpha", "1.2.*", SemverDialect::Cargo, true, true),
+            ("1.2.0-alpha", "1.2.*", SemverDialect::Cargo, false, false),
+            // Cargo operator + wildcard forms supported by Cargo semver 1.0.28.
+            ("1.5.0", ">=1.*", SemverDialect::Cargo, false, true),
+            ("1.5.0", "=1.*", SemverDialect::Cargo, false, true),
+            ("2.0.0", "=1.*", SemverDialect::Cargo, false, false),
+            ("1.5.0", "^1.*", SemverDialect::Cargo, false, true),
+            ("1.2.9", "~1.2.*", SemverDialect::Cargo, false, true),
+            // PEP 440 ==X.* and !=X.* stay exact complements with include_prerelease.
+            (
+                "3.10.0-rc.1",
+                "==3.10.*",
+                SemverDialect::Pep440Basic,
+                true,
+                true,
+            ),
+            (
+                "3.10.0-rc.1",
+                "!=3.10.*",
+                SemverDialect::Pep440Basic,
+                true,
+                false,
+            ),
+            // PEP 440 ~=3.10 rejects 3.10.0-rc.1 even with include_prerelease.
+            (
+                "3.10.0-rc.1",
+                "~=3.10",
+                SemverDialect::Pep440Basic,
+                true,
+                false,
+            ),
+            // D5-M1: PEP 440 `< V` rejects prereleases of V even with include_prerelease.
+            (
+                "3.13.0-rc.1",
+                ">=3.10,<3.13",
+                SemverDialect::Pep440Basic,
+                true,
+                false,
+            ),
+            (
+                "3.12.9-rc.1",
+                ">=3.10,<3.13",
+                SemverDialect::Pep440Basic,
+                true,
+                true,
+            ),
+        ] {
+            assert_eq!(
+                satisfies(ver, range, dialect, pre),
+                want,
+                "{dialect:?}: ver={ver} range={range} pre={pre}"
+            );
+        }
+    }
+
+    #[test]
+    fn audit_regression_semver_dialect_syntax_rejections() {
+        // D5-M2: PEP 440 strict syntax rejections.
+        for bad_pep in [
+            "==3.x",
+            "==3.10.X",
+            "!=3.x",
+            "==*",
+            "!=*",
+            "==3.*.*",
+            "==*.*",
+            "==v*",
+            ">=3.10.0+local",
+            "==3.10.0+foo",
+            ">=3.10.0-post1",
+            ">=3.10.0-dev0",
+        ] {
+            assert!(
+                parse_range(bad_pep, SemverDialect::Pep440Basic).is_err(),
+                "expected pep440-basic rejection for {bad_pep:?}"
+            );
+        }
+
+        // D5-M3: Cargo strict rejections (leading v, non-sole *, *.*, op + *).
+        for bad_cargo in [
+            "v1.2.3",
+            "^v1.2.3",
+            "V1.2.3",
+            "*, >=1.0.0",
+            "1.0.0, *",
+            "*.*",
+            ">=*",
+            "^*",
+        ] {
+            assert!(
+                parse_range(bad_cargo, SemverDialect::Cargo).is_err(),
+                "expected cargo rejection for {bad_cargo:?}"
+            );
+        }
     }
 }

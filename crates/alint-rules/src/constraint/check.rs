@@ -1,5 +1,5 @@
 //! The builder's check of a `constraint` rule against its input relation
-//! (design section 8, "plan check"; ADR-0050 D1 to D4): every field the
+//! (design section 8, "plan check"; ADR-0050 D1 to D5): every field the
 //! assertion and the message name exists, every literal can match the field it
 //! is compared with, and each assertion's options fit the fields it reads.
 
@@ -783,7 +783,7 @@ impl<'p> Checker<'p> {
             }
             CompareOrder::Semver => match written.as_str() {
                 Some(s) => {
-                    alint_core::semver_eval::parse_version(s).map_err(|err| {
+                    let parsed = alint_core::semver_eval::parse_version(s).map_err(|err| {
                         self.fail(
                             path,
                             format!(
@@ -792,7 +792,10 @@ impl<'p> Checker<'p> {
                             ),
                         )
                     })?;
-                    Ok(CompareLiteral::Scalar(Value::String(s.into())))
+                    Ok(CompareLiteral::Semver {
+                        raw: s.to_string(),
+                        parsed,
+                    })
                 }
                 None => Err(self.fail(
                     path,

@@ -316,6 +316,7 @@ fn through_the_engine(
                 applicability: Applicability::Unsafe,
                 verify: EditVerifier::Structured {
                     format,
+                    strict: false,
                     query: query.to_string(),
                     expect: expect.clone(),
                 },

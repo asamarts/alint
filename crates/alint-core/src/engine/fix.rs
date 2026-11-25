@@ -869,6 +869,10 @@ impl Engine {
             condition_environment: self.condition_environment.as_ref(),
             trace: None,
             structured_cache: None,
+            findings_per_rule_limit: Some(
+                self.relation_limits
+                    .get(crate::relation::LimitKind::FindingsPerRule),
+            ),
         };
         let filtered_ctx = filtered_index.as_ref().map(|fi| Context {
             root,
@@ -883,6 +887,10 @@ impl Engine {
             condition_environment: self.condition_environment.as_ref(),
             trace: None,
             structured_cache: None,
+            findings_per_rule_limit: Some(
+                self.relation_limits
+                    .get(crate::relation::LimitKind::FindingsPerRule),
+            ),
         });
         let git_file_only_ctx = git_tracked_indexes
             .as_ref()
@@ -900,6 +908,10 @@ impl Engine {
                 condition_environment: self.condition_environment.as_ref(),
                 trace: None,
                 structured_cache: None,
+                findings_per_rule_limit: Some(
+                    self.relation_limits
+                        .get(crate::relation::LimitKind::FindingsPerRule),
+                ),
             });
         let git_dir_aware_ctx = git_tracked_indexes
             .as_ref()
@@ -917,6 +929,10 @@ impl Engine {
                 condition_environment: self.condition_environment.as_ref(),
                 trace: None,
                 structured_cache: None,
+                findings_per_rule_limit: Some(
+                    self.relation_limits
+                        .get(crate::relation::LimitKind::FindingsPerRule),
+                ),
             });
         // Compose mode for a real (non-dry-run) pass: content fixers route
         // their whole-file writes into this buffer instead of hitting disk, so

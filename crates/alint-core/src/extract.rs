@@ -117,6 +117,26 @@ impl Extract {
     }
 }
 
+/// Reject an explicit `null` on an optional [`ExtractSpec`] field so serde and
+/// JSON Schema agree (`{ json: null, strict: true }` and `{ yaml: "$.a", strict: null }`
+/// are both rejected).
+fn present<'de, D, T>(deserializer: D) -> std::result::Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    match Option::<T>::deserialize(deserializer)? {
+        Some(value) => Ok(Some(value)),
+        None => Err(serde::de::Error::custom(
+            "an optional extract key written as null; give it a value, or leave the key out",
+        )),
+    }
+}
+
+fn no_default(schema: &mut schemars::Schema) {
+    schema.remove("default");
+}
+
 /// Exactly one of: toml/json/yaml/xml/dotenv/properties/ini/hcl (RFC 9535 `JSONPath` string), lines (object;
 /// optional `comment` prefix, default `#`), regex (string; capture group 1 is
 /// the value), `whole_file` (object `{}`; the entire file content as one value,
@@ -135,32 +155,44 @@ impl Extract {
     )
 )]
 pub struct ExtractSpec {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "String", transform = no_default)]
     toml: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "String", transform = no_default)]
     json: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "String", transform = no_default)]
     yaml: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "String", transform = no_default)]
     xml: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "String", transform = no_default)]
     dotenv: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "String", transform = no_default)]
     properties: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "String", transform = no_default)]
     ini: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "String", transform = no_default)]
     hcl: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "LinesOpts", transform = no_default)]
     lines: Option<LinesOpts>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "String", transform = no_default)]
     regex: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "WholeFileOpts", transform = no_default)]
     whole_file: Option<WholeFileOpts>,
     /// When `true` alongside `json:`, parse using strict RFC 8259 JSON
     /// (rejecting comments, trailing commas, leading UTF-8 BOM, and empty
     /// files). Rejected with any non-`json` extractor.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "bool", transform = no_default)]
     strict: Option<bool>,
 }
 

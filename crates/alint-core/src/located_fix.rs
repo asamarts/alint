@@ -207,10 +207,11 @@ pub fn apply_file_edits(
                 }
                 if let EditVerifier::Structured {
                     format,
+                    strict,
                     query,
                     expect,
                 } = &batch[i].collected.verify
-                    && !verifier.check(*format, query, expect)
+                    && !verifier.check(*format, *strict, query, expect)
                 {
                     outcome[i] = LocatedOutcome::Suggested;
                     demoted = true;
@@ -324,10 +325,17 @@ fn collateral(original: &[u8], applied: &[usize], batch: &[LocatedEdit]) -> Vec<
     if !structured_fix::checks_whole_document(format) || !one_format || !rules {
         return Vec::new();
     }
+    let strict_json = format == Format::Json
+        && applied.iter().any(|&i| {
+            matches!(
+                &batch[i].collected.verify,
+                EditVerifier::Structured { strict: true, .. }
+            )
+        });
     let read = |bytes: &[u8]| {
         std::str::from_utf8(bytes)
             .ok()
-            .and_then(|text| format.parse(text).ok())
+            .and_then(|text| format.parse_with_strict_json(text, strict_json).ok())
     };
     let Some(before) = read(original) else {
         return Vec::new();
@@ -462,8 +470,8 @@ enum Goal<'b> {
 /// `Absent` query, and a `replace` batch one `matches:` pattern.
 struct Verifier<'r, 'b> {
     bytes: &'r [u8],
-    /// Each format's reading of the bytes, `None` when they do not parse.
-    documents: Vec<(Format, Option<serde_json::Value>)>,
+    /// Each `(format, strict_json)` reading of the bytes, `None` when they do not parse.
+    documents: Vec<((Format, bool), Option<serde_json::Value>)>,
     paths: HashMap<&'b str, Option<JsonPath>>,
     patterns: HashMap<&'b str, Option<regex::Regex>>,
     answers: HashMap<(usize, &'b str, Goal<'b>), bool>,
@@ -481,8 +489,14 @@ impl<'r, 'b> Verifier<'r, 'b> {
     }
 
     /// Whether the bytes hold what `expect` asks of `query` in `format`.
-    fn check(&mut self, format: Format, query: &'b str, expect: &'b ExpectedValue) -> bool {
-        let document = self.document(format);
+    fn check(
+        &mut self,
+        format: Format,
+        strict: bool,
+        query: &'b str,
+        expect: &'b ExpectedValue,
+    ) -> bool {
+        let document = self.document(format, strict);
         let goal = match expect {
             ExpectedValue::Absent => Some(Goal::Absent),
             ExpectedValue::Matches(re_src) => Some(Goal::Matches(re_src)),
@@ -499,16 +513,17 @@ impl<'r, 'b> Verifier<'r, 'b> {
         answer
     }
 
-    /// The index of `format`'s reading of the bytes, parsing them on first use.
-    fn document(&mut self, format: Format) -> usize {
-        if let Some(index) = self.documents.iter().position(|(f, _)| *f == format) {
+    /// The index of `(format, strict)`'s reading of the bytes, parsing them on first use.
+    fn document(&mut self, format: Format, strict: bool) -> usize {
+        let key = (format, strict && format == Format::Json);
+        if let Some(index) = self.documents.iter().position(|(k, _)| *k == key) {
             return index;
         }
         VERIFY_PARSES.with(|parses| parses.set(parses.get() + 1));
         let value = std::str::from_utf8(self.bytes)
             .ok()
-            .and_then(|text| format.parse(text).ok());
-        self.documents.push((format, value));
+            .and_then(|text| format.parse_with_strict_json(text, key.1).ok());
+        self.documents.push((key, value));
         self.documents.len() - 1
     }
 
@@ -861,6 +876,7 @@ mod tests {
         // syntactic re-parse fails and the edit is demoted, not written.
         let verify = EditVerifier::Structured {
             format: Format::Json,
+            strict: false,
             query: "$.x".to_string(),
             expect: ExpectedValue::Scalar(serde_json::json!(1)),
         };
@@ -884,6 +900,7 @@ mod tests {
         // scalar, so it is demoted for a DIFFERENT reason than a parse fail.
         let verify = EditVerifier::Structured {
             format: Format::Json,
+            strict: false,
             query: "$.x".to_string(),
             expect: ExpectedValue::Scalar(serde_json::json!(1)),
         };
@@ -896,6 +913,7 @@ mod tests {
         // The matching value verifies and IS applied.
         let verify = EditVerifier::Structured {
             format: Format::Json,
+            strict: false,
             query: "$.x".to_string(),
             expect: ExpectedValue::Scalar(serde_json::json!(1)),
         };
@@ -910,6 +928,7 @@ mod tests {
         // `Absent` passes only when the query matches nothing post-edit.
         let verify = EditVerifier::Structured {
             format: Format::Json,
+            strict: false,
             query: "$.x".to_string(),
             expect: ExpectedValue::Absent,
         };
@@ -929,6 +948,7 @@ mod tests {
         // re-query fails and the batch is demoted rather than partially written.
         let verify = EditVerifier::Structured {
             format: Format::Json,
+            strict: false,
             query: "$.x".to_string(),
             expect: ExpectedValue::Absent,
         };
@@ -1023,11 +1043,13 @@ mod tests {
         // after the demotion (the cascade loop), staying Applied.
         let ok_verify = EditVerifier::Structured {
             format: Format::Json,
+            strict: false,
             query: "$.a".to_string(),
             expect: ExpectedValue::Scalar(serde_json::json!(1)),
         };
         let bad_verify = EditVerifier::Structured {
             format: Format::Json,
+            strict: false,
             query: "$.b".to_string(),
             expect: ExpectedValue::Scalar(serde_json::json!(9)), // expects 9, writes 2
         };
@@ -1066,6 +1088,7 @@ mod tests {
             .map(|i| {
                 let verify = EditVerifier::Structured {
                     format: Format::Yaml,
+                    strict: false,
                     query: "$[*].x".to_string(),
                     expect: ExpectedValue::Absent,
                 };
@@ -1092,6 +1115,7 @@ mod tests {
             .map(|i| {
                 let verify = EditVerifier::Structured {
                     format: Format::Yaml,
+                    strict: false,
                     query: format!("$[{i}]['x']"),
                     expect: ExpectedValue::Matches("^v".to_string()),
                 };
@@ -1120,11 +1144,13 @@ mod tests {
     fn a_demotion_reverifies_the_survivors_against_their_own_splice() {
         let absent = || EditVerifier::Structured {
             format: Format::Json,
+            strict: false,
             query: "$.a".to_string(),
             expect: ExpectedValue::Absent,
         };
         let wrong = EditVerifier::Structured {
             format: Format::Json,
+            strict: false,
             query: "$.b".to_string(),
             expect: ExpectedValue::Scalar(serde_json::json!(9)),
         };
@@ -1152,6 +1178,7 @@ mod tests {
     fn edits_of_two_rules_that_together_change_another_node_demote_the_later_rule() {
         let absent = |query: &str| EditVerifier::Structured {
             format: Format::Yaml,
+            strict: false,
             query: query.to_string(),
             expect: ExpectedValue::Absent,
         };
@@ -1210,6 +1237,7 @@ mod tests {
         // A removal and a set by two rules, each at its own target.
         let set = EditVerifier::Structured {
             format: Format::Yaml,
+            strict: false,
             query: "$.name".to_string(),
             expect: ExpectedValue::Scalar(serde_json::json!("y")),
         };
@@ -1227,6 +1255,47 @@ mod tests {
         let (out, o) = apply_file_edits(src.as_bytes(), both, Applicability::Safe);
         assert!(o.iter().all(|(_, o)| *o == LocatedOutcome::Applied));
         assert_eq!(out, b"deps:\n  b: 2\nname: y\n");
+    }
+
+    #[test]
+    fn strict_json_verifier_demotes_jsonc_post_edit_bytes() {
+        let strict_verify = EditVerifier::Structured {
+            format: Format::Json,
+            strict: true,
+            query: "$.x".to_string(),
+            expect: ExpectedValue::Scalar(serde_json::json!(1)),
+        };
+        let tolerant_verify = EditVerifier::Structured {
+            format: Format::Json,
+            strict: false,
+            query: "$.x".to_string(),
+            expect: ExpectedValue::Scalar(serde_json::json!(1)),
+        };
+        // Edit introduces a trailing comma: strict verifier demotes, tolerant accepts.
+        let src = br#"{"x": 0}"#;
+        let strict_edit = edit(
+            0,
+            0,
+            replace(6..7, "1,"),
+            Applicability::Safe,
+            strict_verify,
+            None,
+        );
+        let (out, o) = apply_file_edits(src, vec![strict_edit], Applicability::Safe);
+        assert_eq!(out, src);
+        assert_eq!(o[0].1, LocatedOutcome::Suggested);
+
+        let tol_edit = edit(
+            0,
+            0,
+            replace(6..7, "1,"),
+            Applicability::Safe,
+            tolerant_verify,
+            None,
+        );
+        let (out, o) = apply_file_edits(src, vec![tol_edit], Applicability::Safe);
+        assert_eq!(out, br#"{"x": 1,}"#);
+        assert_eq!(o[0].1, LocatedOutcome::Applied);
     }
 
     /// ROB-7: the splice moved the whole tail once per edit, so N edits on a

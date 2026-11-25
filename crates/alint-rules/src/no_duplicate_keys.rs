@@ -6,11 +6,12 @@
 //! hot path with exact line/column spans and first-occurrence related
 //! locations.
 
+use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::Arc;
 
-use alint_core::duplicate_keys::{MAX_DUPLICATES_PER_FILE, find_duplicate_keys};
+use alint_core::duplicate_keys::{DuplicateKey, MAX_DUPLICATES_PER_FILE, find_duplicate_keys};
 use alint_core::{
     AnalysisFailureKind, ByteSpan, Context, Error, Format, Level, PerFileRule, RelatedLocation,
     Result, Rule, RuleSpec, Scope, SourceRange, Violation,
@@ -18,6 +19,23 @@ use alint_core::{
 use serde::Deserialize;
 
 use crate::io::looks_binary;
+
+fn present<'de, D, T>(deserializer: D) -> std::result::Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    match Option::<T>::deserialize(deserializer)? {
+        Some(value) => Ok(Some(value)),
+        None => Err(serde::de::Error::custom(
+            "an optional key written as null; give it a value, or leave the key out",
+        )),
+    }
+}
+
+fn no_default(schema: &mut schemars::Schema) {
+    schema.remove("default");
+}
 
 /// Explicit `format:` override values for `no_duplicate_keys`.
 ///
@@ -53,6 +71,12 @@ impl TargetFormat {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(extend(
+    "allOf" = [{
+        "if": { "required": ["strict", "format"], "properties": { "format": { "type": "string" } } },
+        "then": { "properties": { "format": { "const": "json" } } }
+    }]
+))]
 struct Options {
     /// Override the auto-detected file format. When omitted, inferred per file
     /// from its extension (`.json`, `.yaml`/`.yml`, `.toml`, `.properties`,
@@ -64,8 +88,9 @@ struct Options {
     /// (rejecting comments, trailing commas, leading UTF-8 BOM, and empty
     /// files; ADR-0050 D7). Rejected at build time when `format:` is explicitly
     /// non-JSON.
-    #[serde(default)]
-    strict: bool,
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "bool", transform = no_default)]
+    strict: Option<bool>,
 }
 
 crate::options_schema_for!(Options);
@@ -85,6 +110,10 @@ pub struct NoDuplicateKeysRule {
 impl Rule for NoDuplicateKeysRule {
     alint_core::rule_common_impl!();
 
+    fn path_contents_sensitive_by_default(&self) -> bool {
+        self.format_override.is_some_and(Format::redacts_by_default)
+    }
+
     fn visit_sensitive_paths(
         &self,
         explicit: bool,
@@ -95,11 +124,19 @@ impl Rule for NoDuplicateKeysRule {
         for path in self.scope.sensitive_manifest_sources() {
             visit(path);
         }
-        if !explicit && !manifest_sensitive && !self.explicit_sensitive {
-            return;
-        }
+        let all_sensitive = explicit
+            || manifest_sensitive
+            || self.explicit_sensitive
+            || self.path_contents_sensitive_by_default();
         for entry in self.scope.candidate_files(ctx.index) {
-            if self.scope.matches(&entry.path, ctx.index) {
+            if !self.scope.matches(&entry.path, ctx.index) {
+                continue;
+            }
+            if all_sensitive
+                || (self.format_override.is_none()
+                    && Format::detect_from_path(&entry.path)
+                        .is_some_and(Format::redacts_by_default))
+            {
                 visit(&entry.path);
             }
         }
@@ -119,48 +156,35 @@ impl PerFileRule for NoDuplicateKeysRule {
         &self.scope
     }
 
-    fn evaluate_file(
-        &self,
-        ctx: &Context<'_>,
-        path: &Path,
-        bytes: &[u8],
-    ) -> Result<Vec<Violation>> {
-        Ok(self.evaluate_file_inner::<false>(ctx, path, bytes))
+    fn enforces_findings_per_rule(&self) -> bool {
+        true
     }
 
-    fn evaluate_file_traced(
+    fn evaluate_file(
         &self,
-        ctx: &Context<'_>,
+        _ctx: &Context<'_>,
         path: &Path,
         bytes: &[u8],
     ) -> Result<Vec<Violation>> {
-        Ok(self.evaluate_file_inner::<true>(ctx, path, bytes))
+        Ok(self.evaluate_file_inner(path, bytes))
     }
 }
 
 impl NoDuplicateKeysRule {
-    fn evaluate_file_inner<const TRACE: bool>(
-        &self,
-        ctx: &Context<'_>,
-        path: &Path,
-        bytes: &[u8],
-    ) -> Vec<Violation> {
-        if looks_binary(bytes) {
+    fn evaluate_file_inner(&self, path: &Path, bytes: &[u8]) -> Vec<Violation> {
+        let format = self
+            .format_override
+            .or_else(|| Format::detect_from_path(path));
+        let strict_json = self.strict && format == Some(Format::Json);
+
+        // Under strict RFC 8259 JSON, do NOT bypass binary/NUL bytes (an
+        // unescaped NUL or UTF-16 BOM is invalid RFC 8259 JSON and must surface
+        // as `resource_parse`). For tolerant formats caught by broad globs,
+        // skip genuinely binary files cleanly.
+        if !strict_json && looks_binary(bytes) {
             return Vec::new();
         }
-        let Some(format) = self
-            .format_override
-            .or_else(|| Format::detect_from_path(path))
-        else {
-            if TRACE {
-                ctx.record_trace_extraction(alint_core::TraceExtractionObservation {
-                    inputs: 1,
-                    values: 0,
-                    parse_failures: 1,
-                    cardinality_checks: 0,
-                    cardinality_mismatches: 0,
-                });
-            }
+        let Some(format) = format else {
             return vec![
                 Violation::new(
                     "could not detect format from extension; pass `format:` \
@@ -171,20 +195,31 @@ impl NoDuplicateKeysRule {
             ];
         };
 
-        let text = String::from_utf8_lossy(bytes);
-        let strict_json = self.strict && format == Format::Json;
-        let scan = match find_duplicate_keys(format, &text, strict_json) {
+        // Require valid UTF-8 so RFC 8259 §8.1 holds under `strict: true` and
+        // distinct non-UTF-8 byte keys never collapse onto `U+FFFD` as a false
+        // positive duplicate.
+        let Ok(text) = std::str::from_utf8(bytes) else {
+            let msg = if format.redacts_by_default() || self.explicit_sensitive {
+                format!(
+                    "not a valid {} document (parse diagnostic redacted)",
+                    format.label()
+                )
+            } else {
+                format!(
+                    "not a valid {} document: input is not valid UTF-8",
+                    format.label()
+                )
+            };
+            return vec![
+                Violation::new(msg)
+                    .with_path(Arc::<Path>::from(path))
+                    .as_analysis_failure(AnalysisFailureKind::ResourceParse),
+            ];
+        };
+
+        let scan = match find_duplicate_keys(format, text, strict_json) {
             Ok(scan) => scan,
             Err(err) => {
-                if TRACE {
-                    ctx.record_trace_extraction(alint_core::TraceExtractionObservation {
-                        inputs: 1,
-                        values: 0,
-                        parse_failures: 1,
-                        cardinality_checks: 0,
-                        cardinality_mismatches: 0,
-                    });
-                }
                 // Never echo parser diagnostics for secret-bearing formats or
                 // explicitly sensitive rules since parse errors may quote values.
                 let msg = if format.redacts_by_default() || self.explicit_sensitive {
@@ -203,26 +238,23 @@ impl NoDuplicateKeysRule {
             }
         };
 
-        if TRACE {
-            ctx.record_trace_extraction(alint_core::TraceExtractionObservation {
-                inputs: 1,
-                values: u64::try_from(scan.duplicates.len()).unwrap_or(u64::MAX),
-                parse_failures: 0,
-                cardinality_checks: 0,
-                cardinality_mismatches: 0,
-            });
-        }
-
         if scan.duplicates.is_empty() && !scan.capped {
             return Vec::new();
         }
 
-        let line_starts = compute_line_starts(&text);
+        let ranges = resolve_duplicate_ranges(text, &scan.duplicates);
         let mut violations = Vec::with_capacity(scan.duplicates.len() + usize::from(scan.capped));
         let path_arc: Arc<Path> = Arc::from(path);
 
-        for dup in &scan.duplicates {
-            violations.push(self.build_finding(format, path, &path_arc, &text, &line_starts, dup));
+        for (dup, (dup_range, first_range)) in scan.duplicates.iter().zip(ranges) {
+            violations.push(self.build_finding(
+                format,
+                path,
+                &path_arc,
+                dup,
+                dup_range,
+                first_range,
+            ));
         }
 
         if scan.capped {
@@ -244,12 +276,10 @@ impl NoDuplicateKeysRule {
         format: Format,
         path: &Path,
         path_arc: &Arc<Path>,
-        text: &str,
-        line_starts: &[usize],
-        dup: &alint_core::duplicate_keys::DuplicateKey,
+        dup: &DuplicateKey,
+        dup_range: Option<SourceRange>,
+        first_range: Option<SourceRange>,
     ) -> Violation {
-        let dup_range = span_to_range(text, line_starts, dup.duplicate);
-        let first_range = span_to_range(text, line_starts, dup.first);
         let msg = if let Some(custom) = &self.message {
             custom.clone()
         } else if self.explicit_sensitive {
@@ -282,24 +312,15 @@ impl NoDuplicateKeysRule {
                 finding.with_range(range)
             };
         }
-        if let Some(range) = first_range {
-            let rel = RelatedLocation::new(path.to_path_buf(), "first occurrence of key");
-            let rel = if self.explicit_sensitive {
-                match SourceRange::new(
-                    range.start_line(),
-                    range.start_column(),
-                    range.start_line(),
-                    range.start_column(),
-                ) {
-                    Some(pt) => rel.with_range(pt),
-                    None => rel,
-                }
-            } else {
-                rel.with_range(range)
-            };
+        if !self.explicit_sensitive
+            && let Some(range) = first_range
+        {
+            let rel = RelatedLocation::new(path.to_path_buf(), "first occurrence of key")
+                .with_range(range);
             finding = finding.with_related_location(rel);
         }
-        let baseline_key_part = bounded_key_token(&dup.key);
+        let baseline_key_src = dup.canonical_key.as_deref().unwrap_or(dup.key.as_ref());
+        let baseline_key_part = bounded_key_token(baseline_key_src);
         let baseline_sec_part = dup
             .section
             .as_deref()
@@ -311,7 +332,11 @@ impl NoDuplicateKeysRule {
         finding = finding.with_baseline_key(baseline);
         if self.explicit_sensitive {
             let locator = format!("{}\0{}\0dup", format.label(), crate::slash(path));
-            finding.redact_evidence(&self.id, &locator, [dup.key.as_ref()]);
+            if let Some(sec) = dup.section.as_deref() {
+                finding.redact_evidence(&self.id, &locator, [dup.key.as_ref(), sec]);
+            } else {
+                finding.redact_evidence(&self.id, &locator, [dup.key.as_ref()]);
+            }
         }
         finding
     }
@@ -348,6 +373,105 @@ fn bounded_key_token(raw: &str) -> String {
     out
 }
 
+/// Resolve every duplicate and first-occurrence byte span to 1-based
+/// [`SourceRange`]s in strictly O(N + K log K) time (avoiding O(K * N) column
+/// rescans on 32 MiB single-line minified files).
+fn resolve_duplicate_ranges(
+    text: &str,
+    duplicates: &[DuplicateKey],
+) -> Vec<(Option<SourceRange>, Option<SourceRange>)> {
+    if duplicates.is_empty() {
+        return Vec::new();
+    }
+    if text.is_ascii() {
+        let starts = compute_line_starts(text);
+        let to_pos = |offset: usize| -> Option<(usize, usize)> {
+            let clamped = offset.min(text.len());
+            let idx = starts.partition_point(|&s| s <= clamped).checked_sub(1)?;
+            Some((idx + 1, clamped - starts[idx] + 1))
+        };
+        let to_range = |span: ByteSpan| -> Option<SourceRange> {
+            let (sl, sc) = to_pos(span.start)?;
+            let (el, ec) = to_pos(span.end)?;
+            SourceRange::new(sl, sc, el, ec)
+        };
+        return duplicates
+            .iter()
+            .map(|d| (to_range(d.duplicate), to_range(d.first)))
+            .collect();
+    }
+
+    // Non-ASCII path: collect and sort all unique valid char-boundary offsets
+    // once, then resolve every offset in a single linear forward pass.
+    let mut targets: Vec<usize> = Vec::with_capacity(duplicates.len() * 4);
+    for d in duplicates {
+        for off in [
+            d.duplicate.start,
+            d.duplicate.end,
+            d.first.start,
+            d.first.end,
+        ] {
+            let clamped = off.min(text.len());
+            if text.is_char_boundary(clamped) {
+                targets.push(clamped);
+            }
+        }
+    }
+    targets.sort_unstable();
+    targets.dedup();
+
+    let mut positions: HashMap<usize, (usize, usize)> = HashMap::with_capacity(targets.len());
+    let bom_prefix_len = text.len() - text.trim_start_matches('\u{feff}').len();
+    let mut target_idx = 0usize;
+    let mut line = 1usize;
+    let mut col = 1usize;
+    let mut prev_cr = false;
+    let mut byte_idx = 0usize;
+
+    for ch in text.chars() {
+        while target_idx < targets.len() && targets[target_idx] == byte_idx {
+            positions.insert(byte_idx, (line, col));
+            target_idx += 1;
+        }
+        if target_idx >= targets.len() {
+            break;
+        }
+        let ch_len = ch.len_utf8();
+        let in_leading_bom = byte_idx < bom_prefix_len;
+        if ch == '\r' {
+            line += 1;
+            col = 1;
+            prev_cr = true;
+        } else if ch == '\n' {
+            if !prev_cr {
+                line += 1;
+                col = 1;
+            }
+            prev_cr = false;
+        } else {
+            prev_cr = false;
+            if !in_leading_bom {
+                col += 1;
+            }
+        }
+        byte_idx += ch_len;
+    }
+    while target_idx < targets.len() && targets[target_idx] == byte_idx {
+        positions.insert(byte_idx, (line, col));
+        target_idx += 1;
+    }
+
+    let lookup = |span: ByteSpan| -> Option<SourceRange> {
+        let &(sl, sc) = positions.get(&span.start.min(text.len()))?;
+        let &(el, ec) = positions.get(&span.end.min(text.len()))?;
+        SourceRange::new(sl, sc, el, ec)
+    };
+    duplicates
+        .iter()
+        .map(|d| (lookup(d.duplicate), lookup(d.first)))
+        .collect()
+}
+
 fn compute_line_starts(text: &str) -> Vec<usize> {
     let mut starts = vec![0usize];
     let bytes = text.as_bytes();
@@ -370,29 +494,6 @@ fn compute_line_starts(text: &str) -> Vec<usize> {
         }
     }
     starts
-}
-
-fn offset_to_line_col(text: &str, starts: &[usize], offset: usize) -> Option<(usize, usize)> {
-    let clamped = offset.min(text.len());
-    if !text.is_char_boundary(clamped) {
-        return None;
-    }
-    let idx = starts.partition_point(|&s| s <= clamped).checked_sub(1)?;
-    let line_start = starts[idx];
-    let slice = text.get(line_start..clamped)?;
-    // A leading UTF-8 BOM on line 1 occupies no visible column.
-    let visible = if idx == 0 {
-        slice.strip_prefix('\u{feff}').unwrap_or(slice)
-    } else {
-        slice
-    };
-    Some((idx + 1, visible.chars().count() + 1))
-}
-
-fn span_to_range(text: &str, starts: &[usize], span: ByteSpan) -> Option<SourceRange> {
-    let (sl, sc) = offset_to_line_col(text, starts, span.start)?;
-    let (el, ec) = offset_to_line_col(text, starts, span.end)?;
-    SourceRange::new(sl, sc, el, ec)
 }
 
 pub static META: alint_core::KindMeta = alint_core::KindMeta {
@@ -418,7 +519,7 @@ pub static META: alint_core::KindMeta = alint_core::KindMeta {
     dependencies: std::borrow::Cow::Borrowed(&[]),
     fix_ops: std::borrow::Cow::Borrowed(&[]),
     expect_matches: true,
-    trace: alint_core::TraceMeta::EXTRACTION,
+    trace: alint_core::TraceMeta::SELECTION,
     nested_rules: false,
 };
 
@@ -442,10 +543,10 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         .deserialize_options()
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
     let format_override = opts.format.map(TargetFormat::to_format);
-    if opts.strict && format_override.is_some_and(|f| f != Format::Json) {
+    if opts.strict.is_some() && format_override.is_some_and(|f| f != Format::Json) {
         return Err(Error::rule_config(
             &spec.id,
-            "`strict: true` is only supported for JSON files; remove `strict` or set `format: json`",
+            "`strict` is only supported for JSON files; remove `strict` or set `format: json`",
         ));
     }
     if spec.fix.is_some() {
@@ -461,7 +562,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         message: spec.message.clone(),
         scope: Scope::from_spec(spec)?,
         format_override,
-        strict: opts.strict,
+        strict: opts.strict.unwrap_or(false),
         explicit_sensitive: spec.sensitive,
     }))
 }
@@ -484,6 +585,9 @@ mod tests {
         assert!(err.to_string().contains("xml"), "{err}");
 
         let err = build(&make_spec("**/*.yml", "format: yaml\nstrict: true\n")).unwrap_err();
+        assert!(err.to_string().contains("strict"), "{err}");
+
+        let err = build(&make_spec("**/*.yml", "format: yaml\nstrict: false\n")).unwrap_err();
         assert!(err.to_string().contains("strict"), "{err}");
 
         assert!(build(&make_spec("**/*.json", "format: json\nstrict: true\n")).is_ok());
@@ -540,25 +644,59 @@ mod tests {
     }
 
     #[test]
-    fn dotenv_never_quotes_values_and_strict_json_rejects_jsonc() {
+    fn dotenv_never_quotes_values_and_registers_sensitive_paths() {
         let (dir, index) = tempdir_with_files(&[
             (".env", b"API_KEY=super_secret_1\nAPI_KEY=super_secret_2\n"),
             ("tsconfig.json", b"{\n  // comment\n  \"a\": 1\n}\n"),
+            ("bad_utf8.json", b"{\"a\": \"\xff\"}"),
+            ("nul_json.json", b"{\"a\": \"\x00\"}"),
         ]);
         let c = ctx(dir.path(), &index);
 
         let env_rule = build(&make_spec(".env", "")).unwrap();
+        let mut sensitive_paths = Vec::new();
+        env_rule.visit_sensitive_paths(false, &c, &mut |p| sensitive_paths.push(p.to_path_buf()));
+        assert_eq!(sensitive_paths, vec![Path::new(".env").to_path_buf()]);
+
+        let env_format_rule = build(&make_spec("secrets.txt", "format: dotenv\n")).unwrap();
+        assert!(env_format_rule.path_contents_sensitive_by_default());
+
         let env_vs = env_rule.evaluate(&c).unwrap();
         assert_eq!(env_vs.len(), 1);
         assert!(env_vs[0].message.contains("API_KEY"));
         assert!(!env_vs[0].message.contains("super_secret"));
 
-        let strict_rule = build(&make_spec("tsconfig.json", "strict: true\n")).unwrap();
-        let strict_vs = strict_rule.evaluate(&c).unwrap();
-        assert_eq!(strict_vs.len(), 1);
+        for strict_target in ["tsconfig.json", "bad_utf8.json", "nul_json.json"] {
+            let strict_rule = build(&make_spec(strict_target, "strict: true\n")).unwrap();
+            let strict_vs = strict_rule.evaluate(&c).unwrap();
+            assert_eq!(strict_vs.len(), 1, "{strict_target}: {strict_vs:#?}");
+            assert_eq!(
+                strict_vs[0].analysis_failure_kind(),
+                Some(AnalysisFailureKind::ResourceParse),
+                "{strict_target}: {strict_vs:#?}"
+            );
+        }
+    }
+
+    #[test]
+    fn non_ascii_and_multi_bom_ranges_resolve_in_single_pass() {
+        let (dir, index) = tempdir_with_files(&[(
+            "unicode.json",
+            "\u{feff}\u{feff}{\"é\": 1, \"k\": 2, \"k\": 3}\n".as_bytes(),
+        )]);
+        let c = ctx(dir.path(), &index);
+        let rule = build(&make_spec("unicode.json", "")).unwrap();
+        let vs = rule.evaluate(&c).unwrap();
+        assert_eq!(vs.len(), 1);
+        // Leading BOMs occupy no visible column on line 1.
+        assert_eq!(vs[0].line, Some(1));
+        assert_eq!(vs[0].column, Some(18));
         assert_eq!(
-            strict_vs[0].analysis_failure_kind(),
-            Some(AnalysisFailureKind::ResourceParse)
+            vs[0].related_locations[0]
+                .range
+                .as_ref()
+                .map(SourceRange::start_column),
+            Some(10)
         );
     }
 }

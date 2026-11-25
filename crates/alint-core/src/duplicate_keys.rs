@@ -22,6 +22,10 @@ pub struct DuplicateKey {
     /// ever captured - never any value). Stored as `Arc<str>` so aliased YAML
     /// keys share one allocation instead of multiplying memory across repeats.
     pub key: Arc<str>,
+    /// Optional canonical key identity used for stable, type-aware baseline
+    /// keys (set for YAML Core Schema typed keys so `1` and `"1"` stay distinct
+    /// while `true`/`True` and `1`/`0x1` share one baseline key).
+    pub canonical_key: Option<Arc<str>>,
     /// Optional INI section name enclosing the duplicate key.
     pub section: Option<Arc<str>>,
     /// Byte span of the repeated key in the input text.
@@ -53,16 +57,23 @@ impl DuplicateScan {
 ///
 /// - `yaml`: streams `ayaml` events with YAML 1.2 Core Schema typed scalar keys
 ///   (reset per `---` document), catches duplicates at every depth including
-///   non-leaf keys and mappings inside sequences, skips complex keys cleanly,
+///   non-leaf keys and mappings inside sequences, validates explicit core scalar
+///   tags and anchor/alias references (rejecting unknown and cyclic aliases),
+///   preserves custom tags as distinct key types, skips complex keys cleanly,
 ///   and allows `<<: *base` merge overrides while flagging two literal `<<:`
 ///   keys in one mapping.
-/// - `json`: walks `jsonc-parser` CST at every depth (honoring `strict_json`).
+/// - `json`: walks `jsonc-parser` CST at every depth in source order (honoring
+///   `strict_json`).
 /// - `dotenv`: walks `adotenv` entries quoting key names only.
 /// - `properties`: walks `.properties` entries quoting key names only.
 /// - `ini`: walks spanned INI entries merging repeated `[section]` headers into
 ///   the same section scope.
-/// - `toml` / `hcl`: delegates to the format parsers, which already reject
-///   duplicate keys/tables/attributes at parse time (`Err(...)`).
+/// - `toml`: delegates to the TOML parser, which rejects duplicate keys and
+///   tables at parse time (`Err(...)`).
+/// - `hcl`: validates with `Format::Hcl.parse` (rejecting duplicate attributes
+///   and identical AST object keys) and additionally scans object literals for
+///   mixed identifier/quoted/parenthesized duplicate static keys (`{ a = 1,
+///   "a" = 2 }`).
 /// - `xml`: unsupported (returns `Err`).
 ///
 /// # Errors
@@ -84,10 +95,7 @@ pub fn find_duplicate_keys(
             Format::Toml.parse(text)?;
             Ok(DuplicateScan::default())
         }
-        Format::Hcl => {
-            Format::Hcl.parse(text)?;
-            Ok(DuplicateScan::default())
-        }
+        Format::Hcl => scan_hcl(text),
         Format::Xml => Err(
             "duplicate-key detection is not supported for XML (sibling elements legitimately \
              repeat, and duplicate XML attributes are already parse errors)"
@@ -107,8 +115,34 @@ enum YamlKey {
     Uint(u128),
     NegInt(i128),
     Float(u64),
-    String(String),
-    Tagged(String, String),
+    String(Arc<str>),
+    Tagged(Arc<str>, Box<Self>),
+}
+
+impl YamlKey {
+    fn from_core_scalar(scalar: crate::yaml::CoreScalar) -> Self {
+        use crate::yaml::CoreScalar;
+        match scalar {
+            CoreScalar::Null => Self::Null,
+            CoreScalar::Bool(b) => Self::Bool(b),
+            CoreScalar::Uint(u) => Self::Uint(u),
+            CoreScalar::NegInt(i) => Self::NegInt(i),
+            CoreScalar::Float(bits) => Self::Float(canonical_float_bits(bits)),
+            CoreScalar::String(s) => Self::String(Arc::from(s)),
+        }
+    }
+
+    fn canonical_token(&self) -> String {
+        match self {
+            Self::Null => "null".to_string(),
+            Self::Bool(b) => format!("bool:{b}"),
+            Self::Uint(u) => format!("uint:{u}"),
+            Self::NegInt(i) => format!("neg:{i}"),
+            Self::Float(bits) => format!("float:{bits:016x}"),
+            Self::String(s) => format!("str:{s}"),
+            Self::Tagged(tag, inner) => format!("tag:{tag}:{}", inner.canonical_token()),
+        }
+    }
 }
 
 fn canonical_float_bits(bits: u64) -> u64 {
@@ -122,46 +156,97 @@ fn canonical_float_bits(bits: u64) -> u64 {
     }
 }
 
-fn yaml_typed_key(
+/// Validate explicit YAML 1.2 core scalar tags on any scalar (key or value),
+/// matching `ayaml`'s resolver so invalid `!!int abc` / `!!bool maybe` never
+/// pass silently.
+fn validate_yaml_core_tag(
     value: &str,
     style: ayaml::ScalarStyle,
     tag: Option<&ayaml::Tag>,
-) -> (YamlKey, Arc<str>) {
-    use crate::yaml::{CoreScalar, resolve_scalar_payload};
+) -> Result<(), String> {
+    if let Some(tag) = tag
+        && crate::yaml::is_core_scalar_tag(tag)
+        && crate::yaml::resolve_core_scalar(value, style, Some(tag)).is_none()
+    {
+        return Err(format!(
+            "invalid `{}{}` scalar `{value}`",
+            tag.handle(),
+            tag.suffix()
+        ));
+    }
+    Ok(())
+}
 
-    let key = match resolve_scalar_payload(value, style, tag) {
-        Some(CoreScalar::Null) => YamlKey::Null,
-        Some(CoreScalar::Bool(b)) => YamlKey::Bool(b),
-        Some(CoreScalar::Uint(u)) => YamlKey::Uint(u),
-        Some(CoreScalar::NegInt(i)) => YamlKey::NegInt(i),
-        Some(CoreScalar::Float(bits)) => YamlKey::Float(canonical_float_bits(bits)),
-        Some(CoreScalar::String(s)) => YamlKey::String(s),
-        None => {
-            let tag_str = tag.map_or_else(String::new, |t| format!("{}{}", t.handle(), t.suffix()));
-            YamlKey::Tagged(tag_str, value.to_string())
+/// Resolve a YAML mapping key or anchored scalar into a shared, O(1)-cloneable
+/// typed key + display label, preserving custom and unknown core tags as
+/// distinct key types (matching `ayaml-0.2.3/src/resolver.rs`).
+fn resolve_yaml_key(
+    value: &str,
+    style: ayaml::ScalarStyle,
+    tag: Option<&ayaml::Tag>,
+) -> Result<(Arc<YamlKey>, Arc<str>), String> {
+    let key = match tag {
+        Some(t) if crate::yaml::is_core_scalar_tag(t) => {
+            let scalar =
+                crate::yaml::resolve_core_scalar(value, style, Some(t)).ok_or_else(|| {
+                    format!("invalid `{}{}` scalar `{value}`", t.handle(), t.suffix())
+                })?;
+            YamlKey::from_core_scalar(scalar)
         }
+        Some(t) if t.handle() == "!" && t.suffix().is_empty() => YamlKey::String(Arc::from(value)),
+        Some(t) if t.is_core() => {
+            // Unknown core tags like `!!binary` or `!!timestamp` keep their tag
+            // identity and string payload.
+            let full_tag: Arc<str> = Arc::from(format!("{}{}", t.handle(), t.suffix()));
+            YamlKey::Tagged(full_tag, Box::new(YamlKey::String(Arc::from(value))))
+        }
+        Some(t) => {
+            let full_tag: Arc<str> = Arc::from(format!("{}{}", t.handle(), t.suffix()));
+            let payload = crate::yaml::resolve_core_scalar(value, style, None).map_or_else(
+                || YamlKey::String(Arc::from(value)),
+                YamlKey::from_core_scalar,
+            );
+            YamlKey::Tagged(full_tag, Box::new(payload))
+        }
+        None => crate::yaml::resolve_core_scalar(value, style, None).map_or_else(
+            || YamlKey::String(Arc::from(value)),
+            YamlKey::from_core_scalar,
+        ),
     };
     let display: Arc<str> = if value.is_empty() && matches!(key, YamlKey::Null) {
         Arc::from("null")
     } else {
         Arc::from(value)
     };
-    (key, display)
+    Ok((Arc::new(key), display))
+}
+
+#[derive(Clone)]
+enum AnchorState {
+    /// Collection currently open on the stack (referencing it is cyclic).
+    Open,
+    /// Finished mapping or sequence anchor (valid alias, skipped as complex key).
+    Collection,
+    /// Scalar anchor resolved once into O(1)-cloneable `Arc` handles.
+    Scalar(Arc<YamlKey>, Arc<str>),
 }
 
 enum YamlFrame {
     Mapping {
+        anchor: Option<String>,
         expecting_key: bool,
-        seen: HashMap<YamlKey, ByteSpan>,
+        seen: HashMap<Arc<YamlKey>, ByteSpan>,
     },
-    Sequence,
+    Sequence {
+        anchor: Option<String>,
+    },
 }
 
 struct YamlWalk {
     offset: usize,
     scan: DuplicateScan,
     stack: Vec<YamlFrame>,
-    anchors: HashMap<String, Option<(YamlKey, Arc<str>)>>,
+    anchors: HashMap<String, AnchorState>,
     collection_depth: usize,
 }
 
@@ -176,20 +261,35 @@ impl YamlWalk {
         }
     }
 
-    fn record_key(&mut self, key_id: YamlKey, display: Arc<str>, key_span: ByteSpan) {
+    fn expecting_mapping_key(&self) -> bool {
+        matches!(
+            self.stack.last(),
+            Some(YamlFrame::Mapping {
+                expecting_key: true,
+                ..
+            })
+        )
+    }
+
+    fn record_key(&mut self, key_id: Arc<YamlKey>, display: Arc<str>, key_span: ByteSpan) {
         if let Some(YamlFrame::Mapping {
             expecting_key,
             seen,
+            ..
         }) = self.stack.last_mut()
             && *expecting_key
         {
             if let Some(&first) = seen.get(&key_id) {
-                self.scan.push(DuplicateKey {
-                    key: display,
-                    section: None,
-                    duplicate: key_span,
-                    first,
-                });
+                if !self.scan.capped {
+                    let canonical = Arc::from(key_id.canonical_token());
+                    self.scan.push(DuplicateKey {
+                        key: display,
+                        canonical_key: Some(canonical),
+                        section: None,
+                        duplicate: key_span,
+                        first,
+                    });
+                }
             } else {
                 seen.insert(key_id, key_span);
             }
@@ -214,30 +314,43 @@ impl YamlWalk {
                 span,
                 ..
             } => {
-                let typed = yaml_typed_key(&value, style, tag.as_ref());
-                if let Some(a) = anchor {
-                    self.anchors
-                        .insert(a.as_str().to_string(), Some(typed.clone()));
-                }
-                if let Some(YamlFrame::Mapping { expecting_key, .. }) = self.stack.last_mut() {
-                    if *expecting_key {
+                let is_key = self.expecting_mapping_key();
+                if is_key || anchor.is_some() {
+                    let (key_id, display) = resolve_yaml_key(&value, style, tag.as_ref())?;
+                    if let Some(a) = anchor {
+                        self.anchors.insert(
+                            a.as_str().to_string(),
+                            AnchorState::Scalar(Arc::clone(&key_id), Arc::clone(&display)),
+                        );
+                    }
+                    if is_key {
                         let key_span =
                             ByteSpan::new(span.start() + self.offset, span.end() + self.offset);
-                        self.record_key(typed.0, typed.1, key_span);
-                    } else {
+                        self.record_key(key_id, display, key_span);
+                    } else if let Some(YamlFrame::Mapping { expecting_key, .. }) =
+                        self.stack.last_mut()
+                    {
+                        *expecting_key = true;
+                    }
+                } else {
+                    validate_yaml_core_tag(&value, style, tag.as_ref())?;
+                    if let Some(YamlFrame::Mapping { expecting_key, .. }) = self.stack.last_mut() {
                         *expecting_key = true;
                     }
                 }
             }
             Event::Alias { anchor, span } => {
+                let state = match self.anchors.get(anchor.as_str()) {
+                    None => return Err(format!("unknown YAML alias `*{}`", anchor.as_str())),
+                    Some(AnchorState::Open) => {
+                        return Err(format!("cyclic YAML alias `*{}`", anchor.as_str()));
+                    }
+                    Some(AnchorState::Collection) => None,
+                    Some(AnchorState::Scalar(k, d)) => Some((Arc::clone(k), Arc::clone(d))),
+                };
                 if let Some(YamlFrame::Mapping { expecting_key, .. }) = self.stack.last_mut() {
                     if *expecting_key {
-                        let resolved = self
-                            .anchors
-                            .get(anchor.as_str())
-                            .and_then(|v| v.as_ref())
-                            .map(|(k, d)| (k.clone(), Arc::clone(d)));
-                        if let Some((key_id, display)) = resolved {
+                        if let Some((key_id, display)) = state {
                             let key_span =
                                 ByteSpan::new(span.start() + self.offset, span.end() + self.offset);
                             self.record_key(key_id, display, key_span);
@@ -259,7 +372,18 @@ impl YamlWalk {
             }
             Event::MappingEnd { .. } | Event::SequenceEnd { .. } => {
                 self.collection_depth = self.collection_depth.saturating_sub(1);
-                self.stack.pop();
+                if let Some(frame) = self.stack.pop() {
+                    let frame_anchor = match frame {
+                        YamlFrame::Mapping { anchor, .. } | YamlFrame::Sequence { anchor } => {
+                            anchor
+                        }
+                    };
+                    if let Some(name) = frame_anchor
+                        && matches!(self.anchors.get(&name), Some(AnchorState::Open))
+                    {
+                        self.anchors.insert(name, AnchorState::Collection);
+                    }
+                }
             }
             _ => {}
         }
@@ -275,19 +399,24 @@ impl YamlWalk {
         if self.collection_depth > crate::yaml_depth::MAX_YAML_FLOW_DEPTH {
             return Err("YAML nesting exceeds the supported limit".to_string());
         }
-        if let Some(a) = anchor {
-            self.anchors.insert(a.as_str().to_string(), None);
-        }
+        let anchor_name = anchor.map(|a| {
+            let name = a.as_str().to_string();
+            self.anchors.insert(name.clone(), AnchorState::Open);
+            name
+        });
         if let Some(YamlFrame::Mapping { expecting_key, .. }) = self.stack.last_mut() {
             *expecting_key = !*expecting_key;
         }
         self.stack.push(if is_mapping {
             YamlFrame::Mapping {
+                anchor: anchor_name,
                 expecting_key: true,
                 seen: HashMap::new(),
             }
         } else {
-            YamlFrame::Sequence
+            YamlFrame::Sequence {
+                anchor: anchor_name,
+            }
         });
         Ok(())
     }
@@ -336,13 +465,52 @@ fn scan_yaml(text: &str) -> Result<DuplicateScan, String> {
 // JSON / JSONC
 // ---------------------------------------------------------------------------
 
+enum JsonFrame<'a> {
+    Object {
+        props: &'a [jsonc_parser::ast::ObjectProp<'a>],
+        idx: usize,
+        seen: HashMap<&'a str, ByteSpan>,
+    },
+    Array {
+        elems: &'a [jsonc_parser::ast::Value<'a>],
+        idx: usize,
+    },
+}
+
+fn push_json_value<'a>(stack: &mut Vec<JsonFrame<'a>>, value: &'a jsonc_parser::ast::Value<'a>) {
+    use jsonc_parser::ast::Value;
+
+    match value {
+        Value::Object(object) => stack.push(JsonFrame::Object {
+            props: &object.properties,
+            idx: 0,
+            seen: HashMap::with_capacity(object.properties.len()),
+        }),
+        Value::Array(array) => stack.push(JsonFrame::Array {
+            elems: &array.elements,
+            idx: 0,
+        }),
+        Value::StringLit(_)
+        | Value::NumberLit(_)
+        | Value::BooleanLit(_)
+        | Value::NullKeyword(_) => {}
+    }
+}
+
 fn scan_json(text: &str, strict: bool) -> Result<DuplicateScan, String> {
-    use jsonc_parser::ast::{ObjectPropName, Value};
+    use jsonc_parser::ast::ObjectPropName;
     use jsonc_parser::common::Ranged as _;
     use jsonc_parser::{CollectOptions, CommentCollectionStrategy, parse_to_ast};
 
     // Enforce size, nesting depth, BOM, empty-file, and strict-vs-JSONC guards.
     Format::Json.parse_with_strict_json(text, strict)?;
+    if !strict
+        && text
+            .trim_matches(|c: char| c == '\u{feff}' || c.is_whitespace())
+            .is_empty()
+    {
+        return Ok(DuplicateScan::default());
+    }
 
     let stripped = if strict {
         text
@@ -361,42 +529,50 @@ fn scan_json(text: &str, strict: bool) -> Result<DuplicateScan, String> {
     .map_err(|e| e.to_string())?;
 
     let mut scan = DuplicateScan::default();
-    let mut pending: Vec<&Value<'_>> = ast.value.iter().collect();
-    while let Some(node) = pending.pop() {
-        match node {
-            Value::Object(object) => {
-                let mut seen: HashMap<&str, ByteSpan> =
-                    HashMap::with_capacity(object.properties.len());
-                for prop in &object.properties {
-                    let (key, range) = match &prop.name {
-                        ObjectPropName::String(lit) => (lit.value.as_ref(), lit.range()),
-                        ObjectPropName::Word(lit) => (lit.value, lit.range()),
-                    };
-                    let key_span = ByteSpan::new(range.start + offset, range.end + offset);
-                    if let Some(&first) = seen.get(key) {
+    let mut stack: Vec<JsonFrame<'_>> = Vec::new();
+    if let Some(root) = &ast.value {
+        push_json_value(&mut stack, root);
+    }
+
+    while let Some(frame) = stack.last_mut() {
+        match frame {
+            JsonFrame::Object { props, idx, seen } => {
+                if *idx >= props.len() {
+                    stack.pop();
+                    continue;
+                }
+                let prop = &props[*idx];
+                *idx += 1;
+                let (key, range) = match &prop.name {
+                    ObjectPropName::String(lit) => (lit.value.as_ref(), lit.range()),
+                    ObjectPropName::Word(lit) => (lit.value, lit.range()),
+                };
+                let key_span = ByteSpan::new(range.start + offset, range.end + offset);
+                if let Some(&first) = seen.get(key) {
+                    if !scan.capped {
                         scan.push(DuplicateKey {
                             key: Arc::from(key),
+                            canonical_key: None,
                             section: None,
                             duplicate: key_span,
                             first,
                         });
-                    } else {
-                        seen.insert(key, key_span);
                     }
+                } else {
+                    seen.insert(key, key_span);
                 }
-                for prop in object.properties.iter().rev() {
-                    pending.push(&prop.value);
-                }
+                let child = &prop.value;
+                push_json_value(&mut stack, child);
             }
-            Value::Array(array) => {
-                for elem in array.elements.iter().rev() {
-                    pending.push(elem);
+            JsonFrame::Array { elems, idx } => {
+                if *idx >= elems.len() {
+                    stack.pop();
+                    continue;
                 }
+                let child = &elems[*idx];
+                *idx += 1;
+                push_json_value(&mut stack, child);
             }
-            Value::StringLit(_)
-            | Value::NumberLit(_)
-            | Value::BooleanLit(_)
-            | Value::NullKeyword(_) => {}
         }
     }
     Ok(scan)
@@ -415,12 +591,15 @@ fn scan_dotenv(text: &str) -> Result<DuplicateScan, String> {
         let raw = entry.key_span();
         let key_span = ByteSpan::new(raw.start, raw.end);
         if let Some(&first) = seen.get(key) {
-            scan.push(DuplicateKey {
-                key: Arc::from(key),
-                section: None,
-                duplicate: key_span,
-                first,
-            });
+            if !scan.capped {
+                scan.push(DuplicateKey {
+                    key: Arc::from(key),
+                    canonical_key: None,
+                    section: None,
+                    duplicate: key_span,
+                    first,
+                });
+            }
         } else {
             seen.insert(key, key_span);
         }
@@ -438,12 +617,15 @@ fn scan_properties(text: &str) -> Result<DuplicateScan, String> {
     crate::properties::for_each_entry(text, None, false, |entry| {
         let key_span = ByteSpan::new(entry.key_span.start, entry.key_span.end);
         if let Some(&first) = seen.get(&entry.key) {
-            scan.push(DuplicateKey {
-                key: Arc::from(entry.key),
-                section: None,
-                duplicate: key_span,
-                first,
-            });
+            if !scan.capped {
+                scan.push(DuplicateKey {
+                    key: Arc::from(entry.key),
+                    canonical_key: None,
+                    section: None,
+                    duplicate: key_span,
+                    first,
+                });
+            }
         } else {
             seen.insert(entry.key, key_span);
         }
@@ -467,16 +649,155 @@ fn scan_ini(text: &str) -> Result<DuplicateScan, String> {
     crate::ini::for_each_entry(text, |entry| {
         let scope = (entry.section.map(str::to_string), entry.key.to_string());
         if let Some(&first) = seen.get(&scope) {
-            scan.push(DuplicateKey {
-                key: Arc::from(entry.key),
-                section: entry.section.map(Arc::from),
-                duplicate: entry.key_span,
-                first,
-            });
+            if !scan.capped {
+                scan.push(DuplicateKey {
+                    key: Arc::from(entry.key),
+                    canonical_key: None,
+                    section: entry.section.map(Arc::from),
+                    duplicate: entry.key_span,
+                    first,
+                });
+            }
         } else {
             seen.insert(scope, entry.key_span);
         }
     })?;
+    Ok(scan)
+}
+
+// ---------------------------------------------------------------------------
+// HCL
+// ---------------------------------------------------------------------------
+
+fn hcl_static_object_key(key: &hcl::edit::expr::ObjectKey) -> Option<&str> {
+    match key {
+        hcl::edit::expr::ObjectKey::Ident(ident) => Some(ident.as_str()),
+        hcl::edit::expr::ObjectKey::Expression(expr) => hcl_static_key_expr(expr),
+    }
+}
+
+fn hcl_static_key_expr(mut expr: &hcl::edit::expr::Expression) -> Option<&str> {
+    loop {
+        match expr {
+            hcl::edit::expr::Expression::String(s) => return Some(s.as_str()),
+            hcl::edit::expr::Expression::Parenthesis(p) => expr = p.inner(),
+            _ => return None,
+        }
+    }
+}
+
+fn scan_hcl_expr(expr: &hcl::edit::expr::Expression, offset: usize, scan: &mut DuplicateScan) {
+    use hcl::edit::Span as _;
+    use hcl::edit::expr::Expression as E;
+
+    let mut pending: Vec<&E> = vec![expr];
+    while let Some(cur) = pending.pop() {
+        match cur {
+            E::Object(obj) => {
+                let mut seen: HashMap<&str, ByteSpan> = HashMap::with_capacity(obj.len());
+                let mut children: Vec<&E> = Vec::with_capacity(obj.len() * 2);
+                for (key, value) in obj {
+                    if let Some(name) = hcl_static_object_key(key) {
+                        let key_span = key.span().map_or_else(
+                            || ByteSpan::new(offset, offset),
+                            |r| ByteSpan::new(r.start + offset, r.end + offset),
+                        );
+                        if let Some(&first) = seen.get(name) {
+                            if !scan.capped {
+                                scan.push(DuplicateKey {
+                                    key: Arc::from(name),
+                                    canonical_key: None,
+                                    section: None,
+                                    duplicate: key_span,
+                                    first,
+                                });
+                            }
+                        } else {
+                            seen.insert(name, key_span);
+                        }
+                    } else if let hcl::edit::expr::ObjectKey::Expression(kexpr) = key {
+                        children.push(kexpr);
+                    }
+                    children.push(value.expr());
+                }
+                for child in children.into_iter().rev() {
+                    pending.push(child);
+                }
+            }
+            E::Array(arr) => {
+                let elems: Vec<&E> = arr.iter().collect();
+                for elem in elems.into_iter().rev() {
+                    pending.push(elem);
+                }
+            }
+            E::Parenthesis(p) => pending.push(p.inner()),
+            E::Conditional(c) => {
+                pending.push(&c.false_expr);
+                pending.push(&c.true_expr);
+                pending.push(&c.cond_expr);
+            }
+            E::UnaryOp(u) => pending.push(&u.expr),
+            E::BinaryOp(b) => {
+                pending.push(&b.rhs_expr);
+                pending.push(&b.lhs_expr);
+            }
+            E::FuncCall(f) => {
+                let args: Vec<&E> = f.args.iter().collect();
+                for arg in args.into_iter().rev() {
+                    pending.push(arg);
+                }
+            }
+            E::ForExpr(f) => {
+                if let Some(cond) = &f.cond {
+                    pending.push(&cond.expr);
+                }
+                pending.push(&f.value_expr);
+                if let Some(kexpr) = &f.key_expr {
+                    pending.push(kexpr);
+                }
+                pending.push(&f.intro.collection_expr);
+            }
+            E::Traversal(t) => pending.push(&t.expr),
+            E::Null(_)
+            | E::Bool(_)
+            | E::Number(_)
+            | E::String(_)
+            | E::Variable(_)
+            | E::StringTemplate(_)
+            | E::HeredocTemplate(_) => {}
+        }
+    }
+}
+
+fn scan_hcl(text: &str) -> Result<DuplicateScan, String> {
+    Format::Hcl.parse(text)?;
+    if text
+        .trim_matches(|c: char| c == '\u{feff}' || c.is_whitespace())
+        .is_empty()
+    {
+        return Ok(DuplicateScan::default());
+    }
+    let stripped = text.trim_start_matches('\u{feff}');
+    let offset = text.len() - stripped.len();
+    let body = crate::structured_format::parse_hcl_edit_body(stripped)?;
+    let mut scan = DuplicateScan::default();
+    let mut bodies: Vec<&hcl::edit::structure::Body> = vec![&body];
+    while let Some(cur) = bodies.pop() {
+        let mut child_bodies = Vec::new();
+        for item in cur {
+            match item {
+                hcl::edit::structure::Structure::Attribute(attr) => {
+                    scan_hcl_expr(&attr.value, offset, &mut scan);
+                }
+                hcl::edit::structure::Structure::Block(block) => {
+                    child_bodies.push(&block.body);
+                }
+            }
+        }
+        for child in child_bodies.into_iter().rev() {
+            bodies.push(child);
+        }
+    }
     Ok(scan)
 }
 
@@ -513,6 +834,45 @@ types:
     }
 
     #[test]
+    fn yaml_custom_tags_stay_distinct_and_invalid_core_tags_and_bad_aliases_fail() {
+        // Distinct custom tags and unknown core tags must not collide with each
+        // other or with untagged keys.
+        let tagged = "\
+!foo bar: 1
+!baz bar: 2
+bar: 3
+!!binary abc: 4
+abc: 5
+!Tag 1: 6
+!Tag \"1\": 7
+";
+        assert_eq!(
+            find_duplicate_keys(Format::Yaml, tagged, false)
+                .unwrap()
+                .duplicates,
+            []
+        );
+        // Same custom tag + equivalent untagged payload DOES collide.
+        let dup_tagged = "!Tag 1: a\n!Tag 0x1: b\n";
+        let scan = find_duplicate_keys(Format::Yaml, dup_tagged, false).unwrap();
+        assert_eq!(scan.duplicates.len(), 1);
+
+        // Invalid explicit core tags fail in both key and value positions.
+        assert!(find_duplicate_keys(Format::Yaml, "!!int abc: 1\n", false).is_err());
+        assert!(find_duplicate_keys(Format::Yaml, "a: !!bool maybe\n", false).is_err());
+        assert!(find_duplicate_keys(Format::Yaml, "b: !!null nope\n", false).is_err());
+        assert!(find_duplicate_keys(Format::Yaml, "c: !!float xyz\n", false).is_err());
+
+        // Undefined and cyclic aliases fail in all positions.
+        assert!(find_duplicate_keys(Format::Yaml, "a: *missing\n", false).is_err());
+        assert!(find_duplicate_keys(Format::Yaml, "*missing: 1\n", false).is_err());
+        assert!(find_duplicate_keys(Format::Yaml, "- *missing\n", false).is_err());
+        assert!(find_duplicate_keys(Format::Yaml, "a: &k foo\n---\n*k: 1\n", false).is_err());
+        assert!(find_duplicate_keys(Format::Yaml, "a: &loop [*loop]\n", false).is_err());
+        assert!(find_duplicate_keys(Format::Yaml, "a: &loop { k: *loop }\n", false).is_err());
+    }
+
+    #[test]
     fn yaml_multi_doc_and_merge_key_semantics() {
         // Multi-document YAML resets seen-key sets at `---`.
         let multi = "apiVersion: v1\nkind: ConfigMap\n---\napiVersion: v1\nkind: Secret\n";
@@ -538,12 +898,21 @@ types:
     }
 
     #[test]
-    fn json_nested_jsonc_and_strict_mode() {
+    fn json_nested_jsonc_source_order_interleaved_bom_and_strict_mode() {
         let jsonc =
             "{\n  // comment\n  \"a\": 1,\n  \"arr\": [{\"x\": 1, \"x\": 2,}],\n  \"a\": 3,\n}\n";
         let tolerant = find_duplicate_keys(Format::Json, jsonc, false).unwrap();
+        // Source order: line 4 (`"x"`) precedes line 5 (`"a"`).
         let keys: Vec<&str> = tolerant.duplicates.iter().map(|d| d.key.as_ref()).collect();
-        assert_eq!(keys, ["a", "x"]);
+        assert_eq!(keys, ["x", "a"]);
+        assert!(tolerant.duplicates[0].duplicate.start < tolerant.duplicates[1].duplicate.start);
+        // Tolerant mode agrees with Format::Json on whitespace + BOM empty files.
+        assert_eq!(
+            find_duplicate_keys(Format::Json, " \u{feff}", false)
+                .unwrap()
+                .duplicates,
+            []
+        );
         // Strict mode rejects JSONC comments / trailing commas / BOM / empty.
         assert!(find_duplicate_keys(Format::Json, jsonc, true).is_err());
         assert!(find_duplicate_keys(Format::Json, "\u{feff}{\"a\":1}", true).is_err());
@@ -555,7 +924,7 @@ types:
     }
 
     #[test]
-    fn dotenv_properties_and_ini_duplicates() {
+    fn dotenv_properties_and_ini_duplicates_and_bom_safety() {
         let env = "FOO=secret1\nBAR=ok\nFOO=secret2\n";
         let scan = find_duplicate_keys(Format::Dotenv, env, false).unwrap();
         assert_eq!(scan.duplicates.len(), 1);
@@ -573,10 +942,24 @@ types:
         assert_eq!(scan.duplicates.len(), 1);
         assert_eq!(scan.duplicates[0].section.as_deref(), Some("a"));
         assert_eq!(scan.duplicates[0].key.as_ref(), "k");
+
+        // Whitespace + BOM INI must not panic.
+        assert_eq!(
+            find_duplicate_keys(Format::Ini, " \u{feff}", false)
+                .unwrap()
+                .duplicates,
+            []
+        );
+        assert_eq!(
+            find_duplicate_keys(Format::Ini, "\u{feff} \u{feff}\n", false)
+                .unwrap()
+                .duplicates,
+            []
+        );
     }
 
     #[test]
-    fn toml_hcl_parse_errors_and_xml_rejected() {
+    fn toml_hcl_mixed_object_keys_and_xml_rejected() {
         assert!(find_duplicate_keys(Format::Toml, "a = 1\na = 2\n", false).is_err());
         assert_eq!(
             find_duplicate_keys(Format::Toml, "a = 1\nb = 2\n", false)
@@ -585,6 +968,13 @@ types:
             []
         );
         assert!(find_duplicate_keys(Format::Hcl, "a = 1\na = 2\n", false).is_err());
+        // Mixed ident / quoted / parenthesized HCL object keys are caught with spans.
+        let hcl_mixed = "x = {\n  foo = 1\n  \"foo\" = 2\n  (\"foo\") = 3\n}\n";
+        let scan = find_duplicate_keys(Format::Hcl, hcl_mixed, false).unwrap();
+        assert_eq!(scan.duplicates.len(), 2);
+        assert_eq!(scan.duplicates[0].key.as_ref(), "foo");
+        assert_eq!(scan.duplicates[1].key.as_ref(), "foo");
+        assert!(scan.duplicates[0].duplicate.start > scan.duplicates[0].first.start);
         assert!(find_duplicate_keys(Format::Xml, "<r><a/><a/></r>", false).is_err());
     }
 

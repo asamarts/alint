@@ -82,8 +82,31 @@ impl TargetFormat {
     }
 }
 
+fn present<'de, D, T>(deserializer: D) -> std::result::Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    match Option::<T>::deserialize(deserializer)? {
+        Some(value) => Ok(Some(value)),
+        None => Err(serde::de::Error::custom(
+            "an optional key written as null; give it a value, or leave the key out",
+        )),
+    }
+}
+
+fn no_default(schema: &mut schemars::Schema) {
+    schema.remove("default");
+}
+
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(extend(
+    "allOf" = [{
+        "if": { "required": ["strict", "format"], "properties": { "format": { "type": "string" } } },
+        "then": { "properties": { "format": { "const": "json" } } }
+    }]
+))]
 struct Options {
     /// Path to a JSON Schema file relative to the lint root. The schema must
     /// itself be JSON even when validating YAML / TOML targets.
@@ -99,8 +122,9 @@ struct Options {
     /// (rejecting comments, trailing commas, leading UTF-8 BOM, and empty
     /// files; ADR-0050 D7). Rejected at build time when `format:` is explicitly
     /// non-JSON.
-    #[serde(default)]
-    strict: bool,
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "bool", transform = no_default)]
+    strict: Option<bool>,
 }
 
 crate::options_schema_for!(Options);
@@ -211,8 +235,8 @@ impl Rule for JsonSchemaPassesRule {
                 continue;
             }
             let full = ctx.root.join(&entry.path);
-            let text = match crate::io::read_capped(&full) {
-                Ok(b) => String::from_utf8_lossy(&b).into_owned(),
+            let raw_bytes = match crate::io::read_capped(&full) {
+                Ok(b) => b,
                 Err(crate::io::ReadCapError::TooLarge(n)) => {
                     violations.push(alint_core::too_large_file_violation(&entry.path, n));
                     continue;
@@ -242,12 +266,23 @@ impl Rule for JsonSchemaPassesRule {
                 continue;
             };
 
-            let parsed = match ctx.parse_structured_strict(
-                &entry.path,
-                format,
-                &text,
-                self.strict && format == Format::Json,
-            ) {
+            let strict_json = self.strict && format == Format::Json;
+            let text = if strict_json {
+                let Ok(s) = std::str::from_utf8(&raw_bytes) else {
+                    violations.push(
+                        Violation::new("not a valid JSON document: input is not valid UTF-8")
+                            .with_path(entry.path.clone())
+                            .as_analysis_failure(AnalysisFailureKind::ResourceParse),
+                    );
+                    continue;
+                };
+                std::borrow::Cow::Borrowed(s)
+            } else {
+                String::from_utf8_lossy(&raw_bytes)
+            };
+
+            let parsed = match ctx.parse_structured_strict(&entry.path, format, &text, strict_json)
+            {
                 Ok(v) => v,
                 Err(err) => {
                     violations.push(
@@ -356,10 +391,10 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
 
     let format_override = opts.format.map(TargetFormat::to_format);
-    if opts.strict && format_override.is_some_and(|f| f != Format::Json) {
+    if opts.strict.is_some() && format_override.is_some_and(|f| f != Format::Json) {
         return Err(Error::rule_config(
             &spec.id,
-            "`strict: true` applies only to JSON targets; remove `strict` or set `format: json`",
+            "`strict` applies only to JSON targets; remove `strict` or set `format: json`",
         ));
     }
 
@@ -380,7 +415,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         schema_path: opts.schema_path,
         allow_out_of_root: false,
         format_override,
-        strict: opts.strict,
+        strict: opts.strict.unwrap_or(false),
         compiled: OnceLock::new(),
     }))
 }

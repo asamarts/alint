@@ -88,9 +88,18 @@ impl Adapter for ExtractAdapter {
         limits: &Limits,
         _budget: &RunBudget,
     ) -> Result<AdapterOutput, AdapterError> {
-        // `cross_file` reads every file through `String::from_utf8_lossy`;
-        // the wrapper must stay byte-compatible with it.
-        let text = String::from_utf8_lossy(bytes);
+        // Strict RFC 8259 JSON mandates valid UTF-8; other extractors stay
+        // byte-compatible with `cross_file`'s lossy decode.
+        let text = if matches!(
+            &self.extract,
+            Extract::Structured(s) if s.strict && s.format == Format::Json
+        ) {
+            std::borrow::Cow::Borrowed(std::str::from_utf8(bytes).map_err(|_| {
+                AdapterError::Parse("the JSON document is not valid UTF-8".to_string())
+            })?)
+        } else {
+            String::from_utf8_lossy(bytes)
+        };
         let max = limits.get(LimitKind::RowsPerExtractor);
         let cache_ctx = ctx.map(|c| (c, resource.path().as_path()));
         let values =

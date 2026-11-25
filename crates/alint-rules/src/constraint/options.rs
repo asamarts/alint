@@ -1,7 +1,7 @@
 //! The `constraint` kind's options as a config writes them (design
-//! `v0.23/selectors-and-constraints.md` section 6, ADR-0050 D1 to D4): `input:`
+//! `v0.23/selectors-and-constraints.md` section 6, ADR-0050 D1 to D5): `input:`
 //! and `assert:`, which holds exactly one of `equal`, `unique`, `set`,
-//! `reference`, `count`, and `compare`.
+//! `reference`, `count`, `compare`, and `satisfies`.
 //!
 //! The draft version 2 schema's `constraint` branch is derived from these
 //! types (`xtask gen-schema`), so it states the shapes the builder checks: one
@@ -800,7 +800,7 @@ pub(super) struct Satisfies {
     /// Literal semantic version string (mutually exclusive with `version:` and
     /// `range_literal:`).
     #[serde(default, deserialize_with = "present")]
-    #[schemars(transform = no_default, with = "String")]
+    #[schemars(transform = no_default, with = "String", extend("minLength" = 1))]
     pub version_literal: Option<String>,
     /// Input field holding a semantic version range expression.
     #[serde(default, deserialize_with = "present")]

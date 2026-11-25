@@ -881,6 +881,8 @@ pub struct Context<'a> {
     pub trace: Option<&'a dyn crate::trace::TraceSink>,
     /// Per-run or per-file structured-tree cache shared across rules (#548).
     pub(crate) structured_cache: Option<crate::structured_cache::StructuredCacheRef<'a>>,
+    /// Per-rule finding cap resolved from top-level `limits.findings_per_rule`.
+    pub(crate) findings_per_rule_limit: Option<usize>,
 }
 
 impl<'a> Context<'a> {
@@ -902,7 +904,14 @@ impl<'a> Context<'a> {
             condition_environment: None,
             trace: None,
             structured_cache: None,
+            findings_per_rule_limit: None,
         }
+    }
+
+    #[must_use]
+    pub(crate) fn findings_per_rule_cap(&self) -> usize {
+        self.findings_per_rule_limit
+            .unwrap_or_else(|| crate::relation::LimitKind::FindingsPerRule.default_value())
     }
 
     /// Sets [`Self::registry`].
@@ -1025,6 +1034,7 @@ impl<'a> Context<'a> {
             structured_cache: Some(crate::structured_cache::StructuredCacheRef::File(
                 file_cache,
             )),
+            findings_per_rule_limit: self.findings_per_rule_limit,
         }
     }
 }
@@ -1583,6 +1593,34 @@ pub trait PerFileRule: Send + Sync + std::fmt::Debug {
     fn max_bytes_needed(&self) -> Option<usize> {
         None
     }
+
+    /// Whether this per-file rule enforces the per-rule `findings_per_rule`
+    /// cap across files (ADR-0050 D6). Default `false`.
+    fn enforces_findings_per_rule(&self) -> bool {
+        false
+    }
+}
+
+/// Build the single non-baselinable analysis failure emitted when a rule hits
+/// [`crate::relation::LimitKind::FindingsPerRule`].
+#[must_use]
+pub(crate) fn findings_per_rule_truncation_failure(
+    cap: usize,
+    emitted: usize,
+    suppressed: usize,
+    lower_bound: bool,
+) -> Violation {
+    let omitted = if lower_bound {
+        format!("at least {suppressed}")
+    } else {
+        suppressed.to_string()
+    };
+    let noun = if emitted == 1 { "finding" } else { "findings" };
+    Violation::new(format!(
+        "relation limit `findings_per_rule` ({cap}) reached: emitted {emitted} {noun} and \
+         suppressed {omitted} more; remaining findings were omitted to bound run memory and output"
+    ))
+    .as_analysis_failure(AnalysisFailureKind::Evaluation)
 }
 
 /// Rule-major fallback for [`PerFileRule`] implementors.
@@ -1617,14 +1655,39 @@ pub fn eval_per_file<R: PerFileRule + ?Sized>(
 ) -> Result<Vec<Violation>> {
     let mut violations = Vec::new();
     let scope = rule.path_scope();
+    let enforce_cap = rule.enforces_findings_per_rule();
+    let cap = ctx.findings_per_rule_cap();
+    let mut emitted_policy = 0usize;
+    let mut suppressed = 0usize;
+    let mut lower_bound = false;
     for entry in scope.candidate_files(ctx.index) {
         if !scope.matches(&entry.path, ctx.index) {
             continue;
         }
+        if enforce_cap && suppressed > 0 {
+            lower_bound = true;
+            break;
+        }
         let full = ctx.root.join(&entry.path);
         match crate::walker::read_for_analysis(&full, entry.size) {
             crate::walker::AnalysisRead::Bytes(bytes) => {
-                violations.extend(rule.evaluate_file(ctx, &entry.path, &bytes)?);
+                let batch = rule.evaluate_file(ctx, &entry.path, &bytes)?;
+                if enforce_cap {
+                    for v in batch {
+                        if v.disposition == FindingDisposition::Violation {
+                            if emitted_policy < cap {
+                                emitted_policy += 1;
+                                violations.push(v);
+                            } else {
+                                suppressed = suppressed.saturating_add(1);
+                            }
+                        } else {
+                            violations.push(v);
+                        }
+                    }
+                } else {
+                    violations.extend(batch);
+                }
             }
             crate::walker::AnalysisRead::Missing => {
                 violations.push(missing_file_violation(&entry.path));
@@ -1636,6 +1699,14 @@ pub fn eval_per_file<R: PerFileRule + ?Sized>(
                 violations.push(unreadable_file_violation(&entry.path, &e));
             }
         }
+    }
+    if enforce_cap && suppressed > 0 {
+        violations.push(findings_per_rule_truncation_failure(
+            cap,
+            emitted_policy,
+            suppressed,
+            lower_bound,
+        ));
     }
     Ok(violations)
 }

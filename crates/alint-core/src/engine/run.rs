@@ -22,8 +22,8 @@ use crate::when::WhenEnv;
 
 use super::{
     Engine, EntryGateOutcome, LivePerFileEntries, RuleEntry, RunGateInputs, TraceSession,
-    evaluate_entry_gates, evaluate_per_file_entries, mark_fixability, phase, pick_ctx, run_entry,
-    trace_assertion, with_worker_pool,
+    evaluate_entry_gates, evaluate_per_file_entries, evaluate_per_file_entries_capped,
+    mark_fixability, phase, pick_ctx, run_entry, trace_assertion, with_worker_pool,
 };
 
 impl Engine {
@@ -74,6 +74,11 @@ impl Engine {
 
     fn default_runtime_limits() -> crate::relation::Limits {
         crate::relation::Limits::default()
+    }
+
+    fn findings_per_rule_limit(&self) -> usize {
+        self.relation_limits
+            .get(crate::relation::LimitKind::FindingsPerRule)
     }
 
     /// Configure top-level runtime limits (`limits:` in `.alint.yml`).
@@ -313,6 +318,7 @@ impl Engine {
             condition_environment: self.condition_environment.as_ref(),
             trace: None,
             structured_cache: None,
+            findings_per_rule_limit: Some(self.findings_per_rule_limit()),
         };
         let target = Self::normalized_write_target(root, path);
         self.entries.iter().any(|entry| {
@@ -669,6 +675,7 @@ impl Engine {
             built = u64::from(git_tracked_indexes.is_some()),
         );
 
+        let findings_per_rule_limit = Some(self.findings_per_rule_limit());
         let full_ctx = Context {
             root,
             index,
@@ -682,6 +689,7 @@ impl Engine {
             condition_environment: self.condition_environment.as_ref(),
             trace: trace.map(|trace| trace as &dyn TraceSink),
             structured_cache,
+            findings_per_rule_limit,
         };
         let filtered_ctx = filtered_index.as_ref().map(|fi| Context {
             root,
@@ -696,6 +704,7 @@ impl Engine {
             condition_environment: self.condition_environment.as_ref(),
             trace: trace.map(|trace| trace as &dyn TraceSink),
             structured_cache,
+            findings_per_rule_limit,
         });
         let git_file_only_ctx = git_tracked_indexes
             .as_ref()
@@ -713,6 +722,7 @@ impl Engine {
                 condition_environment: self.condition_environment.as_ref(),
                 trace: trace.map(|trace| trace as &dyn TraceSink),
                 structured_cache,
+                findings_per_rule_limit,
             });
         let git_dir_aware_ctx = git_tracked_indexes
             .as_ref()
@@ -730,6 +740,7 @@ impl Engine {
                 condition_environment: self.condition_environment.as_ref(),
                 trace: trace.map(|trace| trace as &dyn TraceSink),
                 structured_cache,
+                findings_per_rule_limit,
             });
 
         // Resolve active `scope_filter.changed_since:` diffs + manifest path
@@ -999,24 +1010,60 @@ impl Engine {
         // uses Rayon's work-stealing slabs instead — same
         // observable iteration, no shared lock on the hot
         // path.
-        let (by_file, selection_counts) = if trace.is_some() {
-            evaluate_per_file_entries::<true>(
-                root,
-                walk_index,
-                &live,
-                any_full_index,
-                filtered_ctx,
-                per_file_ctx,
-            )
+        let any_capped = live.iter().any(|(_, entry)| {
+            entry
+                .rule
+                .as_per_file()
+                .is_some_and(PerFileRule::enforces_findings_per_rule)
+        });
+        let (mut bucket, selection_counts) = if any_capped {
+            let cap = self.findings_per_rule_limit();
+            if trace.is_some() {
+                evaluate_per_file_entries_capped::<true>(
+                    root,
+                    walk_index,
+                    &live,
+                    any_full_index,
+                    filtered_ctx,
+                    per_file_ctx,
+                    cap,
+                )
+            } else {
+                evaluate_per_file_entries_capped::<false>(
+                    root,
+                    walk_index,
+                    &live,
+                    any_full_index,
+                    filtered_ctx,
+                    per_file_ctx,
+                    cap,
+                )
+            }
         } else {
-            evaluate_per_file_entries::<false>(
-                root,
-                walk_index,
-                &live,
-                any_full_index,
-                filtered_ctx,
-                per_file_ctx,
-            )
+            let (by_file, selection_counts) = if trace.is_some() {
+                evaluate_per_file_entries::<true>(
+                    root,
+                    walk_index,
+                    &live,
+                    any_full_index,
+                    filtered_ctx,
+                    per_file_ctx,
+                )
+            } else {
+                evaluate_per_file_entries::<false>(
+                    root,
+                    walk_index,
+                    &live,
+                    any_full_index,
+                    filtered_ctx,
+                    per_file_ctx,
+                )
+            };
+            let mut bucket: HashMap<usize, Vec<Violation>> = HashMap::new();
+            for (idx, v) in by_file {
+                bucket.entry(idx).or_default().push(v);
+            }
+            (bucket, selection_counts)
         };
         if let Some(trace) = trace.filter(|trace| trace.allows(TraceStageClass::Selection)) {
             let reason = if selection_counts.matched == 0 {
@@ -1035,13 +1082,8 @@ impl Engine {
             );
         }
 
-        // Bucket violations by entry-index, then rebuild
-        // `RuleResult` per live entry preserving each rule's
-        // metadata (level / policy_url / is_fixable).
-        let mut bucket: HashMap<usize, Vec<Violation>> = HashMap::new();
-        for (idx, v) in by_file {
-            bucket.entry(idx).or_default().push(v);
-        }
+        // Rebuild `RuleResult` per live entry preserving each rule's metadata
+        // (level / policy_url / is_fixable).
         let mut results = gate_results;
         for (idx, entry) in live {
             // A live per-file rule that produced no violations is a
@@ -1195,6 +1237,7 @@ impl Engine {
             condition_environment: self.condition_environment.as_ref(),
             trace: None,
             structured_cache: None,
+            findings_per_rule_limit: Some(self.findings_per_rule_limit()),
         };
 
         let manifest_gates = self.manifest_gates_by_entry(index, &when_env)?;
@@ -1228,12 +1271,36 @@ impl Engine {
             .as_ref()
             .map(|cache| ctx.with_file_structured_cache(cache));
         let eval_ctx = file_ctx.as_ref().unwrap_or(&ctx);
+        let cap = self.findings_per_rule_limit();
         let mut bucket: HashMap<usize, Vec<Violation>> = HashMap::new();
         for (idx, pf) in matching {
             match pf.evaluate_file(eval_ctx, file_path, bytes) {
                 Ok(vs) => {
                     if !vs.is_empty() {
-                        bucket.entry(idx).or_default().extend(vs);
+                        if pf.enforces_findings_per_rule() {
+                            let dest = bucket.entry(idx).or_default();
+                            let mut emitted = 0usize;
+                            let mut suppressed = 0usize;
+                            for v in vs {
+                                if v.disposition == crate::rule::FindingDisposition::Violation {
+                                    if emitted < cap {
+                                        emitted += 1;
+                                        dest.push(v);
+                                    } else {
+                                        suppressed = suppressed.saturating_add(1);
+                                    }
+                                } else {
+                                    dest.push(v);
+                                }
+                            }
+                            if suppressed > 0 {
+                                dest.push(crate::rule::findings_per_rule_truncation_failure(
+                                    cap, emitted, suppressed, false,
+                                ));
+                            }
+                        } else {
+                            bucket.entry(idx).or_default().extend(vs);
+                        }
                     }
                 }
                 Err(e) => bucket.entry(idx).or_default().push(
