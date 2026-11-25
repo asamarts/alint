@@ -18,6 +18,7 @@ Assert a JSONPath query over the document matches nothing; one file-level violat
 | Option | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `path` | string | yes |  | `JSONPath` expression rooted at `$`. The rule fires one violation per file if the query matches any node (the path must be absent). |
+| `strict` | boolean |  | `false` | When true, enforce strict RFC 8259 JSON parsing (rejecting comments, trailing commas, leading UTF-8 BOM, and empty files; ADR-0050 D7). |
 
 Plus the common `paths`, `level`, `id`, `when`, `scope_filter`, `fix`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
