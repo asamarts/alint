@@ -507,3 +507,81 @@ pub static META: alint_core::KindMeta = alint_core::KindMeta {
     trace: alint_core::TraceMeta::ASSERTION,
     nested_rules: false,
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rp(s: &str) -> RelPath {
+        RelPath::parse(s).expect("valid relpath")
+    }
+
+    #[test]
+    fn structural_counterpart_handles_all_tokens_ambiguity_and_root_files() {
+        let rg = |token| ResourceGroups {
+            token,
+            transforms: Vec::new(),
+        };
+
+        // `parent_name`: unique match, `en/en.json`, root-level sibling dir, and ambiguity.
+        let p_auth = rp("locales/fr/auth.json");
+        let p_err = rp("locales/fr/errors.json");
+        let p_err_upper = rp("locales/FR/errors.json");
+        let p_en_file = rp("locales/fr/en.json");
+        let cands = BTreeSet::from([&p_auth, &p_err, &p_en_file]);
+        assert_eq!(
+            rg(PathToken::ParentName).structural_counterpart(&rp("locales/EN/errors.json"), &cands),
+            Some(&p_err)
+        );
+        assert_eq!(
+            rg(PathToken::ParentName).structural_counterpart(&rp("locales/en/en.json"), &cands),
+            Some(&p_en_file)
+        );
+        assert_eq!(
+            rg(PathToken::ParentName)
+                .structural_counterpart(&rp("locales/en/missing.json"), &cands),
+            None
+        );
+        // Root-level file has no parent_name -> None.
+        assert_eq!(
+            rg(PathToken::ParentName).structural_counterpart(&rp("errors.json"), &cands),
+            None
+        );
+        // Ambiguous two matches in the same group -> None (falls back to group.first).
+        let ambig = BTreeSet::from([&p_auth, &p_err, &p_err_upper]);
+        assert_eq!(
+            rg(PathToken::ParentName).structural_counterpart(&rp("locales/EN/errors.json"), &ambig),
+            None
+        );
+
+        // `stem`, `ext`, `dir`, `basename`, `path`.
+        let s1 = rp("locales/fr.json");
+        let s2 = rp("locales/fr.yaml");
+        let stem_cands = BTreeSet::from([&s1, &s2]);
+        assert_eq!(
+            rg(PathToken::Stem).structural_counterpart(&rp("locales/en.json"), &stem_cands),
+            Some(&s1)
+        );
+        let e1 = rp("schemas/a.yaml");
+        let e2 = rp("schemas/user.yaml");
+        let ext_cands = BTreeSet::from([&e1, &e2]);
+        assert_eq!(
+            rg(PathToken::Ext).structural_counterpart(&rp("schemas/user.json"), &ext_cands),
+            Some(&e2)
+        );
+        assert_eq!(
+            rg(PathToken::Dir).structural_counterpart(&rp("apps/web/errors.json"), &cands),
+            Some(&p_err)
+        );
+        let b1 = rp("locales/fr/a.json");
+        let b_cands = BTreeSet::from([&b1]);
+        assert_eq!(
+            rg(PathToken::Basename).structural_counterpart(&rp("locales/fr/b.json"), &b_cands),
+            Some(&b1)
+        );
+        assert_eq!(
+            rg(PathToken::Path).structural_counterpart(&rp("locales/en/errors.json"), &cands),
+            None
+        );
+    }
+}

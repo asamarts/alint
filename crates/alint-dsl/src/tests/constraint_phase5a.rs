@@ -478,8 +478,9 @@ rules:
     );
 }
 
+#[cfg(target_os = "linux")]
 #[test]
-fn set_missing_falls_back_on_ambiguous_counterpart_and_supports_ext_counterpart() {
+fn set_missing_falls_back_on_ambiguous_counterpart_on_case_sensitive_fs() {
     let config = "\
 version: 2
 relations:
@@ -502,8 +503,9 @@ rules:
         equal_to: { group: en }
     level: error
 ";
-    // Ambiguous counterpart (both `locales/FR/errors.json` and `locales/fr/errors.json`
-    // collapse into group `fr`): falls back to `group.first` (`locales/FR/auth.json`).
+    // Both `locales/FR/errors.json` and `locales/fr/errors.json` collapse into
+    // group `fr`, producing two structural counterparts -> falls back to
+    // `group.first` (`locales/FR/auth.json`).
     let ambig = run(
         config,
         &[
@@ -520,7 +522,10 @@ rules:
         ambig_found[0].starts_with("locales/FR/auth.json: "),
         "ambiguous counterparts must fall back to group.first: {ambig_found:?}"
     );
+}
 
+#[test]
+fn set_missing_places_ext_counterpart() {
     // 3. `ext` token counterpart (`schemas/user.json` -> `schemas/user.yaml`, not `a.yaml`).
     let ext_config = "\
 version: 2

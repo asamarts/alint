@@ -484,20 +484,8 @@ impl<'r> Run<'r> {
         row: Option<&FieldRow>,
         compared: Option<(&Scalar, bool)>,
     ) -> String {
-        if !template.contains("{{") {
-            return template.to_string();
-        }
-        let mut out = String::with_capacity(template.len());
-        let mut rest = template;
-        while let Some(open) = rest.find("{{") {
-            out.push_str(&rest[..open]);
-            let after = &rest[open + 2..];
-            let Some(close) = after.find("}}") else {
-                out.push_str(&rest[open..]);
-                return out;
-            };
-            let inner = after[..close].trim();
-            let replacement = if inner == "value" {
+        render_message(template, |inner| {
+            if inner == "value" {
                 compared.map(|(value, redact)| {
                     if redact {
                         "<redacted>".to_string()
@@ -516,15 +504,8 @@ impl<'r> Run<'r> {
                 self.render_row_field(name, row)
             } else {
                 None
-            };
-            match replacement {
-                Some(text) => out.push_str(&text),
-                None => out.push_str(&rest[open..open + 2 + close + 2]),
             }
-            rest = &after[close + 2..];
-        }
-        out.push_str(rest);
-        out
+        })
     }
 
     /// Format one `{{row.FIELD}}` placeholder.
@@ -1069,6 +1050,33 @@ impl<'r> Run<'r> {
             self.report(at, message, key, related, Some(row), None);
         }
     }
+}
+
+/// Single-pass `{{...}}` message-template renderer for `constraint` rules
+/// (supports both namespaced `{{row.FIELD}}` and bare `{{value}}`; unknown
+/// tokens stay literal and substituted values are never re-scanned).
+fn render_message(template: &str, resolve: impl Fn(&str) -> Option<String>) -> String {
+    if !template.contains("{{") {
+        return template.to_string();
+    }
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some(open) = rest.find("{{") {
+        out.push_str(&rest[..open]);
+        let after = &rest[open + 2..];
+        let Some(close) = after.find("}}") else {
+            out.push_str(&rest[open..]);
+            return out;
+        };
+        let inner = after[..close].trim();
+        match resolve(inner) {
+            Some(text) => out.push_str(&text),
+            None => out.push_str(&rest[open..open + 2 + close + 2]),
+        }
+        rest = &after[close + 2..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Where a finding about a row, or a related location, sits: always in a
