@@ -427,6 +427,7 @@ mod tests {
                 read: Read::WholeFile,
                 optional: false,
             },
+            fields: None,
         }
     }
 

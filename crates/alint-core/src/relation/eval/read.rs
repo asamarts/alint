@@ -13,12 +13,14 @@ use super::{
 };
 use crate::extract::{Extract, LinesOpts};
 use crate::relation::adapter::{Adapter, AdapterError, AdapterNote, AdapterOutput};
-use crate::relation::adapters::{EntryValuesAdapter, ExtractAdapter, entry_values};
+use crate::relation::adapters::{
+    EntryValuesAdapter, ExtractAdapter, RecordsAdapter, entry_values, records,
+};
 use crate::relation::limits::{LimitExceeded, LimitKind, Limits};
 use crate::relation::path::RelPath;
 use crate::relation::plan::{
     BoundMissing, Entries, EntriesFormat, FieldDef, FieldSource, NamedRelation, Part, PathToken,
-    Read, Reader, RelationDef, SelectorRef, Transform,
+    Read, Reader, Records, RelationDef, SelectorRef, Transform,
 };
 use crate::relation::pointer::{Pointer, Segment};
 use crate::relation::resource::{Origin, Resource, ResourceId, ResourceRead};
@@ -99,6 +101,7 @@ impl Evaluator<'_> {
     /// One part's rows, added to `out`, and the resources it reads, to
     /// `resources`; `Break` once the run's cells, bytes or decoded rows ran
     /// out, so no later part builds a row or decodes a file.
+    #[allow(clippy::too_many_lines)]
     fn part(
         &self,
         site: &Site,
@@ -111,8 +114,10 @@ impl Evaluator<'_> {
         let Some(resources) = self.select(site, &part.from, failures) else {
             return ControlFlow::Continue(());
         };
-        let bound: Vec<String> = bound_queries(relation);
-        let reader = match PartReader::new(&part.reader, &bound, &self.limits) {
+        let part_fields = relation.part_fields(part);
+        let bound: Vec<String> = bound_queries(part_fields);
+        let rec_fields: Vec<String> = record_queries(part_fields);
+        let reader = match PartReader::new(&part.reader, &rec_fields, &bound, &self.limits) {
             Ok(reader) => reader,
             Err(message) => {
                 failures.push(site.failure(AnalysisFailureKind::Evaluation, None, message));
@@ -166,7 +171,14 @@ impl Evaluator<'_> {
                 },
                 _ => None,
             };
-            let rows = match Rows::new(self, site, relation, (index, reader.format()), &resource) {
+            let rows = match Rows::new(
+                self,
+                site,
+                relation,
+                part_fields,
+                (index, reader.format()),
+                &resource,
+            ) {
                 Ok(rows) => rows,
                 Err(limit) => {
                     failures.push_limit(limit_reached(&limit));
@@ -175,6 +187,7 @@ impl Evaluator<'_> {
             };
             let result = match &reader {
                 PartReader::Entries(_) => rows.entries(&output, out),
+                PartReader::Records(_) => rows.records(&output, out),
                 PartReader::Read {
                     read,
                     optional,
@@ -430,11 +443,24 @@ impl Evaluator<'_> {
     }
 }
 
-/// The `bound:` paths `relation`'s fields read, each once.
-fn bound_queries(relation: &RelationDef) -> Vec<String> {
+/// The `bound:` paths `fields` read, each once.
+fn bound_queries(fields: &[(String, FieldDef)]) -> Vec<String> {
     let mut queries: Vec<String> = Vec::new();
-    for (_, field) in &relation.fields {
+    for (_, field) in fields {
         if let FieldSource::Bound { query, .. } = &field.source
+            && !queries.contains(query)
+        {
+            queries.push(query.clone());
+        }
+    }
+    queries
+}
+
+/// The `record:` subpaths `fields` read, each once.
+fn record_queries(fields: &[(String, FieldDef)]) -> Vec<String> {
+    let mut queries: Vec<String> = Vec::new();
+    for (_, field) in fields {
+        if let FieldSource::Record { query, .. } = &field.source
             && !queries.contains(query)
         {
             queries.push(query.clone());
@@ -446,6 +472,7 @@ fn bound_queries(relation: &RelationDef) -> Vec<String> {
 /// How one part decodes a resource.
 enum PartReader {
     Entries(EntryValuesAdapter),
+    Records(RecordsAdapter),
     Read {
         adapter: ExtractAdapter,
         read: Read,
@@ -461,11 +488,21 @@ enum PartReader {
 }
 
 impl PartReader {
-    fn new(reader: &Reader, bound: &[String], limits: &Limits) -> Result<Self, String> {
+    fn new(
+        reader: &Reader,
+        rec_fields: &[String],
+        bound: &[String],
+        limits: &Limits,
+    ) -> Result<Self, String> {
         match reader {
             Reader::Entries(Entries { format, at, leaves }) => {
                 EntryValuesAdapter::new(entries_format(*format), at, *leaves, bound)
                     .map(Self::Entries)
+                    .map_err(|error| error.to_string())
+            }
+            Reader::Records(Records { format, at }) => {
+                RecordsAdapter::new(entries_format(*format), at, rec_fields, bound)
+                    .map(Self::Records)
                     .map_err(|error| error.to_string())
             }
             Reader::Read { read, optional } => {
@@ -510,6 +547,7 @@ impl PartReader {
     fn adapter(&self) -> &dyn Adapter {
         match self {
             Self::Entries(adapter) => adapter,
+            Self::Records(adapter) => adapter,
             Self::Read { adapter, .. } => adapter,
         }
     }
@@ -517,6 +555,7 @@ impl PartReader {
     fn format(&self) -> Option<Format> {
         match self {
             Self::Entries(adapter) => Some(adapter.format()),
+            Self::Records(adapter) => Some(adapter.format()),
             Self::Read { read, .. } => read_format(read),
         }
     }
@@ -615,6 +654,9 @@ struct Rows<'r> {
     /// names nothing it selects ([`Site`]).
     hide_config: bool,
     relation: &'r RelationDef,
+    /// The active fields for this part (per-part `fields:` in a mixed-reader
+    /// `union:`, or the relation's shared `fields:`), in canonical column order.
+    fields: &'r [(String, FieldDef)],
     /// The part's index in the relation.
     part: u32,
     /// What the part reads its entries' spans as: an `entries:` part's
@@ -713,12 +755,13 @@ impl<'r> Rows<'r> {
         evaluator: &'r Evaluator<'r>,
         site: &Site,
         relation: &'r RelationDef,
+        fields: &'r [(String, FieldDef)],
         (part, format): (u32, Option<Format>),
         resource: &'r Resource,
     ) -> Result<Self, LimitExceeded> {
         let mut tokens: [Option<Value>; 6] = Default::default();
         let mut paths = None;
-        for (_, field) in &relation.fields {
+        for (_, field) in fields {
             let FieldSource::Path(token) = field.source else {
                 continue;
             };
@@ -736,6 +779,7 @@ impl<'r> Rows<'r> {
             hide_keys: site.keys_sensitive,
             hide_config: site.sensitive,
             relation,
+            fields,
             part,
             format,
             resource,
@@ -799,10 +843,10 @@ impl<'r> Rows<'r> {
                 by_query.entry(query).or_default().push(row);
             }
         }
-        let mut cells = Vec::with_capacity(self.relation.fields.len());
+        let mut cells = Vec::with_capacity(self.fields.len());
         let mut skip_resource = false;
         let mut first_missing_err: Option<String> = None;
-        for (name, field) in &self.relation.fields {
+        for (name, field) in self.fields {
             let FieldSource::Bound {
                 query,
                 optional,
@@ -934,8 +978,139 @@ impl<'r> Rows<'r> {
     /// Take the cells of one row before it is built.
     fn take_row(&self) -> Result<(), Stop> {
         self.evaluator
-            .take_cells(self.relation.fields.len().max(1))
+            .take_cells(self.fields.len().max(1))
             .map_err(Stop::Limit)
+    }
+
+    /// A `records:` part's rows in one resource (ADR-0050 D8, #592). Returns
+    /// `Ok(false)` when an optional `bound:` field with `on_missing: skip`
+    /// skipped the resource.
+    fn records(&self, output: &AdapterOutput, out: &mut RelationRows) -> Result<bool, Stop> {
+        let bound = match self.bound_cells(output)? {
+            BoundCells::SkipResource => return Ok(false),
+            BoundCells::Cells(cells) => cells,
+        };
+        self.at_selects_objects(output)?;
+        let mut by_rec_query: HashMap<(u32, &str), Vec<&Row>> = HashMap::new();
+        for row in &output.rows {
+            if let Some(query) = row
+                .label
+                .as_deref()
+                .and_then(|label| label.strip_prefix(records::RECORD_LABEL))
+            {
+                by_rec_query
+                    .entry((row.ordinal, query))
+                    .or_default()
+                    .push(row);
+            }
+        }
+        for header in output
+            .rows
+            .iter()
+            .filter(|row| row.label.as_deref() == Some(records::REC_LABEL))
+        {
+            self.take_row()?;
+            let provenance = self.provenance(header.pointer.clone(), header.ordinal, false)?;
+            let mut cells = Vec::with_capacity(self.fields.len());
+            for (position, (name, field)) in self.fields.iter().enumerate() {
+                match &field.source {
+                    FieldSource::Path(token) => cells.push(Cell {
+                        value: Some(self.token(*token)),
+                        at: Arc::clone(&provenance),
+                        span: None,
+                        path: None,
+                    }),
+                    FieldSource::Bound { .. } => {
+                        cells.push(bound[position].clone().expect("a bound field's cell"));
+                    }
+                    FieldSource::Record { query, optional } => {
+                        let matches = by_rec_query
+                            .get(&(header.ordinal, query.as_str()))
+                            .map_or(&[][..], Vec::as_slice);
+                        cells.push(self.record_cell(
+                            name,
+                            query,
+                            *optional,
+                            matches,
+                            &provenance,
+                        )?);
+                    }
+                    _ => return Err(wrong_source(name, field, "a `records:` row").into()),
+                }
+            }
+            out.rows.push(super::FieldRow {
+                cells,
+                at: provenance,
+            });
+        }
+        Ok(true)
+    }
+
+    /// Build one `record: <subpath>` cell for a matched record element.
+    fn record_cell(
+        &self,
+        name: &str,
+        query: &str,
+        optional: bool,
+        matches: &[&Row],
+        provenance: &Arc<Provenance>,
+    ) -> Result<Cell, Stop> {
+        let row = match matches {
+            [] if optional => {
+                return Ok(Cell {
+                    value: None,
+                    span: None,
+                    at: Arc::clone(provenance),
+                    path: None,
+                });
+            }
+            [] => {
+                return Err(format!(
+                    "`{name}` (`record: {query}`) matches nothing in record {}; fix the path, \
+                     narrow `records.at`, or mark the field `optional: true`",
+                    place(provenance.pointer.as_ref(), self.hide_keys)
+                )
+                .into());
+            }
+            [one] => *one,
+            [first, second, ..] => {
+                return Err(format!(
+                    "`{name}` (`record: {query}`) matches more than once ({} and {}); a record \
+                     field path matches at most once per element",
+                    place(first.pointer.as_ref(), self.hide_keys),
+                    place(second.pointer.as_ref(), self.hide_keys),
+                )
+                .into());
+            }
+        };
+        let value = match &row.state {
+            RowState::Value(value) => value.clone(),
+            RowState::Error(kind) if kind.as_ref() == entry_values::ARRAY_NUMBER => {
+                return Err(format!(
+                    "`{name}` (`record: {query}`) selects {kind} {}, whose lexeme alint does not \
+                     keep (`1.10` would read as `1.1`); bind an object member instead",
+                    place(row.pointer.as_ref(), self.hide_keys)
+                )
+                .into());
+            }
+            RowState::Error(kind) => {
+                return Err(format!(
+                    "`{name}` (`record: {query}`) selects {kind} {}; a field holds a scalar \
+                     (null, a boolean, a number or a string), so bind a path that selects one",
+                    place(row.pointer.as_ref(), self.hide_keys)
+                )
+                .into());
+            }
+            RowState::Key | RowState::Missing => {
+                unreachable!("a record field row holds a value or an error")
+            }
+        };
+        Ok(Cell {
+            span: self.value_span(row, &value),
+            value: Some(value),
+            at: Arc::clone(provenance),
+            path: None,
+        })
     }
 
     /// An `entries:` part's rows in one resource. Returns `Ok(false)` when an
@@ -962,12 +1137,12 @@ impl<'r> Rows<'r> {
                 .as_ref()
                 .expect("an entry row's key path");
             let mut derived = Derived::default();
-            let mut cells = Vec::with_capacity(self.relation.fields.len());
+            let mut cells = Vec::with_capacity(self.fields.len());
             // The key's span, made once for the cells of the entry that
             // place at its key.
             let key_span = std::cell::OnceCell::new();
             let key_span = || key_span.get_or_init(|| self.key_span(row, pointer)).clone();
-            for (position, (name, field)) in self.relation.fields.iter().enumerate() {
+            for (position, (name, field)) in self.fields.iter().enumerate() {
                 let cell = |value: Value, span: Option<Span>| Cell {
                     value: Some(value),
                     at: Arc::clone(&provenance),
@@ -983,7 +1158,7 @@ impl<'r> Rows<'r> {
                         cells.push(bound[position].clone().expect("a bound field's cell"));
                         continue;
                     }
-                    FieldSource::Value | FieldSource::Side(..) => {
+                    FieldSource::Value | FieldSource::Record { .. } | FieldSource::Side(..) => {
                         return Err(wrong_source(name, field, "an `entries:` row").into());
                     }
                     FieldSource::EntryKey => (KEY, &field.source),
@@ -1114,6 +1289,7 @@ impl<'r> Rows<'r> {
             }
             FieldSource::Path(_)
             | FieldSource::Bound { .. }
+            | FieldSource::Record { .. }
             | FieldSource::Value
             | FieldSource::Side(..) => unreachable!("an `entry.*` source"),
         })
@@ -1137,7 +1313,7 @@ impl<'r> Rows<'r> {
                 BoundCells::SkipResource => return Ok(false),
                 BoundCells::Cells(cells) => cells,
             },
-            None => vec![None; self.relation.fields.len()],
+            None => vec![None; self.fields.len()],
         };
         if !output.non_strings.is_empty() {
             let kinds = non_string_kinds(output);
@@ -1167,7 +1343,6 @@ impl<'r> Rows<'r> {
             });
         }
         let value_sensitive = self
-            .relation
             .fields
             .iter()
             .any(|(name, field)| field.source == FieldSource::Value && self.sensitive(name));
@@ -1210,8 +1385,8 @@ impl<'r> Rows<'r> {
                 .as_ref()
                 .zip(reading)
                 .map(|(value, reading)| Span::Read(ReadSpan::new(reading, ordinal, value)));
-            let mut cells = Vec::with_capacity(self.relation.fields.len());
-            for (position, (name, field)) in self.relation.fields.iter().enumerate() {
+            let mut cells = Vec::with_capacity(self.fields.len());
+            for (position, (name, field)) in self.fields.iter().enumerate() {
                 let (value, span) = match &field.source {
                     FieldSource::Path(token) => (Some(self.token(*token)), None),
                     FieldSource::Value => (value.clone(), value_span.clone()),
@@ -1250,6 +1425,7 @@ fn wrong_source(name: &str, field: &FieldDef, row: &str) -> String {
         FieldSource::Value => "value",
         FieldSource::Side(..) => "a join side's field",
         FieldSource::Bound { .. } => "bound:",
+        FieldSource::Record { .. } => "record:",
         FieldSource::Path(_) => "a path token",
         _ => "an `entry.*` source",
     };

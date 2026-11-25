@@ -66,10 +66,10 @@ enum Assertion {
         key: Vec<String>,
         determines: Vec<String>,
     },
-    /// `equal` within groups (`group_by:` or the relation).
+    /// `equal` within groups (`group_by:` empty = whole relation).
     EqualGroups {
         field: String,
-        group_by: Option<String>,
+        group_by: Vec<String>,
     },
     /// `equal` against the one row whose fields hold these literals.
     EqualSource {
@@ -80,25 +80,33 @@ enum Assertion {
     EqualField { field: String, other: String },
     /// `set`.
     Set(Box<SetAssertion>),
+    /// `reference`: single-key or composite-key foreign key (ADR-0050 D1).
+    Reference(Box<ReferenceAssertion>),
+    /// `count`: row or distinct-value count bounds (ADR-0050 D2).
+    Count(Box<CountAssertion>),
+    /// `compare`: pairwise comparison under exact, lexical, or numeric
+    /// ordering (ADR-0050 D4).
+    Compare(Box<CompareAssertion>),
 }
 
 /// A `set` assertion: each group's set of `field`'s values against `target`.
 #[derive(Debug, Clone)]
 struct SetAssertion {
     field: String,
-    /// The group of each row; without it, the relation is one group.
-    group_by: Option<String>,
-    /// When `group_by:` is `path` or a path token: every resource the
-    /// relation reads forms its group, rows or not.
-    resource_groups: Option<ResourceGroups>,
-    /// When `group_by:` reads `entry.root`: single-root stub files removed by
-    /// `strip-root` (`fr:`, `fr: {}`, `fr: []`) still form zero-row groups
-    /// anchored at the stub file (#598).
+    /// The grouping field(s); empty means the relation is one group.
+    group_by: Vec<String>,
+    /// When every `group_by` field is a path token: one `ResourceGroups` entry
+    /// per grouping field so every resource forms a zero-row group.
+    resource_groups: Vec<ResourceGroups>,
+    /// When `group_by` is non-empty, every field derives from `entry.root` or
+    /// a path token, and at least one derives from `entry.root`: single-root
+    /// stub files removed by `strip-root` (`fr:`, `fr: {}`, `fr: []`) still
+    /// form zero-row groups anchored at the stub file (#598).
     stub_root_groups: bool,
     target: SetTarget,
     mode: SetMode,
     /// `groups:`: the groups that must exist, rows or not (`equal_to:` only).
-    groups: Vec<Value>,
+    groups: Vec<Vec<Value>>,
     /// `plurals: cldr`: CLDR plural groups of the key paths merge.
     plurals: bool,
 }
@@ -106,15 +114,118 @@ struct SetAssertion {
 /// The set each group is compared with.
 #[derive(Debug, Clone)]
 enum SetTarget {
-    /// The reference group: the rows whose `group_by:` value is this.
-    Group(Value),
-    /// Every value of `field` across the rows of `relation`, which the
-    /// config names as `written` (`names`, or `alias.names`).
+    /// The reference group: the rows whose `group_by:` field(s) hold these
+    /// values.
+    Group(Vec<Value>),
+    /// Inline non-empty list of scalar literals (ADR-0050 D3).
+    Values(Vec<Value>),
+    /// Every value of `field` across `relation` (optionally partitioned by
+    /// `group_by:` of matching arity), which the config names as `written`.
     Relation {
         relation: RelationId,
         field: String,
+        group_by: Vec<String>,
+        all_target_groups: bool,
         written: String,
     },
+}
+
+/// A `reference` foreign-key assertion (ADR-0050 D1).
+#[derive(Debug, Clone)]
+struct ReferenceAssertion {
+    fields: Vec<String>,
+    target: RelationId,
+    target_fields: Vec<String>,
+    written: String,
+    skip_missing: bool,
+}
+
+/// A unified `count` assertion (ADR-0050 D2).
+#[derive(Debug, Clone)]
+struct CountAssertion {
+    group_by: Vec<String>,
+    resource_groups: Vec<ResourceGroups>,
+    stub_root_groups: bool,
+    field: Option<String>,
+    min: Option<u64>,
+    max: Option<u64>,
+    exact: Option<u64>,
+    groups: Vec<Vec<Value>>,
+}
+
+/// A `compare` assertion (ADR-0050 D4).
+#[derive(Debug, Clone)]
+struct CompareAssertion {
+    field: String,
+    op: CompareOp,
+    order: CompareOrder,
+    target: CompareTarget,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompareOp {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
+impl CompareOp {
+    const fn key(self) -> &'static str {
+        match self {
+            Self::Eq => "eq",
+            Self::Ne => "ne",
+            Self::Lt => "lt",
+            Self::Le => "le",
+            Self::Gt => "gt",
+            Self::Ge => "ge",
+        }
+    }
+
+    const fn symbol(self) -> &'static str {
+        match self {
+            Self::Eq => "==",
+            Self::Ne => "!=",
+            Self::Lt => "<",
+            Self::Le => "<=",
+            Self::Gt => ">",
+            Self::Ge => ">=",
+        }
+    }
+
+    fn matches(self, ord: std::cmp::Ordering) -> bool {
+        use std::cmp::Ordering::{Equal, Greater, Less};
+        match self {
+            Self::Eq => ord == Equal,
+            Self::Ne => ord != Equal,
+            Self::Lt => ord == Less,
+            Self::Le => matches!(ord, Less | Equal),
+            Self::Gt => ord == Greater,
+            Self::Ge => matches!(ord, Greater | Equal),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompareOrder {
+    Exact,
+    Lexical,
+    Numeric,
+}
+
+#[derive(Debug, Clone)]
+enum CompareTarget {
+    Field(String),
+    Value(CompareLiteral),
+    Row(Vec<(String, Value)>),
+}
+
+#[derive(Debug, Clone)]
+enum CompareLiteral {
+    Scalar(Value),
+    Number(String),
 }
 
 /// How a `set` grouped by a path token gives a resource its group: the
@@ -159,10 +270,10 @@ impl<'r> CounterpartIndex<'r> {
 }
 
 impl ResourceGroups {
-    fn group_of(&self, resource: &Resource) -> String {
-        let mut text = eval::path_token(resource, self.token);
+    fn group_of(&self, resource: &Resource) -> Option<String> {
+        let mut text = Some(eval::path_token(resource, self.token));
         for transform in &self.transforms {
-            text = transform.apply(&text);
+            text = text.and_then(|value| transform.apply_optional(&value));
         }
         text
     }
@@ -275,11 +386,18 @@ fn build_rule(spec: &RuleSpec) -> Result<ConstraintRule> {
         checker.message(message, &assertion)?;
     }
     let mut inputs = vec![input];
-    if let Assertion::Set(set) = &assertion
-        && let SetTarget::Relation { relation, .. } = &set.target
-        && *relation != input
-    {
-        inputs.push(*relation);
+    match &assertion {
+        Assertion::Set(set) => {
+            if let SetTarget::Relation { relation, .. } = &set.target
+                && *relation != input
+            {
+                inputs.push(*relation);
+            }
+        }
+        Assertion::Reference(reference) if reference.target != input => {
+            inputs.push(reference.target);
+        }
+        _ => {}
     }
     let trigger = TriggerScope::of(&plan, &inputs);
     Ok(ConstraintRule {
@@ -431,7 +549,7 @@ impl Rule for ConstraintRule {
         match &self.assertion {
             Assertion::Unique { key, determines } => run.unique(key, determines),
             Assertion::EqualGroups { field, group_by } => {
-                run.equal_groups(field, group_by.as_deref());
+                run.equal_groups(field, group_by);
             }
             Assertion::EqualSource { field, row } => run.equal_source(field, row),
             Assertion::EqualField { field, other } => run.equal_field(field, other),
@@ -441,14 +559,28 @@ impl Rule for ConstraintRule {
                         let at = self.inputs.iter().position(|id| id == relation);
                         &outcomes[at.expect("the builder lists the relation as an input")]
                     }
-                    SetTarget::Group(_) => rows,
+                    SetTarget::Group(_) | SetTarget::Values(_) => rows,
                 };
                 // The resources a group may sit at: those `where:` may keep
                 // a row of, as their paths alone decide.
-                let kept = (set.group_by.is_none() || set.resource_groups.is_some())
+                let kept = (set.group_by.is_empty() || !set.resource_groups.is_empty())
                     .then(|| eval::resources_kept(&self.plan, self.inputs[0], rows, ctx));
                 run.set(set, other, kept.as_deref());
             }
+            Assertion::Reference(reference) => {
+                let at = self
+                    .inputs
+                    .iter()
+                    .position(|id| *id == reference.target)
+                    .expect("the builder lists the target relation as an input");
+                run.reference(reference, &outcomes[at]);
+            }
+            Assertion::Count(count) => {
+                let kept = (count.group_by.is_empty() || !count.resource_groups.is_empty())
+                    .then(|| eval::resources_kept(&self.plan, self.inputs[0], rows, ctx));
+                run.count(count, kept.as_deref());
+            }
+            Assertion::Compare(compare) => run.compare(compare),
         }
         reported.extend(run.finish(skipped));
         Ok(reported)

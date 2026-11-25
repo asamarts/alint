@@ -209,29 +209,15 @@ impl Evaluator<'_> {
                     Some(FieldSource::EntryRoot)
                 )
             });
-        for (field, transforms) in &relation.transforms {
-            let position = rows.field(field)?;
-            let applies_to_stubs = retain_stubs
-                && field_origin_source(self.plan, id, field).is_some_and(|src| {
-                    matches!(
-                        src,
-                        FieldSource::EntryRoot | FieldSource::Path(_) | FieldSource::Bound { .. }
-                    )
-                });
-            for transform in transforms {
-                match string_transform(*transform) {
-                    Some(transform) => {
-                        self.transform_field(site, &mut rows, position, field, transform, failures);
-                        if applies_to_stubs && failures.is_empty() {
-                            self.transform_rows(
-                                site, &mut stubs, position, field, transform, failures,
-                            );
-                        }
-                    }
-                    None => self.strip_root(site, &mut rows, &stubs, position, field, failures),
-                }
-            }
-        }
+        self.apply_transforms(
+            site,
+            id,
+            relation,
+            retain_stubs,
+            &mut rows,
+            &mut stubs,
+            failures,
+        )?;
         if !failures.is_empty() {
             return None;
         }
@@ -298,6 +284,58 @@ impl Evaluator<'_> {
         }
         rows.rows = kept;
         Some(rows)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn apply_transforms(
+        &self,
+        site: &Site,
+        id: RelationId,
+        relation: &RelationDef,
+        retain_stubs: bool,
+        rows: &mut RelationRows,
+        stubs: &mut [FieldRow],
+        failures: &mut Failures,
+    ) -> Option<()> {
+        for (field, transforms) in &relation.transforms {
+            let position = rows.field(field)?;
+            let field_sensitive = rows.fields[position].sensitive;
+            let applies_to_stubs = retain_stubs
+                && field_origin_source(self.plan, id, field).is_some_and(|src| {
+                    matches!(
+                        src,
+                        FieldSource::EntryRoot | FieldSource::Path(_) | FieldSource::Bound { .. }
+                    )
+                });
+            for transform in transforms {
+                match string_transform(transform) {
+                    Some(transform) => {
+                        self.transform_field(
+                            site,
+                            rows,
+                            position,
+                            field,
+                            field_sensitive,
+                            &transform,
+                            failures,
+                        );
+                        if applies_to_stubs && failures.is_empty() {
+                            self.transform_rows(
+                                site,
+                                stubs,
+                                position,
+                                field,
+                                field_sensitive,
+                                &transform,
+                                failures,
+                            );
+                        }
+                    }
+                    None => self.strip_root(site, rows, stubs, position, field, failures),
+                }
+            }
+        }
+        Some(())
     }
 
     /// Each `where:` predicate, ready to test a row, in the order
@@ -575,13 +613,15 @@ impl Evaluator<'_> {
     /// Apply one string transform to the field at `position` of every row. A
     /// value it does not change stays shared, and rows that share a value
     /// share what it becomes; each new text takes its bytes from the run.
+    #[allow(clippy::too_many_arguments)]
     fn transform_field(
         &self,
         site: &Site,
         rows: &mut RelationRows,
         position: usize,
         field: &str,
-        string_transform: StringTransform,
+        field_sensitive: bool,
+        string_transform: &StringTransform,
         failures: &mut Failures,
     ) {
         self.transform_rows(
@@ -589,6 +629,7 @@ impl Evaluator<'_> {
             &mut rows.rows,
             position,
             field,
+            field_sensitive,
             string_transform,
             failures,
         );
@@ -596,43 +637,80 @@ impl Evaluator<'_> {
 
     /// Apply one string transform to the field at `position` of every row in
     /// `target`.
+    #[allow(clippy::too_many_arguments)]
     fn transform_rows(
         &self,
         site: &Site,
         target: &mut [FieldRow],
         position: usize,
         field: &str,
-        string_transform: StringTransform,
+        field_sensitive: bool,
+        string_transform: &StringTransform,
         failures: &mut Failures,
     ) {
         // Each text transformed, by the text it was, while the field is.
-        let mut done: HashMap<Arc<str>, Arc<str>> = HashMap::new();
+        let mut done: HashMap<Arc<str>, Option<Arc<str>>> = HashMap::new();
         for row in target {
             let cell = &mut row.cells[position];
             match &cell.value {
                 None => {}
                 Some(Value::String(text)) => {
                     let became = if let Some(became) = done.get(text) {
-                        Arc::clone(became)
+                        became.clone()
                     } else {
-                        let applied = string_transform.apply(text);
-                        let became: Arc<str> = if applied == **text {
-                            Arc::clone(text)
-                        } else {
-                            if let Err(limit) = self.take_bytes(applied.len()) {
-                                failures.push_limit(site.failure(
-                                    AnalysisFailureKind::Evaluation,
-                                    None,
-                                    super::limit_reached(&limit),
-                                ));
-                                return;
+                        let became: Option<Arc<str>> = match string_transform.apply_optional(text) {
+                            Some(applied) if applied == **text => Some(Arc::clone(text)),
+                            Some(applied) => {
+                                if let Err(limit) = self.take_bytes(applied.len()) {
+                                    failures.push_limit(site.failure(
+                                        AnalysisFailureKind::Evaluation,
+                                        None,
+                                        super::limit_reached(&limit),
+                                    ));
+                                    return;
+                                }
+                                Some(applied.into())
                             }
-                            applied.into()
+                            None => None,
                         };
-                        done.insert(Arc::clone(text), Arc::clone(&became));
+                        done.insert(Arc::clone(text), became.clone());
                         became
                     };
-                    cell.value = Some(Value::String(became));
+                    match became {
+                        Some(became) => cell.value = Some(Value::String(became)),
+                        None => {
+                            if let StringTransform::Split {
+                                on,
+                                part,
+                                required: true,
+                            } = string_transform
+                            {
+                                let detail = if field_sensitive {
+                                    format!(
+                                        "`transform.{field}`: required `split` part is out of \
+                                         range{}",
+                                        at(cell, site.keys_sensitive)
+                                    )
+                                } else {
+                                    format!(
+                                        "`transform.{field}`: `split` on {} part {part} is out \
+                                         of range{}; set `required: false` to emit a missing \
+                                         cell instead",
+                                        quoted(on, true),
+                                        at(cell, site.keys_sensitive)
+                                    )
+                                };
+                                failures.push(site.failure(
+                                    AnalysisFailureKind::Evaluation,
+                                    Some(resource_of(cell)),
+                                    detail,
+                                ));
+                            } else {
+                                cell.value = None;
+                                cell.span = None;
+                            }
+                        }
+                    }
                 }
                 Some(other) => {
                     failures.push(site.failure(
@@ -676,7 +754,22 @@ fn path_fields<'p>(
     let mut fields = HashMap::new();
     'fields: for (name, field) in &relation.fields {
         let from = match (&field.source, &relation.rows) {
-            (FieldSource::Path(token), _) => Some((*token, Vec::new())),
+            (FieldSource::Path(token), _) if !relation.uses_part_fields() => {
+                Some((*token, Vec::new()))
+            }
+            (_, Rows::Union(_)) if relation.uses_part_fields() => {
+                let sources = relation.field_sources(name);
+                match sources.first().map(|f| &f.source) {
+                    Some(FieldSource::Path(token))
+                        if sources
+                            .iter()
+                            .all(|f| f.source == FieldSource::Path(*token)) =>
+                    {
+                        Some((*token, Vec::new()))
+                    }
+                    _ => None,
+                }
+            }
             (FieldSource::Side(side, copied), Rows::Join(join)) if *side != join.unique => {
                 inner.get(copied.as_str()).cloned()
             }
@@ -687,7 +780,7 @@ fn path_fields<'p>(
         };
         for transform in relation.transforms_of(name) {
             // The plan check refuses `strip-root` on a path token.
-            let Some(transform) = string_transform(*transform) else {
+            let Some(transform) = string_transform(transform) else {
                 continue 'fields;
             };
             transforms.push(transform);
@@ -770,11 +863,12 @@ impl Evaluator<'_> {
             .map(|resource| {
                 let tokens = super::read::resource_tokens(resource);
                 tested.iter().all(|((token, transforms), test)| {
-                    let mut text = super::read::token_text(&tokens, *token).to_string();
+                    let mut text = Some(super::read::token_text(&tokens, *token).to_string());
                     for transform in transforms {
-                        text = transform.apply(&text);
+                        text = text.and_then(|value| transform.apply_optional(&value));
                     }
-                    test.verdict_of(Some(&Value::String(text.into()))) != Verdict::Fail
+                    let value = text.map(|t| Value::String(t.into()));
+                    test.verdict_of(value.as_ref()) != Verdict::Fail
                 })
             })
             .collect()
@@ -1051,7 +1145,8 @@ impl Test<'_> {
 }
 
 /// Trace a field's underlying non-join [`FieldSource`] through any chain of
-/// `join:` relations.
+/// `join:` relations. For a per-part `union:`, returns `Some` only when every
+/// part agrees on the same underlying source.
 fn field_origin_source<'p>(
     plan: &'p crate::relation::plan::Plan,
     mut id: RelationId,
@@ -1060,6 +1155,11 @@ fn field_origin_source<'p>(
     let mut current = name;
     for _ in 0..=plan.relations.len() {
         let relation = &plan.relation(id).relation;
+        if relation.uses_part_fields() {
+            let sources = relation.field_sources(current);
+            let first = &sources.first()?.source;
+            return sources.iter().all(|f| &f.source == first).then_some(first);
+        }
         let source = &relation.field(current)?.source;
         match (source, &relation.rows) {
             (FieldSource::Side(side, copied), Rows::Join(join)) => {
@@ -1171,13 +1271,22 @@ fn add_root<'r>(roots: &mut Roots<'r>, cell: &'r Cell, path: &'r Pointer) {
 
 /// The string transform `transform` is, or `None` for `strip-root`, which
 /// reads a key path's segments rather than a string.
-const fn string_transform(transform: Transform) -> Option<StringTransform> {
+fn string_transform(transform: &Transform) -> Option<StringTransform> {
     match transform {
         Transform::Trim => Some(StringTransform::Trim),
         Transform::Lower => Some(StringTransform::Lower),
         Transform::SemverMajor => Some(StringTransform::SemverMajor),
         Transform::SemverMinor => Some(StringTransform::SemverMinor),
         Transform::StripRoot => None,
+        Transform::Split { on, part, required } => Some(StringTransform::Split {
+            on: on.clone(),
+            part: *part,
+            required: *required,
+        }),
+        Transform::StripPrefix(prefix) => Some(StringTransform::StripPrefix(prefix.clone())),
+        Transform::StripSuffix(suffixes) => Some(StringTransform::StripSuffix(suffixes.clone())),
+        Transform::Prefix(prefix) => Some(StringTransform::Prefix(prefix.clone())),
+        Transform::Suffix(suffix) => Some(StringTransform::Suffix(suffix.clone())),
     }
 }
 

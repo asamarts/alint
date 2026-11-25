@@ -22,7 +22,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::extract::{ByteSpan, EntryValue, Extract, JsonSyntax};
-use crate::relation::adapters::{entry_table, locate, same_reading, walks};
+use crate::relation::adapters::{entry_table_with_arrays, locate, same_reading, walks};
 use crate::relation::key_paths::EntryTable;
 use crate::relation::limits::Limits;
 use crate::relation::pointer::Segment;
@@ -344,7 +344,7 @@ fn still_held(
             }
         }
         let table = (format != Format::Json)
-            .then(|| entry_table(format, text, &Limits::default()).ok())
+            .then(|| entry_table_with_arrays(format, text, &Limits::default()).ok())
             .flatten();
         if let Some(table) = &table {
             walked = walked.max(table_held(table));

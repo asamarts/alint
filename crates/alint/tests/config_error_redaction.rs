@@ -1262,8 +1262,8 @@ fn a_v2_error_beside_an_unmaskable_value_elsewhere_stays_readable() {
         (
             "    fieldz: { v: value }\n",
             ".alint.yml: `relations.b`: unknown key `fieldz` in a relation; expected one of \
-             `from`, `entries`, `read`, `optional`, `union`, `join`, `fields`, `transform`, \
-             `where`",
+             `from`, `entries`, `records`, `read`, `optional`, `union`, `join`, `fields`, \
+             `transform`, `where`",
         ),
         (
             "    fields: { v: value }\n    transform: { vv: [trim] }\n",

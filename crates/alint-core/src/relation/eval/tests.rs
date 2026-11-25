@@ -70,6 +70,7 @@ fn entries(paths: &str, at: &str) -> Rows {
             at: vec![at.into()],
             leaves: false,
         }),
+        fields: None,
     })
 }
 
@@ -80,6 +81,7 @@ fn read_json(paths: &str, query: &str) -> Rows {
             read: Read::Json(query.into()),
             optional: false,
         },
+        fields: None,
     })
 }
 
@@ -501,6 +503,7 @@ fn lines(paths: &str) -> Part {
             read: Read::Lines { comment: None },
             optional: false,
         },
+        fields: None,
     }
 }
 
@@ -736,6 +739,7 @@ fn a_value_bound_to_many_fields_is_held_once() {
             read: Read::WholeFile,
             optional: false,
         },
+        fields: None,
     });
     let plan = plan(vec![named("wide", whole_file, &fields)]);
     // The decode holds the text and one row: a little more than the text.
@@ -776,6 +780,7 @@ fn a_chain_of_joins_copies_values_without_their_text() {
             read: Read::WholeFile,
             optional: false,
         },
+        fields: None,
     });
     let joins = 100;
     let mut relations = vec![named("base", whole_file, &[("v", FieldSource::Value)])];
@@ -833,6 +838,7 @@ fn a_rows_entry_fields_share_each_source_once() {
             at: vec!["$".into()],
             leaves: true,
         }),
+        fields: None,
     });
     let plan = plan(vec![named("keys", leaves, &fields)]);
     // Two leaves under the long key: the decode holds the key in each
@@ -883,6 +889,7 @@ fn a_chain_of_joins_shares_its_sides_resources() {
             at: vec!["$.nope".into()],
             leaves: false,
         }),
+        fields: None,
     };
     let joins = 1_000;
     let mut relations = vec![named(
@@ -1046,6 +1053,7 @@ fn rows_that_share_a_key_path_share_what_strip_root_makes_of_it() {
                 at: vec!["$".into()],
                 leaves: true,
             }),
+            fields: None,
         }),
         &[
             ("path", FieldSource::EntryPath),
@@ -1273,6 +1281,7 @@ fn versions() -> NamedRelation {
                 read: Read::Toml("$.package.version".into()),
                 optional: false,
             },
+            fields: None,
         }),
         &[
             ("version", FieldSource::Value),
@@ -1489,6 +1498,7 @@ fn roots(sensitive: bool) -> NamedRelation {
                 at: vec!["$".into()],
                 leaves: true,
             }),
+            fields: None,
         }),
         &[("path", FieldSource::EntryPath)],
     );
@@ -1639,6 +1649,7 @@ fn selector_with_directory_prefix_narrows_index_scan() {
                 read: Read::Json("$.name".into()),
                 optional: false,
             },
+            fields: None,
         }),
         &[("name", FieldSource::Value)],
     );
@@ -1654,3 +1665,6 @@ fn selector_with_directory_prefix_narrows_index_scan() {
 
 #[path = "tests_phase5a.rs"]
 mod phase5a;
+
+#[path = "tests_phase5b.rs"]
+mod phase5b;

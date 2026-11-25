@@ -357,7 +357,7 @@ pub fn keys_sensitive(plan: &Plan, id: RelationId) -> bool {
             continue;
         }
         let relation = &plan.relation(next).relation;
-        if relation.fields.iter().any(|(_, field)| {
+        let is_sensitive_key = |field: &super::plan::FieldDef| {
             field.sensitive
                 && matches!(
                     field.source,
@@ -366,7 +366,19 @@ pub fn keys_sensitive(plan: &Plan, id: RelationId) -> bool {
                         | FieldSource::EntryRoot
                         | FieldSource::EntryPath
                 )
-        }) {
+        };
+        if relation.fields.iter().any(|(_, f)| is_sensitive_key(f)) {
+            return true;
+        }
+        if let super::plan::Rows::Union(parts) = &relation.rows
+            && parts.iter().any(|part| {
+                part.fields
+                    .as_deref()
+                    .into_iter()
+                    .flatten()
+                    .any(|(_, f)| is_sensitive_key(f))
+            })
+        {
             return true;
         }
         stack.extend(ops::reads(relation));

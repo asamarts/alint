@@ -335,6 +335,45 @@ impl RelationDef {
             .map(|(_, field)| field)
     }
 
+    /// Whether a `union:` relation declares per-part `fields:` instead of one
+    /// shared top-level `fields:` map (ADR-0050 D8, #592).
+    #[must_use]
+    pub fn uses_part_fields(&self) -> bool {
+        matches!(
+            &self.rows,
+            Rows::Union(parts) if parts.iter().any(|part| part.fields.is_some())
+        )
+    }
+
+    /// The fields active for `part`: per-part `fields:` when present, else the
+    /// relation's top-level `fields:`.
+    #[must_use]
+    pub fn part_fields<'a>(&'a self, part: &'a Part) -> &'a [(String, FieldDef)] {
+        part.fields.as_deref().unwrap_or(&self.fields)
+    }
+
+    /// Every `FieldDef` declared for `name` across parts (one entry for
+    /// shared-fields relations, one per part for per-part `union:`).
+    #[must_use]
+    pub fn field_sources<'a>(&'a self, name: &str) -> Vec<&'a FieldDef> {
+        if let Rows::Union(parts) = &self.rows
+            && parts.iter().any(|part| part.fields.is_some())
+        {
+            return parts
+                .iter()
+                .filter_map(|part| {
+                    part.fields
+                        .as_deref()
+                        .unwrap_or(&self.fields)
+                        .iter()
+                        .find(|(held, _)| held == name)
+                        .map(|(_, field)| field)
+                })
+                .collect();
+        }
+        self.field(name).into_iter().collect()
+    }
+
     /// The transforms of field `name`, in order (none when it has none).
     #[must_use]
     pub fn transforms_of(&self, name: &str) -> &[Transform] {
@@ -378,17 +417,22 @@ pub enum Rows {
     Join(JoinDef),
 }
 
-/// A selector and how its resources are read: a relation with `entries:` or
-/// `read:`, or one part of a `union:`.
+/// A selector and how its resources are read: a relation with `entries:`,
+/// `records:` or `read:`, or one part of a `union:`.
 #[derive(Debug, Clone)]
 pub struct Part {
     pub from: SelectorRef,
     pub reader: Reader,
+    /// Per-part field bindings in a mixed-reader `union:` (ADR-0050 D8, #592),
+    /// normalized to the first part's field order; `None` when the relation
+    /// declares shared top-level `fields:`.
+    pub fields: Option<Vec<(String, FieldDef)>>,
 }
 
 #[derive(Debug, Clone)]
 pub enum Reader {
     Entries(Entries),
+    Records(Records),
     Read {
         read: Read,
         /// A `read:` that matches nothing yields no row instead of a missing
@@ -404,6 +448,14 @@ pub struct Entries {
     pub format: EntriesFormat,
     pub at: Vec<String>,
     pub leaves: bool,
+}
+
+/// `records:`: one row per object element `at` selects, with arbitrary sibling
+/// scalar subfields read via `record: <JSONPath>` (ADR-0050 D8, #592).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Records {
+    pub format: EntriesFormat,
+    pub at: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -481,6 +533,12 @@ pub enum FieldSource {
         optional: bool,
         on_missing: BoundMissing,
     },
+    /// `record: <JSONPath>`: a scalar subfield read from each `records:`
+    /// element object (ADR-0050 D8, #592).
+    Record {
+        query: String,
+        optional: bool,
+    },
     /// `left.F` or `right.F` in a join's output.
     Side(JoinSide, String),
 }
@@ -495,8 +553,8 @@ pub enum PathToken {
     ParentName,
 }
 
-/// The fixed transforms (ADR-0037 decision 2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Relation transforms (ADR-0037 decision 2, ADR-0050 D8).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Transform {
     Trim,
     /// Trims, then lowercases each character: not Unicode case folding.
@@ -504,6 +562,18 @@ pub enum Transform {
     SemverMajor,
     SemverMinor,
     StripRoot,
+    /// Split on non-empty separator `on` and select 0-based (or negative from
+    /// end) segment `part`; out-of-range emits `Missing` when `!required` or
+    /// fails when `required`.
+    Split {
+        on: String,
+        part: i64,
+        required: bool,
+    },
+    StripPrefix(String),
+    StripSuffix(Vec<String>),
+    Prefix(String),
+    Suffix(String),
 }
 
 /// A row filter's predicate (section 7).
@@ -576,6 +646,7 @@ mod tests {
                         read: Read::WholeFile,
                         optional: false,
                     },
+                    fields: None,
                 }),
                 fields: vec![(
                     "text".into(),

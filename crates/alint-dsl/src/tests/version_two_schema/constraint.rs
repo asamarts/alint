@@ -109,6 +109,9 @@ fn sweep() -> Vec<(&'static str, String)> {
     equal(&mut cases);
     unique(&mut cases);
     set(&mut cases);
+    reference(&mut cases);
+    count(&mut cases);
+    compare(&mut cases);
     cases
 }
 
@@ -139,7 +142,16 @@ fn families(cases: &mut Vec<(&'static str, String)>) {
 
 /// `equal`: `group_by:` and each form of `to:`.
 fn equal(cases: &mut Vec<(&'static str, String)>) {
-    for group_by in [None, Some("dependency"), Some("~"), Some("'not a name'")] {
+    for group_by in [
+        None,
+        Some("dependency"),
+        Some("[dependency]"),
+        Some("[dependency, at]"),
+        Some("[]"),
+        Some("[dependency, dependency]"),
+        Some("~"),
+        Some("'not a name'"),
+    ] {
         for to in [
             None,
             Some("~"),
@@ -196,7 +208,14 @@ fn unique(cases: &mut Vec<(&'static str, String)>) {
 fn set(cases: &mut Vec<(&'static str, String)>) {
     let shapes = [
         "{ group: en }",
+        "{ group: [en, core] }",
+        "{ values: [a, b] }",
+        "{ values: [] }",
+        "{ values: ~ }",
         "{ relation: names, field: name }",
+        "{ relation: deps, field: dependency, group_by: at }",
+        "{ relation: deps, field: dependency, group_by: at, all_target_groups: true }",
+        "{ relation: deps, field: dependency, all_target_groups: true }",
         "{ relation: names }",
         "{ field: name }",
         "{}",
@@ -204,6 +223,7 @@ fn set(cases: &mut Vec<(&'static str, String)>) {
         "{ group: ~ }",
         "{ group: en, field: ~ }",
         "{ group: en, relation: names, field: name }",
+        "{ values: [a], relation: names, field: name }",
     ];
     let targets: [&[&str]; 5] = [
         &[],
@@ -212,15 +232,28 @@ fn set(cases: &mut Vec<(&'static str, String)>) {
         &["disjoint_from"],
         &["equal_to", "subset_of"],
     ];
-    for group_by in [None, Some("locale"), Some("~")] {
+    for group_by in [None, Some("locale"), Some("[locale, name]"), Some("~")] {
         for keys in targets {
             for shape in if keys.is_empty() {
                 &shapes[..1]
             } else {
                 &shapes[..]
             } {
-                for groups in [None, Some("[]"), Some("[fr]"), Some("~"), Some("[fr, fr]")] {
+                for groups in [
+                    None,
+                    Some("[]"),
+                    Some("[fr]"),
+                    Some("[[fr, core]]"),
+                    Some("~"),
+                    Some("[fr, fr]"),
+                ] {
                     for plurals in [None, Some("exact"), Some("cldr"), Some("~")] {
+                        // Skip multi-field group_by vs 1-field target group_by arity
+                        // mismatch (which is builder-only, since JSON Schema cannot
+                        // compare lengths of two arbitrary properties).
+                        if group_by == Some("[locale, name]") && shape.contains("group_by: at") {
+                            continue;
+                        }
                         let mut entries =
                             vec![Some("field: key".to_string()), entry("group_by", group_by)];
                         entries.extend(keys.iter().map(|key| entry(key, Some(shape))));
@@ -229,6 +262,130 @@ fn set(cases: &mut Vec<(&'static str, String)>) {
                         cases.push(("keys", format!("{{ set: {} }}", flow(entries))));
                     }
                 }
+            }
+        }
+    }
+}
+
+/// `reference`: `field:` / `fields:`, `to: { relation, field | fields }`,
+/// and `skip_missing:`.
+fn reference(cases: &mut Vec<(&'static str, String)>) {
+    for src in [
+        (None, None),
+        (Some("dependency"), None),
+        (None, Some("[dependency]")),
+        (None, Some("[dependency, at]")),
+        (Some("dependency"), Some("[dependency]")),
+        (None, Some("[]")),
+        (None, Some("[dependency, dependency]")),
+        (Some("~"), None),
+    ] {
+        for dst in [
+            "{ relation: names, field: name }",
+            "{ relation: deps, fields: [dependency, at] }",
+            "{ relation: names, field: name, fields: [name] }",
+            "{ relation: names }",
+            "{ relation: names, fields: [] }",
+        ] {
+            // Skip source/target arity mismatches (builder-only).
+            let src_len = match src {
+                (Some("dependency"), None) | (None, Some("[dependency]")) => Some(1),
+                (None, Some("[dependency, at]")) => Some(2),
+                _ => None,
+            };
+            let dst_len = if dst == "{ relation: names, field: name }" {
+                Some(1)
+            } else if dst == "{ relation: deps, fields: [dependency, at] }" {
+                Some(2)
+            } else {
+                None
+            };
+            if let (Some(a), Some(b)) = (src_len, dst_len)
+                && a != b
+            {
+                continue;
+            }
+            for skip_missing in [None, Some("false"), Some("true"), Some("~")] {
+                let reference = flow([
+                    entry("field", src.0),
+                    entry("fields", src.1),
+                    entry("to", Some(dst)),
+                    entry("skip_missing", skip_missing),
+                ]);
+                cases.push(("deps", format!("{{ reference: {reference} }}")));
+            }
+        }
+    }
+}
+
+/// `count`: `group_by:`, `field:`, `distinct:`, `min:`, `max:`, `exact:`, `groups:`.
+fn count(cases: &mut Vec<(&'static str, String)>) {
+    for group_by in [None, Some("at"), Some("[at, dependency]"), Some("~")] {
+        for (distinct, field) in [
+            (None, None),
+            (Some("false"), None),
+            (Some("true"), Some("range")),
+            (Some("true"), None),
+            (None, Some("range")),
+            (Some("false"), Some("range")),
+            (Some("~"), None),
+        ] {
+            for bounds in [
+                (None, None, None),
+                (Some("1"), None, None),
+                (None, Some("0"), None),
+                (Some("1"), Some("3"), None),
+                (None, None, Some("0")),
+                (None, None, Some("2")),
+                (Some("1"), None, Some("1")),
+                (None, Some("1"), Some("1")),
+                (Some("-1"), None, None),
+            ] {
+                for groups in [None, Some("[]"), Some("[a]"), Some("[[a, react]]")] {
+                    let count = flow([
+                        entry("group_by", group_by),
+                        entry("field", field),
+                        entry("distinct", distinct),
+                        entry("min", bounds.0),
+                        entry("max", bounds.1),
+                        entry("exact", bounds.2),
+                        entry("groups", groups),
+                    ]);
+                    cases.push(("deps", format!("{{ count: {count} }}")));
+                }
+            }
+        }
+    }
+}
+
+/// `compare`: `field:`, `op:`, `order:`, `to: { field | value | row }`.
+fn compare(cases: &mut Vec<(&'static str, String)>) {
+    for op in ["eq", "ne", "lt", "le", "gt", "ge"] {
+        for order in [
+            None,
+            Some("exact"),
+            Some("lexical"),
+            Some("numeric"),
+            Some("~"),
+        ] {
+            for to in [
+                "{ field: at }",
+                "{ value: '1.0' }",
+                "{ value: true }",
+                "{ value: 42 }",
+                "{ value: ~ }",
+                "{ row: { dependency: react } }",
+                "{ row: {} }",
+                "{}",
+                "{ field: at, value: '1.0' }",
+            ] {
+                let compare = flow([
+                    Some("field: range".to_string()),
+                    entry("op", Some(op)),
+                    entry("order", order),
+                    entry("to", Some(to)),
+                ]);
+                cases.push(("deps", format!("{{ compare: {compare} }}")));
             }
         }
     }
@@ -366,6 +523,11 @@ fn refused_by_both() -> Vec<(&'static str, &'static str, &'static str)> {
             "D",
             "keys",
             "{ set: { field: key, subset_of: { relation: a.b.c, field: name } } }",
+        ),
+        (
+            "D",
+            "deps",
+            "{ reference: { field: dependency, to: { relation: a.b.c, field: name } } }",
         ),
         // E: a field name that is not a name.
         ("E", "deps", "{ equal: { field: 'range!' } }"),

@@ -53,6 +53,7 @@ impl Adapter for TomlRowsAdapter {
             text,
             limits,
             values: false,
+            descend_arrays: false,
             entries: EntryTable::default(),
         };
         walk.document()?;
@@ -76,6 +77,25 @@ impl TomlRowsAdapter {
             text,
             limits,
             values: true,
+            descend_arrays: false,
+            entries: EntryTable::default(),
+        };
+        walk.document()?;
+        Ok(walk.entries)
+    }
+
+    /// Like [`Self::values`], also descending into arrays of tables
+    /// (`[[items]]`) and inline tables inside arrays (`items = [{ a = 1 }]`)
+    /// with `Segment::Index(i)` paths for `records:` extraction (#592).
+    pub(crate) fn values_with_arrays(
+        text: &str,
+        limits: &Limits,
+    ) -> Result<EntryTable, AdapterError> {
+        let mut walk = Walk {
+            text,
+            limits,
+            values: true,
+            descend_arrays: true,
             entries: EntryTable::default(),
         };
         walk.document()?;
@@ -95,6 +115,7 @@ struct Walk<'w> {
     text: &'w str,
     limits: &'w Limits,
     values: bool,
+    descend_arrays: bool,
     entries: EntryTable,
 }
 
@@ -141,17 +162,55 @@ impl Walk<'_> {
         let text = self.text;
         let owned = text_of(key_text, item.as_value());
         self.push(path, span, owned, || item_value(item, text))?;
-        // The walk does not descend an array: what the document holds
-        // below one.
-        self.entries.parsed += match item {
-            Item::Value(Value::Array(_)) | Item::ArrayOfTables(_) => below(item),
-            Item::None | Item::Value(_) | Item::Table(_) => 0,
-        };
+        // When arrays are not descended, charge what the document holds below
+        // them up front.
+        if !self.descend_arrays {
+            self.entries.parsed += match item {
+                Item::Value(Value::Array(_)) | Item::ArrayOfTables(_) => below(item),
+                Item::None | Item::Value(_) | Item::Table(_) => 0,
+            };
+        }
 
         match item {
             Item::Table(table) => self.table(table, path)?,
             Item::Value(Value::InlineTable(inline)) => self.inline_table(inline, path)?,
+            Item::ArrayOfTables(tables) if self.descend_arrays => {
+                for (index, table) in tables.iter().enumerate() {
+                    self.entries.parsed += std::mem::size_of::<Item>();
+                    let elem = self.entries.paths.child(path, Segment::Index(index));
+                    self.table(table, elem)?;
+                }
+            }
+            Item::Value(Value::Array(array)) if self.descend_arrays => {
+                self.array(array, path)?;
+            }
             Item::None | Item::Value(_) | Item::ArrayOfTables(_) => {}
+        }
+        Ok(())
+    }
+
+    /// Descend a TOML array in `records:` mode so inline tables and nested
+    /// arrays inside it record their members' spans and number lexemes.
+    fn array(&mut self, array: &toml_edit::Array, parent: PathId) -> Result<(), AdapterError> {
+        let mut pending: Vec<(PathId, &toml_edit::Array)> = vec![(parent, array)];
+        while let Some((prefix, current)) = pending.pop() {
+            let mut nested = Vec::new();
+            for (index, value) in current.iter().enumerate() {
+                self.entries.parsed += std::mem::size_of::<Item>();
+                match value {
+                    Value::InlineTable(table) => {
+                        let elem = self.entries.paths.child(prefix, Segment::Index(index));
+                        self.inline_table(table, elem)?;
+                    }
+                    Value::Array(inner) => {
+                        let elem = self.entries.paths.child(prefix, Segment::Index(index));
+                        nested.push((elem, inner));
+                    }
+                    Value::String(string) => self.entries.parsed += string.value().len(),
+                    _ => {}
+                }
+            }
+            pending.extend(nested.into_iter().rev());
         }
         Ok(())
     }
@@ -365,6 +424,10 @@ impl Walk<'_> {
             })?;
             if let Value::InlineTable(inner) = value {
                 nested.push((at, inner));
+            } else if self.descend_arrays
+                && let Value::Array(array) = value
+            {
+                self.array(array, at)?;
             }
         }
         Ok(())

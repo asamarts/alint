@@ -21,6 +21,12 @@ use super::ConstraintRule;
 use super::places::{Asked, Placed, Places};
 use super::values::{Key, Kind, Scalar, escaped};
 
+#[path = "compare.rs"]
+mod compare;
+#[path = "count.rs"]
+mod count;
+#[path = "reference.rs"]
+mod reference;
 #[path = "set.rs"]
 mod set;
 
@@ -335,8 +341,15 @@ impl<'r> Run<'r> {
         if named.reads_environment || self.redact_all || self.sensitive(position) {
             format!(" (`{at}` matched nothing)")
         } else {
-            let query = match named.relation.field(&field_name).map(|f| &f.source) {
+            let source = named
+                .relation
+                .part_fields(part)
+                .iter()
+                .find(|(name, _)| name == &field_name)
+                .map(|(_, field)| &field.source);
+            let query = match source {
                 Some(FieldSource::Bound { query, .. }) => format!("bound: {query}"),
+                Some(FieldSource::Record { query, .. }) => format!("record: {query}"),
                 _ => part_text(part),
             };
             format!(" (`{at}`, `{}`, matched nothing)", escaped(&query))
@@ -406,33 +419,73 @@ impl<'r> Run<'r> {
         }
     }
 
-    /// Each row's group: the value of the field at `position`, which must be
+    /// Each row's group across one or more grouping fields: every field must be
     /// present, not null, and of one type in every row.
-    fn groups_by(&mut self, position: usize, option: &str) -> Option<(Groups, Vec<Scalar>)> {
-        let values = self.column(position, option)?;
-        for (row, value) in values.iter().enumerate() {
-            if value.is_null() {
-                let cell = self.cell(row, position);
+    fn groups_by_fields(
+        &mut self,
+        positions: &[usize],
+        option: &str,
+    ) -> Option<(Groups, Vec<Vec<Scalar>>)> {
+        let mut columns = Vec::with_capacity(positions.len());
+        for &position in positions {
+            let values = self.column(position, option)?;
+            for (row, value) in values.iter().enumerate() {
+                if value.is_null() {
+                    let cell = self.cell(row, position);
+                    let message = format!(
+                        "`{option}`: `{}` has no value at {}; every row's group must have one",
+                        self.name(position),
+                        self.located(cell)
+                    );
+                    self.fail(Some(cell.at.resource.path().as_path()), message);
+                    return None;
+                }
+            }
+            let all: Vec<usize> = (0..values.len()).collect();
+            let before = self.failures.len();
+            self.one_type(&all, position, &values, option);
+            if self.failures.len() > before {
+                return None;
+            }
+            columns.push(values);
+        }
+        let mut groups = Groups::new();
+        for row in 0..self.rows.rows.len() {
+            let tuple: Vec<Scalar> = columns.iter().map(|col| col[row].clone()).collect();
+            groups.add(tuple, row);
+        }
+        Some((groups, columns))
+    }
+
+    /// Check that a literal group tuple `tuple` matches the scalar type of each
+    /// grouping column in `group_cols` (non-empty columns only).
+    fn check_group_tuple_types(
+        &mut self,
+        tuple: &[Value],
+        group_at: &[usize],
+        group_cols: &[Vec<Scalar>],
+        option: &str,
+    ) -> bool {
+        for ((&position, col), literal) in group_at.iter().zip(group_cols).zip(tuple) {
+            let literal = Scalar::of_value(literal).expect("the builder takes scalar literals");
+            if col
+                .first()
+                .is_some_and(|value| value.kind() != literal.kind())
+            {
+                let cell = self.cell(0, position);
                 let message = format!(
-                    "`{option}`: `{}` has no value at {}; every row's group must have one",
+                    "`{option}`: the literal is {} and `{}` holds {} at {}; the comparison \
+                     would cross types, so the assertion has no verdict",
+                    literal_type(&literal),
                     self.name(position),
+                    type_of(cell),
                     self.located(cell)
                 );
                 self.fail(Some(cell.at.resource.path().as_path()), message);
-                return None;
+                return false;
             }
         }
-        let all: Vec<usize> = (0..values.len()).collect();
-        let before = self.failures.len();
-        self.one_type(&all, position, &values, option);
-        if self.failures.len() > before {
-            return None;
-        }
-        let mut groups = Groups::new();
-        for (row, value) in values.iter().enumerate() {
-            groups.add(vec![value.clone()], row);
-        }
-        Some((groups, values))
+        true
     }
 
     // ------------------------------------------------------------------
@@ -451,6 +504,31 @@ impl<'r> Run<'r> {
         related: Related,
         reported: Option<usize>,
         compared: Option<(&Scalar, bool)>,
+    ) {
+        let compared = compared.map(|(value, redact)| {
+            if redact {
+                "<redacted>".to_string()
+            } else if value.is_missing() {
+                "<missing>".to_string()
+            } else if matches!(value, Scalar::Null) {
+                "null".to_string()
+            } else {
+                value.text_shown()
+            }
+        });
+        self.report_with_value(at, generated, key, related, reported, compared.as_deref());
+    }
+
+    /// Emit a finding with an optional pre-formatted `{{value}}` placeholder
+    /// string (used by `set` and `reference` findings).
+    fn report_with_value<'p>(
+        &mut self,
+        at: impl Into<Place<'p>>,
+        generated: String,
+        key: Key,
+        related: Related,
+        reported: Option<usize>,
+        compared: Option<&str>,
     ) {
         if self.at_finding_cap() {
             self.suppress_findings(1, false);
@@ -489,27 +567,13 @@ impl<'r> Run<'r> {
     /// The rule's `message:` with each `{{row.FIELD}}` replaced by the
     /// reported row's value of the field (`<redacted>` for a sensitive
     /// field's, and `<no row>` without a reported row) and each `{{value}}`
-    /// replaced by the compared value on `set` findings (#594). Single-pass
-    /// left-to-right scan so substituted data values are never re-expanded.
-    fn render(
-        &self,
-        template: &str,
-        row: Option<&FieldRow>,
-        compared: Option<(&Scalar, bool)>,
-    ) -> String {
+    /// replaced by the compared value on `set` and `reference` findings
+    /// (#594). Single-pass left-to-right scan so substituted data values are
+    /// never re-expanded.
+    fn render(&self, template: &str, row: Option<&FieldRow>, compared: Option<&str>) -> String {
         render_message(template, |inner| {
             if inner == "value" {
-                compared.map(|(value, redact)| {
-                    if redact {
-                        "<redacted>".to_string()
-                    } else if value.is_missing() {
-                        "<missing>".to_string()
-                    } else if matches!(value, Scalar::Null) {
-                        "null".to_string()
-                    } else {
-                        value.text_shown()
-                    }
-                })
+                compared.map(str::to_string)
             } else if let Some(("row", name)) = inner
                 .split_once('.')
                 .map(|(namespace, name)| (namespace.trim(), name.trim()))
@@ -709,21 +773,21 @@ impl<'r> Run<'r> {
         }
     }
 
-    pub(super) fn equal_groups(&mut self, field: &str, group_by: Option<&str>) {
+    pub(super) fn equal_groups(&mut self, field: &str, group_by: &[String]) {
         let Some(field_at) = self.position(field) else {
             return;
         };
-        let groups = match group_by {
-            Some(group_by) => {
-                let Some(group_at) = self.position(group_by) else {
-                    return;
-                };
-                let Some((groups, _)) = self.groups_by(group_at, "assert.equal.group_by") else {
-                    return;
-                };
-                Some((group_at, groups))
-            }
-            None => None,
+        let groups = if group_by.is_empty() {
+            None
+        } else {
+            let Some(group_at) = self.positions(group_by) else {
+                return;
+            };
+            let Some((groups, _)) = self.groups_by_fields(&group_at, "assert.equal.group_by")
+            else {
+                return;
+            };
+            Some((group_at, groups))
         };
         if self.column(field_at, "assert.equal.field").is_none() {
             return;
@@ -736,9 +800,11 @@ impl<'r> Run<'r> {
             return;
         };
         for (value, members) in groups.iter() {
-            let subject = format!("rows with {}", self.describe(&[group_at], value));
+            let subject = format!("rows with {}", self.describe(&group_at, value));
             let mut base = Key::new("equal");
-            base.value(&value[0], self.sensitive(group_at));
+            for (&position, part) in group_at.iter().zip(value) {
+                base.value(part, self.sensitive(position));
+            }
             self.disagreements(members, &[field_at], &subject, &base, "assert.equal.field");
         }
     }
@@ -888,7 +954,9 @@ impl<'r> Run<'r> {
         } else {
             self.describe(&positions, &literal_values)
         };
-        let Some(source) = self.source_row(field_at, &wanted, &source_desc) else {
+        let Some(source) =
+            self.source_row_at(field_at, &wanted, &source_desc, "assert.equal.to.row")
+        else {
             return;
         };
         let Some(expected) = self.scalar(source, field_at, "assert.equal.field") else {
@@ -950,17 +1018,18 @@ impl<'r> Run<'r> {
     /// The one row whose fields at `wanted` hold their literals (described
     /// as `source_desc`), or `None` after a failure: no such row, several, or
     /// a literal of another type than its field's values.
-    fn source_row(
+    fn source_row_at(
         &mut self,
         field_at: usize,
         wanted: &[(usize, Scalar)],
         source_desc: &str,
+        option_prefix: &str,
     ) -> Option<usize> {
         let mut sources = Vec::new();
         for row in 0..self.rows.rows.len() {
             let mut matches = true;
             for (position, literal) in wanted {
-                let option = format!("assert.equal.to.row.{}", self.name(*position));
+                let option = format!("{option_prefix}.{}", self.name(*position));
                 let value = self.scalar(row, *position, &option)?;
                 if value.is_null() {
                     matches = false;
@@ -990,7 +1059,7 @@ impl<'r> Run<'r> {
                 self.fail(
                     None,
                     format!(
-                        "`assert.equal.to.row`: no row has {source_desc}; the source row must \
+                        "`{option_prefix}`: no row has {source_desc}; the source row must \
                          exist"
                     ),
                 );
@@ -999,7 +1068,7 @@ impl<'r> Run<'r> {
             [one] => Some(*one),
             [one, two, ..] => {
                 let message = format!(
-                    "`assert.equal.to.row`: {} rows have {source_desc}, at {} and {}; exactly \
+                    "`{option_prefix}`: {} rows have {source_desc}, at {} and {}; exactly \
                      one source row may",
                     sources.len(),
                     self.located(self.cell(*one, field_at)),
@@ -1161,6 +1230,15 @@ struct Related {
     omitted: usize,
 }
 
+impl Related {
+    fn empty() -> Self {
+        Self {
+            locations: Vec::new(),
+            omitted: 0,
+        }
+    }
+}
+
 /// The rows a finding about `distinct[index]` (a value and the rows with
 /// it, among the distinct values of a comparison) relates to, at most `cap`
 /// of them, each marked when it holds the same value; and how many more it
@@ -1235,6 +1313,7 @@ fn part_text(part: &Part) -> String {
             Read::WholeFile => "read.whole_file".to_string(),
         },
         Reader::Entries(entries) => format!("entries.at: {}", entries.at.join(", ")),
+        Reader::Records(records) => format!("records.at: {}", records.at.join(", ")),
     }
 }
 

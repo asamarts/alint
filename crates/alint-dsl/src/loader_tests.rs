@@ -1120,7 +1120,7 @@ fn a_v2_object_error_that_could_quote_the_environment_is_redacted() {
     assert_eq!(
         error,
         ".alint.yml: `relations.b`: unknown key `colour` in a relation; expected one of `from`, \
-         `entries`, `read`, `optional`, `union`, `join`, `fields`, `transform`, `where`"
+         `entries`, `records`, `read`, `optional`, `union`, `join`, `fields`, `transform`, `where`"
     );
     // And so does one that reads nothing from the environment.
     let error = v2_error(&relation(
@@ -1176,7 +1176,7 @@ fn v2_field_error(yaml: &str) -> String {
 fn a_v2_object_error_beside_an_unmaskable_value_elsewhere_stays_readable() {
     let typo = "  b:\n    from: s\n    read: { json: $.a }\n    fieldz: { v: value }\n";
     let typo_message = ".alint.yml: `relations.b`: unknown key `fieldz` in a relation; expected \
-                        one of `from`, `entries`, `read`, `optional`, `union`, `join`, \
+                        one of `from`, `entries`, `records`, `read`, `optional`, `union`, `join`, \
                         `fields`, `transform`, `where`";
     for elsewhere in [
         "  a:\n    from: s\n    entries: { format: '{{env.FORMAT | default(\"x\")}}', at: $ }\n    \

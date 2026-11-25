@@ -71,12 +71,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (default `skip`, skipping resources that lack the bound path and excluding them from path-token
   `resource_groups`; `missing` keeps the resource's rows with a `Missing` cell while multi-match
   and non-scalar bound results remain analysis failures; #593).
-- `constraint` `set` rules now support `{{value}}` (and `{{ value }}`) in custom `message:`
-  templates for missing, extra, and shared values with single-pass expansion (never re-expanding
-  substituted values), 64-character truncation, invisible-character escaping, and `<redacted>`
-  redaction for sensitive fields, environment-derived relations/literals, and `sensitive: true`
-  rules, rejecting `{{value}}` at load time on `equal` and `unique` assertions while leaving
-  non-alint `{{...}}` tokens literal (#594).
+- `constraint` `set` and `reference` rules now support `{{value}}` (and `{{ value }}`) in custom
+  `message:` templates for missing, extra, shared, and unresolved values with single-pass expansion
+  (never re-expanding substituted values), 64-character truncation, invisible-character escaping,
+  and `<redacted>` redaction for sensitive fields, environment-derived relations/literals, and
+  `sensitive: true` rules, rejecting `{{value}}` at load time on `equal`, `unique`, `count`, and
+  `compare` assertions while leaving non-alint `{{...}}` tokens literal (#594).
+- `version: 2` relations now support `records:` array-of-objects extraction (`format: json | yaml |
+  toml`, `at:` JSONPath or list) with `record: <JSONPath>` (and optional `optional: true`) field
+  sources preserving source spans and numeric lexemes, parameterized string transforms (`split`
+  with positive/negative `part` and `required`, `strip_prefix`, `strip_suffix`, `prefix`, `suffix`),
+  and mixed-reader `union:` per-part `fields:` (ADR-0050 D8, #592).
+- `version: 2` `constraint` rules now support `reference` (single-key and composite-key foreign
+  keys with `skip_missing:`), unified `count` (`min`, `max`, `exact`, `distinct: true` + `field:`,
+  per-row emptiness findings for `max: 0` / `exact: 0`, and `groups:`), orthogonal multi-field
+  `group_by: [...]` across `equal`, `set`, and `count`, per-group cross-relation `set` targets
+  (`to.group_by:`, `all_target_groups: true`), inline literal `set` targets (`values: [...]`), and
+  pairwise `compare` (`eq`, `ne`, `lt`, `le`, `gt`, `ge` under `exact`, `lexical`, or `numeric`
+  ordering, failing loud on `Null`/`Missing` operands; ADR-0050 D1-D4).
 - `constraint` `set` missing-value findings against same-relation `{ group: ... }` targets grouped
   by a path token (`parent_name`, `dir`, `basename`, `stem`, `ext`) now anchor at the unique
   structural counterpart file in the target group whose non-token path components match the

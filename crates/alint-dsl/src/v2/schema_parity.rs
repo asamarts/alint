@@ -29,9 +29,9 @@ use serde_json::Value as Json;
 
 use super::ExtendsEntry;
 use super::decode::{
-    ENTRIES_KEYS, FIELD_KEYS, JOIN_KEYS, MEMBER_KEYS, NAMED_FIELD_SOURCES, PART_KEYS,
-    PREDICATE_KEYS, READ_KEYS, RELATION_KEYS, ROW_SOURCES, SELECTOR_FILTER_KEYS, SELECTOR_KEYS,
-    TRANSFORMS,
+    ENTRIES_KEYS, FIELD_KEYS, JOIN_KEYS, MEMBER_KEYS, NAMED_FIELD_SOURCES, PARAM_TRANSFORMS,
+    PART_KEYS, PREDICATE_KEYS, READ_KEYS, RECORDS_KEYS, RELATION_KEYS, ROW_SOURCES,
+    SELECTOR_FILTER_KEYS, SELECTOR_KEYS, SPLIT_KEYS, TRANSFORMS,
 };
 use super::document::{EXTENDS_ENTRY_KEYS, V2_ONLY_KEYS, v1_keys};
 use super::model::SourceId;
@@ -234,15 +234,24 @@ fn every_object_has_the_keys_the_decode_reads() {
         ("v2_relation", RELATION_KEYS),
         ("v2_union_part", PART_KEYS),
         ("v2_entries", ENTRIES_KEYS),
+        ("v2_records", RECORDS_KEYS),
         ("v2_read", READ_KEYS),
         ("v2_join", JOIN_KEYS),
         ("v2_predicates", PREDICATE_KEYS),
         ("v2_membership", MEMBER_KEYS),
+        ("v2_transform_param", PARAM_TRANSFORMS),
     ] {
         let object = def(name);
         assert_eq!(keys(object), set(list), "`$defs/{name}`");
         assert_eq!(object["additionalProperties"], false, "`$defs/{name}`");
     }
+    let split = &def("v2_transform_param")["properties"]["split"];
+    assert_eq!(
+        keys(split),
+        set(SPLIT_KEYS),
+        "`$defs/v2_transform_param.split`"
+    );
+    assert_eq!(split["additionalProperties"], false);
     for rows in ROW_SOURCES {
         let field = def(&format!("v2_field_{rows}"))["oneOf"][1].clone();
         assert_eq!(keys(&field), set(FIELD_KEYS), "`$defs/v2_field_{rows}`");
@@ -262,8 +271,8 @@ fn the_schema_lists_the_values_the_decode_takes() {
     if !has_schema() {
         return;
     }
-    let transforms = &def("v2_transforms")["additionalProperties"]["items"];
-    assert_eq!(constants(transforms), set(TRANSFORMS));
+    assert_eq!(constants(def("v2_transform_name")), set(TRANSFORMS));
+    assert_eq!(keys(def("v2_transform_param")), set(PARAM_TRANSFORMS));
     let named: BTreeSet<&str> = ["v2_source_path_token", "v2_source_entry", "v2_source_value"]
         .into_iter()
         .flat_map(|name| constants(def(name)))
@@ -298,6 +307,7 @@ fn agree(configs: impl IntoIterator<Item = String>) {
 /// The rows of each kind of relation.
 const ROWS: &[&str] = &[
     "from: s\n    entries: { format: json, at: $ }",
+    "from: s\n    records: { format: yaml, at: '$.items[*]' }",
     "from: s\n    read: { json: $.a }",
     "union:\n      - { from: s, read: { json: $.a } }\n      - { from: s, entries: { format: json, \
      at: $ } }",
@@ -319,6 +329,10 @@ fn the_decode_and_the_schema_agree_on_each_field_source() {
             "bound:$.name",
             "bound:",
             "bound:  ",
+            "record: $.name",
+            "record:$.name",
+            "record:",
+            "record:  ",
             "left.f",
             "right.f_2",
             "left.a.b",
@@ -350,12 +364,37 @@ fn the_decode_and_the_schema_agree_on_each_transform() {
     if !has_schema() {
         return;
     }
-    let mut transforms: Vec<&str> = TRANSFORMS.to_vec();
-    transforms.extend(["cldr-plurals", "upper", "Trim", "semver"]);
+    let mut transforms: Vec<String> = TRANSFORMS.iter().map(|t| format!("'{t}'")).collect();
+    transforms.extend(
+        [
+            "'cldr-plurals'",
+            "'upper'",
+            "'Trim'",
+            "'semver'",
+            "{ split: { on: ':', part: 0 } }",
+            "{ split: { on: ':', part: -1, required: true } }",
+            "{ split: { on: '', part: 0 } }",
+            "{ split: { on: ':' } }",
+            "{ split: { part: 0 } }",
+            "{ split: { on: ':', part: '0' } }",
+            "{ split: { on: ':', part: 0, required: 'yes' } }",
+            "{ strip_prefix: '$' }",
+            "{ strip_prefix: 1 }",
+            "{ strip_suffix: '.singular' }",
+            "{ strip_suffix: ['.singular', '.plural'] }",
+            "{ strip_suffix: [] }",
+            "{ prefix: 'v' }",
+            "{ suffix: '.json' }",
+            "{}",
+            "{ prefix: 'a', suffix: 'b' }",
+            "{ replace: 'x' }",
+        ]
+        .map(String::from),
+    );
     agree(transforms.into_iter().map(|transform| {
         relation(
             &format!(
-                "from: s\n    read: {{ json: $.a }}\n    transform: {{ f: [trim, '{transform}'] }}"
+                "from: s\n    read: {{ json: $.a }}\n    transform: {{ f: [trim, {transform}] }}"
             ),
             "{ f: value }",
         )
@@ -488,6 +527,10 @@ fn the_decode_and_the_schema_agree_on_bound_optional_and_on_missing() {
         "{ f: { source: 'bound: $.name', on_missing: skip } }",
         "{ f: { source: 'bound: $.name', optional: true, on_missing: fail } }",
         "{ f: { source: 'bound: $.name', optional: 'true' } }",
+        "{ f: { source: 'record: $.name', optional: true } }",
+        "{ f: { source: 'record: $.name', optional: false } }",
+        "{ f: { source: 'record: $.name', optional: true, on_missing: skip } }",
+        "{ f: { source: 'record: $.name', on_missing: missing } }",
         "{ f: { source: 'entry.key', optional: true } }",
         "{ f: { source: 'value', optional: true } }",
         "{ f: { source: 'path', optional: true } }",
@@ -497,13 +540,30 @@ fn the_decode_and_the_schema_agree_on_bound_optional_and_on_missing() {
     let rows_all = [
         ROWS[0],
         ROWS[1],
-        "from: s\n    read: { regex: '(x)' }",
         ROWS[2],
+        "from: s\n    read: { regex: '(x)' }",
         ROWS[3],
+        ROWS[4],
     ];
     agree(
         rows_all
             .into_iter()
             .flat_map(|rows| shapes.iter().map(move |fields| relation(rows, fields))),
     );
+}
+
+#[test]
+fn the_decode_and_the_schema_agree_on_mixed_union_part_fields() {
+    if !has_schema() {
+        return;
+    }
+    let configs = [
+        "version: 2\nrelations:\n  r:\n    union:\n      - { from: s, entries: { format: json, at: $ }, fields: { a: entry.key } }\n      - { from: s, read: { json: $.x }, fields: { a: value } }\n",
+        "version: 2\nrelations:\n  r:\n    union:\n      - { from: s, records: { format: yaml, at: '$.items[*]' }, fields: { a: 'record: $.name' } }\n      - { from: s, read: { json: $.x }, fields: { a: value } }\n",
+        "version: 2\nrelations:\n  r:\n    union:\n      - { from: s, entries: { format: json, at: $ }, fields: { a: entry.key } }\n      - { from: s, read: { json: $.x } }\n",
+        "version: 2\nrelations:\n  r:\n    union:\n      - { from: s, entries: { format: json, at: $ }, fields: { a: entry.key } }\n      - { from: s, read: { json: $.x }, fields: { a: value } }\n    fields: { a: path }\n",
+        "version: 2\nrelations:\n  r:\n    union:\n      - { from: s, entries: { format: json, at: $ }, fields: { a: value } }\n      - { from: s, read: { json: $.x }, fields: { a: value } }\n",
+        "version: 2\nrelations:\n  r:\n    union:\n      - { from: s, read: { regex: '(x)' }, fields: { a: 'bound: $.x' } }\n      - { from: s, read: { json: $.x }, fields: { a: value } }\n",
+    ];
+    agree(configs.into_iter().map(String::from));
 }

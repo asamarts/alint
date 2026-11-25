@@ -23,7 +23,7 @@ use std::collections::{HashMap, HashSet};
 use ayaml::Value;
 
 use super::decode::Locus;
-use super::model::{FieldSource, JoinSide, SourceObjects};
+use super::model::{Field, FieldSource, JoinSide, Rows, SourceObjects};
 
 /// What one source's selectors and relations read from the environment, by
 /// name, so marking a source of many objects costs one lookup per object.
@@ -103,23 +103,52 @@ impl Environment {
             };
             relation.reads_environment = environment.reading;
             relation.filters_read_environment = !environment.fields.is_empty();
-            let marked: HashSet<Family<'_>> = relation
-                .fields
-                .iter()
-                .filter(|(field, _)| environment.fields.contains(field))
-                .map(|(_, definition)| family(&definition.source))
-                .collect();
-            let shows: Vec<bool> = relation
-                .fields
-                .iter()
-                .map(|(field, definition)| {
-                    environment.fields.contains(field)
-                        || marked.contains(&family(&definition.source))
-                })
-                .collect();
-            for ((_, definition), shows) in relation.fields.iter_mut().zip(shows) {
-                definition.sensitive |= shows;
+            let mut sensitive_names: HashSet<String> = environment.fields.clone();
+            if let Rows::Union(parts) = &mut relation.rows
+                && parts.iter().any(|part| part.fields.is_some())
+            {
+                // Propagate environment-driven sensitivity across every part's
+                // source families until fixpoint, then sync canonical `fields`.
+                loop {
+                    let before = sensitive_names.len();
+                    for part in parts.iter() {
+                        if let Some(fields) = &part.fields {
+                            propagate_field_family(fields, &mut sensitive_names);
+                        }
+                    }
+                    if sensitive_names.len() == before {
+                        break;
+                    }
+                }
+                for part in parts.iter_mut() {
+                    if let Some(fields) = &mut part.fields {
+                        for (field, definition) in fields.iter_mut() {
+                            definition.sensitive |= sensitive_names.contains(field);
+                        }
+                    }
+                }
+                for (field, definition) in &mut relation.fields {
+                    definition.sensitive |= sensitive_names.contains(field);
+                }
+            } else {
+                propagate_field_family(&relation.fields, &mut sensitive_names);
+                for (field, definition) in &mut relation.fields {
+                    definition.sensitive |= sensitive_names.contains(field);
+                }
             }
+        }
+    }
+}
+
+fn propagate_field_family(fields: &[(String, Field)], sensitive_names: &mut HashSet<String>) {
+    let marked: HashSet<Family<'_>> = fields
+        .iter()
+        .filter(|(field, _)| sensitive_names.contains(field))
+        .map(|(_, definition)| family(&definition.source))
+        .collect();
+    for (field, definition) in fields {
+        if marked.contains(&family(&definition.source)) {
+            sensitive_names.insert(field.clone());
         }
     }
 }
@@ -128,13 +157,15 @@ impl Environment {
 /// filters makes all of its family sensitive: an entry's key, path, parent,
 /// root and value (a key is in its path, its parent's and its root, and a
 /// value is read at its key); a resource's path and its tokens; and fields
-/// bound to one value, one `bound:` path or one side's field.
+/// bound to one value, one `bound:` path, one `record:` path or one side's
+/// field.
 #[derive(Debug, PartialEq, Eq, Hash)]
 enum Family<'a> {
     Entry,
     Path,
     Value,
     Bound(&'a str),
+    Record(&'a str),
     Side(bool, &'a str),
 }
 
@@ -148,6 +179,7 @@ fn family(source: &FieldSource) -> Family<'_> {
         FieldSource::Path(_) => Family::Path,
         FieldSource::Value => Family::Value,
         FieldSource::Bound { query, .. } => Family::Bound(query),
+        FieldSource::Record { query, .. } => Family::Record(query),
         FieldSource::Side(side, field) => Family::Side(*side == JoinSide::Left, field),
     }
 }

@@ -28,21 +28,411 @@
     },
     "ConstraintAssert": {
       "additionalProperties": false,
-      "description": "`assert:`: exactly one of its three keys.",
+      "description": "`assert:`: exactly one of its six keys.",
       "maxProperties": 1,
       "minProperties": 1,
       "properties": {
+        "compare": {
+          "$ref": "#/$defs/ConstraintCompare",
+          "description": "Pairwise row comparison (`eq`, `ne`, `lt`, `le`, `gt`, `ge`) under exact, lexical, or numeric ordering (ADR-0050 D4)."
+        },
+        "count": {
+          "$ref": "#/$defs/ConstraintCount",
+          "description": "Row count or distinct-value count bounds, whole-relation or per group (ADR-0050 D2)."
+        },
         "equal": {
           "$ref": "#/$defs/ConstraintEqual",
           "description": "Rows agree on a field: within each group, with a named source row, or with another field of the same row."
         },
+        "reference": {
+          "$ref": "#/$defs/ConstraintReference",
+          "description": "Every row's key field or composite key tuple resolves to a row in another relation (foreign key, ADR-0050 D1)."
+        },
         "set": {
           "$ref": "#/$defs/ConstraintSet",
-          "description": "The set of a field's values, per group, is equal to, a subset of or disjoint from another set: a group's, or another relation's field's."
+          "description": "The set of a field's values, per group, is equal to, a subset of or disjoint from another set: a group's, another relation's field's, or an inline list of values."
         },
         "unique": {
           "$ref": "#/$defs/ConstraintUnique",
           "description": "No two rows share a key; with `determines:`, rows that share a key agree on the determined fields."
+        }
+      },
+      "type": "object"
+    },
+    "ConstraintCompare": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {
+                "not": {
+                  "required": [
+                    "order"
+                  ]
+                }
+              },
+              {
+                "properties": {
+                  "order": {
+                    "const": "exact"
+                  }
+                }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "op": {
+                "enum": [
+                  "eq",
+                  "ne"
+                ]
+              },
+              "to": {
+                "properties": {
+                  "value": {
+                    "type": [
+                      "string",
+                      "boolean"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "order": {
+                "const": "lexical"
+              }
+            },
+            "required": [
+              "order"
+            ]
+          },
+          "then": {
+            "properties": {
+              "to": {
+                "properties": {
+                  "value": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "order": {
+                "const": "numeric"
+              }
+            },
+            "required": [
+              "order"
+            ]
+          },
+          "then": {
+            "properties": {
+              "to": {
+                "properties": {
+                  "value": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "description": "`assert.compare` (ADR-0050 D4).",
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/v2_name",
+          "description": "Left-hand field to compare."
+        },
+        "op": {
+          "$ref": "#/$defs/ConstraintCompareOp",
+          "description": "Comparison operator: `eq`, `ne`, `lt`, `le`, `gt`, or `ge`."
+        },
+        "order": {
+          "$ref": "#/$defs/ConstraintCompareOrder",
+          "description": "Ordering domain: `exact` (default; `eq`/`ne` only), `lexical`, or `numeric`."
+        },
+        "to": {
+          "$ref": "#/$defs/ConstraintCompareTo",
+          "description": "Right-hand target: another field of the same row, a literal value, or a named source row."
+        }
+      },
+      "required": [
+        "field",
+        "op",
+        "to"
+      ],
+      "type": "object"
+    },
+    "ConstraintCompareOp": {
+      "description": "Comparison operator for `assert.compare`.",
+      "enum": [
+        "eq",
+        "ne",
+        "lt",
+        "le",
+        "gt",
+        "ge"
+      ],
+      "type": "string"
+    },
+    "ConstraintCompareOrder": {
+      "description": "Ordering domain for `assert.compare`.",
+      "enum": [
+        "exact",
+        "lexical",
+        "numeric"
+      ],
+      "type": "string"
+    },
+    "ConstraintCompareTo": {
+      "additionalProperties": false,
+      "description": "`assert.compare.to`: exactly one of `field`, `value`, and `row`.",
+      "maxProperties": 1,
+      "minProperties": 1,
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/v2_name",
+          "description": "Another field of the same row."
+        },
+        "row": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ConstraintLiteral"
+          },
+          "description": "A named source row whose fields hold these literals (matching `equal.to.row`).",
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/v2_name"
+          },
+          "type": "object"
+        },
+        "value": {
+          "$ref": "#/$defs/ConstraintCompareValue",
+          "description": "A literal value (string/bool for `exact`, string for `lexical`, finite number for `numeric`)."
+        }
+      },
+      "type": "object"
+    },
+    "ConstraintCompareValue": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "format": "double",
+          "type": "number"
+        }
+      ]
+    },
+    "ConstraintCount": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "else": {
+            "not": {
+              "required": [
+                "field"
+              ]
+            }
+          },
+          "if": {
+            "properties": {
+              "distinct": {
+                "const": true
+              }
+            },
+            "required": [
+              "distinct"
+            ]
+          },
+          "then": {
+            "required": [
+              "field"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "groups": {
+                "minItems": 1
+              }
+            },
+            "required": [
+              "groups"
+            ]
+          },
+          "then": {
+            "anyOf": [
+              {
+                "properties": {
+                  "min": {
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "min"
+                ]
+              },
+              {
+                "properties": {
+                  "exact": {
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "exact"
+                ]
+              }
+            ],
+            "required": [
+              "group_by"
+            ]
+          }
+        },
+        {
+          "else": {
+            "properties": {
+              "groups": {
+                "items": {
+                  "not": {
+                    "type": "array"
+                  }
+                }
+              }
+            }
+          },
+          "if": {
+            "properties": {
+              "group_by": {
+                "minItems": 2,
+                "type": "array"
+              }
+            },
+            "required": [
+              "group_by"
+            ]
+          },
+          "then": {
+            "properties": {
+              "groups": {
+                "items": {
+                  "type": "array"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "min"
+          ]
+        },
+        {
+          "required": [
+            "max"
+          ]
+        },
+        {
+          "required": [
+            "exact"
+          ]
+        }
+      ],
+      "description": "`assert.count` (ADR-0050 D2).",
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "exact",
+              "min"
+            ]
+          },
+          {
+            "required": [
+              "exact",
+              "max"
+            ]
+          }
+        ]
+      },
+      "properties": {
+        "distinct": {
+          "description": "Count distinct non-null values of `field:` instead of rows (default false).",
+          "type": "boolean"
+        },
+        "exact": {
+          "description": "Exact required count (`0` asserts emptiness; mutually exclusive with `min:` and `max:`).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "field": {
+          "$ref": "#/$defs/v2_name",
+          "description": "Field whose distinct non-null/present values are counted; required iff `distinct: true`, refused otherwise."
+        },
+        "group_by": {
+          "description": "Optional grouping field or fields; omitted counts across the whole relation.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/v2_name"
+            },
+            {
+              "items": {
+                "$ref": "#/$defs/v2_name"
+              },
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            }
+          ]
+        },
+        "groups": {
+          "description": "Groups that must exist (requires `group_by:` and `min > 0` or `exact > 0`).",
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/ConstraintLiteral"
+              },
+              {
+                "items": {
+                  "$ref": "#/$defs/ConstraintLiteral"
+                },
+                "minItems": 2,
+                "type": "array"
+              }
+            ]
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "max": {
+          "description": "Maximum allowed count (`0` asserts emptiness and emits per-row findings).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "min": {
+          "description": "Minimum allowed count.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
         }
       },
       "type": "object"
@@ -62,8 +452,20 @@
           "description": "The compared field."
         },
         "group_by": {
-          "$ref": "#/$defs/v2_name",
-          "description": "Compare within each group of rows that share this field's value; without it, the relation is one group. Not with `to:`."
+          "description": "Compare within each group of rows that share this field's (or fields') value; without it, the relation is one group. Not with `to:`.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/v2_name"
+            },
+            {
+              "items": {
+                "$ref": "#/$defs/v2_name"
+              },
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            }
+          ]
         },
         "to": {
           "$ref": "#/$defs/ConstraintEqualTo",
@@ -122,6 +524,108 @@
       ],
       "type": "string"
     },
+    "ConstraintReference": {
+      "additionalProperties": false,
+      "description": "`assert.reference` (ADR-0050 D1).",
+      "oneOf": [
+        {
+          "not": {
+            "required": [
+              "fields"
+            ]
+          },
+          "required": [
+            "field"
+          ]
+        },
+        {
+          "not": {
+            "required": [
+              "field"
+            ]
+          },
+          "required": [
+            "fields"
+          ]
+        }
+      ],
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/v2_name",
+          "description": "Single source key field (mutually exclusive with `fields:`)."
+        },
+        "fields": {
+          "description": "Ordered composite source key fields (mutually exclusive with `field:`).",
+          "items": {
+            "$ref": "#/$defs/v2_name"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "skip_missing": {
+          "description": "When true, skip rows where any source key field is `Missing` or `Null` instead of emitting a finding (default false).",
+          "type": "boolean"
+        },
+        "to": {
+          "$ref": "#/$defs/ConstraintReferenceTo",
+          "description": "Target relation and key field(s) of matching arity."
+        }
+      },
+      "required": [
+        "to"
+      ],
+      "type": "object"
+    },
+    "ConstraintReferenceTo": {
+      "additionalProperties": false,
+      "description": "`assert.reference.to`.",
+      "oneOf": [
+        {
+          "not": {
+            "required": [
+              "fields"
+            ]
+          },
+          "required": [
+            "field"
+          ]
+        },
+        {
+          "not": {
+            "required": [
+              "field"
+            ]
+          },
+          "required": [
+            "fields"
+          ]
+        }
+      ],
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/v2_name",
+          "description": "Single target key field (mutually exclusive with `fields:`)."
+        },
+        "fields": {
+          "description": "Ordered composite target key fields (mutually exclusive with `field:`).",
+          "items": {
+            "$ref": "#/$defs/v2_name"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "relation": {
+          "$ref": "#/$defs/v2_reference",
+          "description": "Target relation name, bare or qualified by an `extends:` alias."
+        }
+      },
+      "required": [
+        "relation"
+      ],
+      "type": "object"
+    },
     "ConstraintSet": {
       "additionalProperties": false,
       "allOf": [
@@ -163,12 +667,78 @@
                 "required": [
                   "disjoint_from"
                 ]
+              },
+              {
+                "properties": {
+                  "equal_to": {
+                    "required": [
+                      "group_by"
+                    ]
+                  }
+                },
+                "required": [
+                  "equal_to"
+                ]
+              },
+              {
+                "properties": {
+                  "subset_of": {
+                    "required": [
+                      "group_by"
+                    ]
+                  }
+                },
+                "required": [
+                  "subset_of"
+                ]
+              },
+              {
+                "properties": {
+                  "disjoint_from": {
+                    "required": [
+                      "group_by"
+                    ]
+                  }
+                },
+                "required": [
+                  "disjoint_from"
+                ]
               }
             ]
           },
           "then": {
             "required": [
               "group_by"
+            ]
+          }
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "properties": {
+                  "subset_of": {
+                    "required": [
+                      "all_target_groups"
+                    ]
+                  }
+                },
+                "required": [
+                  "subset_of"
+                ]
+              },
+              {
+                "properties": {
+                  "disjoint_from": {
+                    "required": [
+                      "all_target_groups"
+                    ]
+                  }
+                },
+                "required": [
+                  "disjoint_from"
+                ]
+              }
             ]
           }
         },
@@ -220,6 +790,87 @@
               }
             }
           }
+        },
+        {
+          "else": {
+            "properties": {
+              "disjoint_from": {
+                "properties": {
+                  "group": {
+                    "not": {
+                      "type": "array"
+                    }
+                  }
+                }
+              },
+              "equal_to": {
+                "properties": {
+                  "group": {
+                    "not": {
+                      "type": "array"
+                    }
+                  }
+                }
+              },
+              "groups": {
+                "items": {
+                  "not": {
+                    "type": "array"
+                  }
+                }
+              },
+              "subset_of": {
+                "properties": {
+                  "group": {
+                    "not": {
+                      "type": "array"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "if": {
+            "properties": {
+              "group_by": {
+                "minItems": 2,
+                "type": "array"
+              }
+            },
+            "required": [
+              "group_by"
+            ]
+          },
+          "then": {
+            "properties": {
+              "disjoint_from": {
+                "properties": {
+                  "group": {
+                    "type": "array"
+                  }
+                }
+              },
+              "equal_to": {
+                "properties": {
+                  "group": {
+                    "type": "array"
+                  }
+                }
+              },
+              "groups": {
+                "items": {
+                  "type": "array"
+                }
+              },
+              "subset_of": {
+                "properties": {
+                  "group": {
+                    "type": "array"
+                  }
+                }
+              }
+            }
+          }
         }
       ],
       "description": "`assert.set`.",
@@ -254,13 +905,36 @@
           "description": "The field whose values form each group's set."
         },
         "group_by": {
-          "$ref": "#/$defs/v2_name",
-          "description": "The field whose value is each row's group; without it, the relation is one group. Grouped by `path` or a path token, every resource the relation reads forms its group, rows or not, except one whose path alone the relation's `where:` rejects."
+          "description": "The field or fields whose values form each row's group; without it, the relation is one group. Grouped by `path` or path tokens, every resource the relation reads forms its group, rows or not, except one whose path alone the relation's `where:` rejects.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/v2_name"
+            },
+            {
+              "items": {
+                "$ref": "#/$defs/v2_name"
+              },
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            }
+          ]
         },
         "groups": {
-          "description": "Groups that must exist, rows or not, with `equal_to:`: literals of the `group_by:` field, none twice. A group named only here lacks every value of the other set.",
+          "description": "Groups that must exist, rows or not, with `equal_to:`: literals of the `group_by:` field(s), none twice. A group named only here lacks every value of the other set.",
           "items": {
-            "$ref": "#/$defs/ConstraintLiteral"
+            "oneOf": [
+              {
+                "$ref": "#/$defs/ConstraintLiteral"
+              },
+              {
+                "items": {
+                  "$ref": "#/$defs/ConstraintLiteral"
+                },
+                "minItems": 2,
+                "type": "array"
+              }
+            ]
           },
           "type": "array",
           "uniqueItems": true
@@ -281,7 +955,21 @@
     },
     "ConstraintSetTarget": {
       "additionalProperties": false,
-      "description": "The other set: a group of the same relation (`{ group: literal }`), or every value of another relation's field (`{ relation: R, field: F }`).",
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "all_target_groups"
+            ]
+          },
+          "then": {
+            "required": [
+              "group_by"
+            ]
+          }
+        }
+      ],
+      "description": "The other set: a group of the same relation (`{ group: literal }`), an inline list of literals (`{ values: [...] }`), or another relation's field (`{ relation: R, field: F, group_by?: ..., all_target_groups?: bool }`).",
       "oneOf": [
         {
           "maxProperties": 1,
@@ -290,7 +978,26 @@
           ]
         },
         {
-          "maxProperties": 2,
+          "maxProperties": 1,
+          "required": [
+            "values"
+          ]
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "group"
+                ]
+              },
+              {
+                "required": [
+                  "values"
+                ]
+              }
+            ]
+          },
           "required": [
             "relation",
             "field"
@@ -298,17 +1005,56 @@
         }
       ],
       "properties": {
+        "all_target_groups": {
+          "description": "With `equal_to:` and target `group_by:`: also report missing values for target groups absent from the input relation (default false).",
+          "type": "boolean"
+        },
         "field": {
           "$ref": "#/$defs/v2_name",
           "description": "That relation's field, whose values are the other set."
         },
         "group": {
-          "$ref": "#/$defs/ConstraintLiteral",
-          "description": "The reference group: the rows whose `group_by:` field holds this literal."
+          "description": "The reference group: the rows whose `group_by:` field(s) hold this literal (scalar for 1-field, array for multi-field).",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ConstraintLiteral"
+            },
+            {
+              "items": {
+                "$ref": "#/$defs/ConstraintLiteral"
+              },
+              "minItems": 2,
+              "type": "array"
+            }
+          ]
+        },
+        "group_by": {
+          "description": "Partition the target relation by this field or fields (same arity as the input's `group_by:`) for per-group cross-relation comparison (ADR-0050 D3).",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/v2_name"
+            },
+            {
+              "items": {
+                "$ref": "#/$defs/v2_name"
+              },
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            }
+          ]
         },
         "relation": {
           "$ref": "#/$defs/v2_reference",
           "description": "Another relation: its name, bare or qualified by an `extends:` alias (`ws.names`); not an inline relation."
+        },
+        "values": {
+          "description": "An inline non-empty list of allowed/expected/forbidden scalar literals (strings and booleans only, ADR-0050 D3).",
+          "items": {
+            "$ref": "#/$defs/ConstraintLiteral"
+          },
+          "minItems": 1,
+          "type": "array"
         }
       },
       "type": "object"
@@ -2734,7 +3480,7 @@
       "properties": {
         "assert": {
           "$ref": "#/$defs/ConstraintAssert",
-          "description": "The assertion: exactly one of `equal`, `unique` and `set`."
+          "description": "The assertion: exactly one of `equal`, `unique`, `set`, `reference`, `count`, and `compare`."
         },
         "input": {
           "description": "The rows the assertion reads: a relation's name, bare or qualified by an `extends:` alias (`deps.ranges`), or an inline relation (a map, as a relation under `relations:` is written, whose values may not read the environment).",
@@ -7848,23 +8594,21 @@
           "allOf": [
             {
               "if": {
-                "anyOf": [
-                  {
-                    "required": [
-                      "optional"
-                    ]
-                  },
-                  {
-                    "required": [
-                      "on_missing"
-                    ]
-                  }
+                "required": [
+                  "optional"
                 ]
               },
               "then": {
                 "properties": {
                   "source": {
-                    "$ref": "#/$defs/v2_source_bound"
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/v2_source_bound"
+                      },
+                      {
+                        "$ref": "#/$defs/v2_source_record"
+                      }
+                    ]
                   }
                 }
               }
@@ -7879,6 +8623,9 @@
                 "properties": {
                   "optional": {
                     "const": true
+                  },
+                  "source": {
+                    "$ref": "#/$defs/v2_source_bound"
                   }
                 },
                 "required": [
@@ -7898,7 +8645,7 @@
             },
             "optional": {
               "default": false,
-              "description": "With a `bound:` source: allow the bound path to match nothing instead of failing the relation. Defaults to false; see `on_missing`.",
+              "description": "With a `bound:` or `record:` source: allow the path to match nothing instead of failing the relation. Defaults to false; see `on_missing` (for `bound:`).",
               "type": "boolean"
             },
             "sensitive": {
@@ -7928,23 +8675,21 @@
           "allOf": [
             {
               "if": {
-                "anyOf": [
-                  {
-                    "required": [
-                      "optional"
-                    ]
-                  },
-                  {
-                    "required": [
-                      "on_missing"
-                    ]
-                  }
+                "required": [
+                  "optional"
                 ]
               },
               "then": {
                 "properties": {
                   "source": {
-                    "$ref": "#/$defs/v2_source_bound"
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/v2_source_bound"
+                      },
+                      {
+                        "$ref": "#/$defs/v2_source_record"
+                      }
+                    ]
                   }
                 }
               }
@@ -7959,6 +8704,9 @@
                 "properties": {
                   "optional": {
                     "const": true
+                  },
+                  "source": {
+                    "$ref": "#/$defs/v2_source_bound"
                   }
                 },
                 "required": [
@@ -7978,7 +8726,7 @@
             },
             "optional": {
               "default": false,
-              "description": "With a `bound:` source: allow the bound path to match nothing instead of failing the relation. Defaults to false; see `on_missing`.",
+              "description": "With a `bound:` or `record:` source: allow the path to match nothing instead of failing the relation. Defaults to false; see `on_missing` (for `bound:`).",
               "type": "boolean"
             },
             "sensitive": {
@@ -8008,23 +8756,21 @@
           "allOf": [
             {
               "if": {
-                "anyOf": [
-                  {
-                    "required": [
-                      "optional"
-                    ]
-                  },
-                  {
-                    "required": [
-                      "on_missing"
-                    ]
-                  }
+                "required": [
+                  "optional"
                 ]
               },
               "then": {
                 "properties": {
                   "source": {
-                    "$ref": "#/$defs/v2_source_bound"
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/v2_source_bound"
+                      },
+                      {
+                        "$ref": "#/$defs/v2_source_record"
+                      }
+                    ]
                   }
                 }
               }
@@ -8039,6 +8785,9 @@
                 "properties": {
                   "optional": {
                     "const": true
+                  },
+                  "source": {
+                    "$ref": "#/$defs/v2_source_bound"
                   }
                 },
                 "required": [
@@ -8058,7 +8807,7 @@
             },
             "optional": {
               "default": false,
-              "description": "With a `bound:` source: allow the bound path to match nothing instead of failing the relation. Defaults to false; see `on_missing`.",
+              "description": "With a `bound:` or `record:` source: allow the path to match nothing instead of failing the relation. Defaults to false; see `on_missing` (for `bound:`).",
               "type": "boolean"
             },
             "sensitive": {
@@ -8088,23 +8837,21 @@
           "allOf": [
             {
               "if": {
-                "anyOf": [
-                  {
-                    "required": [
-                      "optional"
-                    ]
-                  },
-                  {
-                    "required": [
-                      "on_missing"
-                    ]
-                  }
+                "required": [
+                  "optional"
                 ]
               },
               "then": {
                 "properties": {
                   "source": {
-                    "$ref": "#/$defs/v2_source_bound"
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/v2_source_bound"
+                      },
+                      {
+                        "$ref": "#/$defs/v2_source_record"
+                      }
+                    ]
                   }
                 }
               }
@@ -8119,6 +8866,9 @@
                 "properties": {
                   "optional": {
                     "const": true
+                  },
+                  "source": {
+                    "$ref": "#/$defs/v2_source_bound"
                   }
                 },
                 "required": [
@@ -8138,7 +8888,7 @@
             },
             "optional": {
               "default": false,
-              "description": "With a `bound:` source: allow the bound path to match nothing instead of failing the relation. Defaults to false; see `on_missing`.",
+              "description": "With a `bound:` or `record:` source: allow the path to match nothing instead of failing the relation. Defaults to false; see `on_missing` (for `bound:`).",
               "type": "boolean"
             },
             "sensitive": {
@@ -8148,6 +8898,87 @@
             },
             "source": {
               "$ref": "#/$defs/v2_field_source_read_text"
+            }
+          },
+          "required": [
+            "source"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "v2_field_records": {
+      "description": "A field: its source, or a `{ source, sensitive, optional, on_missing }` map.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/v2_field_source_records"
+        },
+        {
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "required": [
+                  "optional"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "source": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/v2_source_bound"
+                      },
+                      {
+                        "$ref": "#/$defs/v2_source_record"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "required": [
+                  "on_missing"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "optional": {
+                    "const": true
+                  },
+                  "source": {
+                    "$ref": "#/$defs/v2_source_bound"
+                  }
+                },
+                "required": [
+                  "optional"
+                ]
+              }
+            }
+          ],
+          "properties": {
+            "on_missing": {
+              "default": "skip",
+              "description": "With an `optional: true` `bound:` source: `skip` (default) skips the resource cleanly (emitting no rows and excluding it from resource groups); `missing` keeps the resource's rows with a missing cell for this field.",
+              "enum": [
+                "skip",
+                "missing"
+              ]
+            },
+            "optional": {
+              "default": false,
+              "description": "With a `bound:` or `record:` source: allow the path to match nothing instead of failing the relation. Defaults to false; see `on_missing` (for `bound:`).",
+              "type": "boolean"
+            },
+            "sensitive": {
+              "default": false,
+              "description": "Keep this field's values out of messages, the JSON report and baselines.",
+              "type": "boolean"
+            },
+            "source": {
+              "$ref": "#/$defs/v2_field_source_records"
             }
           },
           "required": [
@@ -8201,6 +9032,20 @@
       ],
       "description": "A field source of a `read:` relation that reads the file as text (`regex:`, `lines:` or `whole_file:`): a path token or `value`. A `bound:` field reads a JSON, YAML or TOML document."
     },
+    "v2_field_source_records": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/v2_source_path_token"
+        },
+        {
+          "$ref": "#/$defs/v2_source_record"
+        },
+        {
+          "$ref": "#/$defs/v2_source_bound"
+        }
+      ],
+      "description": "A field source of a `records:` relation: a path token, `record: <JSONPath>` or `bound: <JSONPath>`."
+    },
     "v2_field_source_union": {
       "anyOf": [
         {
@@ -8210,13 +9055,16 @@
           "$ref": "#/$defs/v2_source_entry"
         },
         {
+          "$ref": "#/$defs/v2_source_record"
+        },
+        {
           "$ref": "#/$defs/v2_source_value"
         },
         {
           "$ref": "#/$defs/v2_source_bound"
         }
       ],
-      "description": "A field source of a `union:` relation: a path token, an `entry.*` source, `value` or `bound: <JSONPath>`. Every part must be able to bind it."
+      "description": "A field source of a `union:` relation: a path token, an `entry.*` source, `record: <JSONPath>`, `value` or `bound: <JSONPath>`. Every part must be able to bind it (or give each part its own `fields:`)."
     },
     "v2_field_union": {
       "description": "A field: its source, or a `{ source, sensitive, optional, on_missing }` map.",
@@ -8229,23 +9077,21 @@
           "allOf": [
             {
               "if": {
-                "anyOf": [
-                  {
-                    "required": [
-                      "optional"
-                    ]
-                  },
-                  {
-                    "required": [
-                      "on_missing"
-                    ]
-                  }
+                "required": [
+                  "optional"
                 ]
               },
               "then": {
                 "properties": {
                   "source": {
-                    "$ref": "#/$defs/v2_source_bound"
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/v2_source_bound"
+                      },
+                      {
+                        "$ref": "#/$defs/v2_source_record"
+                      }
+                    ]
                   }
                 }
               }
@@ -8260,6 +9106,9 @@
                 "properties": {
                   "optional": {
                     "const": true
+                  },
+                  "source": {
+                    "$ref": "#/$defs/v2_source_bound"
                   }
                 },
                 "required": [
@@ -8279,7 +9128,7 @@
             },
             "optional": {
               "default": false,
-              "description": "With a `bound:` source: allow the bound path to match nothing instead of failing the relation. Defaults to false; see `on_missing`.",
+              "description": "With a `bound:` or `record:` source: allow the path to match nothing instead of failing the relation. Defaults to false; see `on_missing` (for `bound:`).",
               "type": "boolean"
             },
             "sensitive": {
@@ -8454,6 +9303,40 @@
       },
       "type": "object"
     },
+    "v2_records": {
+      "additionalProperties": false,
+      "description": "One row per object element `at` selects, read with `record: <JSONPath>` field sources.",
+      "properties": {
+        "at": {
+          "description": "A JSONPath, or a non-empty list of them, selecting object elements (for example `$.spec.containers[*]`). A path a file lacks yields no rows; a matched non-object element is an analysis failure.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            }
+          ]
+        },
+        "format": {
+          "description": "How the files are decoded: JSON, YAML or TOML.",
+          "enum": [
+            "json",
+            "yaml",
+            "toml"
+          ]
+        }
+      },
+      "required": [
+        "format",
+        "at"
+      ],
+      "type": "object"
+    },
     "v2_reference": {
       "description": "A selector or relation: a name this config file declares, or `alias.name` for one that the file an `extends:` entry gives `as: alias` declares itself (no re-export, no `a.b.c` chain).",
       "pattern": "^[A-Za-z_][A-Za-z0-9_-]*(\\.[A-Za-z_][A-Za-z0-9_-]*)?$",
@@ -8461,11 +9344,16 @@
     },
     "v2_relation": {
       "additionalProperties": false,
-      "description": "A relation: rows with named fields. It has `fields:` and exactly one of `entries:` and `read:` (each with `from:`), `union:` and `join:`, and may have `transform:` and `where:`.",
+      "description": "A relation: rows with named fields. It has `fields:` (or per-part `fields:` under `union:`) and exactly one of `entries:`, `records:`, and `read:` (each with `from:`), `union:`, and `join:`, and may have `transform:` and `where:`.",
       "oneOf": [
         {
           "not": {
             "anyOf": [
+              {
+                "required": [
+                  "records"
+                ]
+              },
               {
                 "required": [
                   "read"
@@ -8497,7 +9385,8 @@
           },
           "required": [
             "entries",
-            "from"
+            "from",
+            "fields"
           ]
         },
         {
@@ -8506,6 +9395,54 @@
               {
                 "required": [
                   "entries"
+                ]
+              },
+              {
+                "required": [
+                  "read"
+                ]
+              },
+              {
+                "required": [
+                  "union"
+                ]
+              },
+              {
+                "required": [
+                  "join"
+                ]
+              },
+              {
+                "required": [
+                  "optional"
+                ]
+              }
+            ]
+          },
+          "properties": {
+            "fields": {
+              "additionalProperties": {
+                "$ref": "#/$defs/v2_field_records"
+              }
+            }
+          },
+          "required": [
+            "records",
+            "from",
+            "fields"
+          ]
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "entries"
+                ]
+              },
+              {
+                "required": [
+                  "records"
                 ]
               },
               {
@@ -8550,7 +9487,8 @@
           },
           "required": [
             "read",
-            "from"
+            "from",
+            "fields"
           ]
         },
         {
@@ -8559,6 +9497,11 @@
               {
                 "required": [
                   "entries"
+                ]
+              },
+              {
+                "required": [
+                  "records"
                 ]
               },
               {
@@ -8601,7 +9544,8 @@
           },
           "required": [
             "read",
-            "from"
+            "from",
+            "fields"
           ]
         },
         {
@@ -8610,6 +9554,11 @@
               {
                 "required": [
                   "entries"
+                ]
+              },
+              {
+                "required": [
+                  "records"
                 ]
               },
               {
@@ -8634,13 +9583,45 @@
               }
             ]
           },
-          "properties": {
-            "fields": {
-              "additionalProperties": {
-                "$ref": "#/$defs/v2_field_union"
+          "oneOf": [
+            {
+              "properties": {
+                "fields": {
+                  "additionalProperties": {
+                    "$ref": "#/$defs/v2_field_union"
+                  }
+                },
+                "union": {
+                  "items": {
+                    "not": {
+                      "required": [
+                        "fields"
+                      ]
+                    }
+                  }
+                }
+              },
+              "required": [
+                "fields"
+              ]
+            },
+            {
+              "not": {
+                "required": [
+                  "fields"
+                ]
+              },
+              "properties": {
+                "union": {
+                  "items": {
+                    "required": [
+                      "fields"
+                    ]
+                  }
+                }
               }
             }
-          },
+          ],
           "required": [
             "union"
           ]
@@ -8651,6 +9632,11 @@
               {
                 "required": [
                   "entries"
+                ]
+              },
+              {
+                "required": [
+                  "records"
                 ]
               },
               {
@@ -8683,7 +9669,8 @@
             }
           },
           "required": [
-            "join"
+            "join",
+            "fields"
           ]
         }
       ],
@@ -8713,11 +9700,14 @@
         "read": {
           "$ref": "#/$defs/v2_read"
         },
+        "records": {
+          "$ref": "#/$defs/v2_records"
+        },
         "transform": {
           "$ref": "#/$defs/v2_transforms"
         },
         "union": {
-          "description": "The rows of two or more parts, in the order written. Every part binds every field.",
+          "description": "The rows of two or more parts, in the order written. Either top-level `fields:` applies to every part, or every part declares its own `fields:` with identical field names and `sensitive` flags.",
           "items": {
             "$ref": "#/$defs/v2_union_part"
           },
@@ -8728,9 +9718,6 @@
           "$ref": "#/$defs/v2_filters"
         }
       },
-      "required": [
-        "fields"
-      ],
       "type": "object"
     },
     "v2_selector": {
@@ -8869,6 +9856,11 @@
       ],
       "type": "string"
     },
+    "v2_source_record": {
+      "description": "`record: <JSONPath>`: a scalar value read from each `records:` object element (for example `record: $.image`). Must match at most one scalar; set `optional: true` to emit a missing cell when absent.",
+      "pattern": "^record:\\s*\\S",
+      "type": "string"
+    },
     "v2_source_value": {
       "description": "The value of a `read:` row.",
       "oneOf": [
@@ -8879,33 +9871,105 @@
       ],
       "type": "string"
     },
+    "v2_transform_name": {
+      "description": "A bare transform name.",
+      "oneOf": [
+        {
+          "const": "trim",
+          "description": "Trim leading and trailing whitespace."
+        },
+        {
+          "const": "lower",
+          "description": "Lower-case the value."
+        },
+        {
+          "const": "semver-major",
+          "description": "Keep only a version's leading `MAJOR` token, as `cross_file`'s `normalize:` does."
+        },
+        {
+          "const": "semver-minor",
+          "description": "Keep only a version's leading `MAJOR.MINOR` band, as `cross_file`'s `normalize:` does (`4.36-dev`, `4.36.0` and `>=4.36` all become `4.36`)."
+        },
+        {
+          "const": "strip-root",
+          "description": "Drop the first segment of an `entry.path` field (`en.nav.home` becomes `nav.home`). It applies to an `entry.path` field, or a join's copy of one no transform has changed, first."
+        }
+      ],
+      "type": "string"
+    },
+    "v2_transform_param": {
+      "additionalProperties": false,
+      "description": "A parameterized string transform (single-key map).",
+      "maxProperties": 1,
+      "minProperties": 1,
+      "properties": {
+        "prefix": {
+          "description": "Prepend a literal prefix string.",
+          "type": "string"
+        },
+        "split": {
+          "additionalProperties": false,
+          "description": "Split a string on literal `on:` and select segment `part:`.",
+          "properties": {
+            "on": {
+              "description": "Non-empty literal separator string.",
+              "minLength": 1,
+              "type": "string"
+            },
+            "part": {
+              "description": "0-based segment index (negative indices count from the end; `-1` is the last segment).",
+              "type": "integer"
+            },
+            "required": {
+              "default": false,
+              "description": "When true, an out-of-range `part` is an analysis failure; when false (default), it emits a missing cell.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "on",
+            "part"
+          ],
+          "type": "object"
+        },
+        "strip_prefix": {
+          "description": "Strip a literal prefix once if present.",
+          "type": "string"
+        },
+        "strip_suffix": {
+          "description": "Strip the first matching literal suffix once if present.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            }
+          ]
+        },
+        "suffix": {
+          "description": "Append a literal suffix string.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "v2_transforms": {
       "additionalProperties": {
         "items": {
-          "description": "A transform.",
+          "description": "A transform name or parameterized transform map.",
           "oneOf": [
             {
-              "const": "trim",
-              "description": "Trim leading and trailing whitespace."
+              "$ref": "#/$defs/v2_transform_name"
             },
             {
-              "const": "lower",
-              "description": "Lower-case the value."
-            },
-            {
-              "const": "semver-major",
-              "description": "Keep only a version's leading `MAJOR` token, as `cross_file`'s `normalize:` does."
-            },
-            {
-              "const": "semver-minor",
-              "description": "Keep only a version's leading `MAJOR.MINOR` band, as `cross_file`'s `normalize:` does (`4.36-dev`, `4.36.0` and `>=4.36` all become `4.36`)."
-            },
-            {
-              "const": "strip-root",
-              "description": "Drop the first segment of an `entry.path` field (`en.nav.home` becomes `nav.home`). It applies to an `entry.path` field, or a join's copy of one no transform has changed, first."
+              "$ref": "#/$defs/v2_transform_param"
             }
-          ],
-          "type": "string"
+          ]
         },
         "minItems": 1,
         "type": "array"
@@ -8918,11 +9982,16 @@
     },
     "v2_union_part": {
       "additionalProperties": false,
-      "description": "One part of a `union:`: its own `from:`, and exactly one of `entries:` and `read:`.",
+      "description": "One part of a `union:`: its own `from:`, exactly one of `entries:`, `records:` and `read:`, and optional per-part `fields:`.",
       "oneOf": [
         {
           "not": {
             "anyOf": [
+              {
+                "required": [
+                  "records"
+                ]
+              },
               {
                 "required": [
                   "read"
@@ -8935,15 +10004,135 @@
               }
             ]
           },
+          "properties": {
+            "fields": {
+              "additionalProperties": {
+                "$ref": "#/$defs/v2_field_entries"
+              }
+            }
+          },
           "required": [
             "entries"
           ]
         },
         {
           "not": {
-            "required": [
-              "entries"
+            "anyOf": [
+              {
+                "required": [
+                  "entries"
+                ]
+              },
+              {
+                "required": [
+                  "read"
+                ]
+              },
+              {
+                "required": [
+                  "optional"
+                ]
+              }
             ]
+          },
+          "properties": {
+            "fields": {
+              "additionalProperties": {
+                "$ref": "#/$defs/v2_field_records"
+              }
+            }
+          },
+          "required": [
+            "records"
+          ]
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "entries"
+                ]
+              },
+              {
+                "required": [
+                  "records"
+                ]
+              }
+            ]
+          },
+          "properties": {
+            "fields": {
+              "additionalProperties": {
+                "$ref": "#/$defs/v2_field_read"
+              }
+            },
+            "read": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "regex"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "lines"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "whole_file"
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          "required": [
+            "read"
+          ]
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "entries"
+                ]
+              },
+              {
+                "required": [
+                  "records"
+                ]
+              }
+            ]
+          },
+          "properties": {
+            "fields": {
+              "additionalProperties": {
+                "$ref": "#/$defs/v2_field_read_text"
+              }
+            },
+            "read": {
+              "anyOf": [
+                {
+                  "required": [
+                    "regex"
+                  ]
+                },
+                {
+                  "required": [
+                    "lines"
+                  ]
+                },
+                {
+                  "required": [
+                    "whole_file"
+                  ]
+                }
+              ]
+            }
           },
           "required": [
             "read"
@@ -8953,6 +10142,14 @@
       "properties": {
         "entries": {
           "$ref": "#/$defs/v2_entries"
+        },
+        "fields": {
+          "description": "Per-part fields for a mixed-reader `union:`: every part must declare `fields:` with the same output field names and `sensitive` flags, and top-level `fields:` must be omitted.",
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/v2_name"
+          },
+          "type": "object"
         },
         "from": {
           "$ref": "#/$defs/v2_selector_ref"
@@ -8964,6 +10161,9 @@
         },
         "read": {
           "$ref": "#/$defs/v2_read"
+        },
+        "records": {
+          "$ref": "#/$defs/v2_records"
         }
       },
       "required": [

@@ -49,6 +49,7 @@ fn relation(doc: &str, reader: Reader, source: FieldSource) -> Arc<Plan> {
                         scope_filter: None,
                     })),
                     reader,
+                    fields: None,
                 }),
                 fields: vec![(
                     "f".into(),

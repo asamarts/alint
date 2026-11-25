@@ -691,11 +691,13 @@ fn the_assertion_is_one_family_of_one_shape() {
     };
     refused(
         "    assert: {}\n",
-        "`assert`: holds exactly one of `equal`, `unique` and `set`; found none",
+        "`assert`: holds exactly one of `equal`, `unique`, `set`, `reference`, `count` and \
+         `compare`; found none",
     );
     refused(
         "    assert: { unique: { key: [dependency] }, equal: { field: range } }\n",
-        "`assert`: holds exactly one of `equal`, `unique` and `set`; found `equal` and `unique`",
+        "`assert`: holds exactly one of `equal`, `unique`, `set`, `reference`, `count` and \
+         `compare`; found `equal` and `unique`",
     );
     refused(
         "    assert: { unique: { key: [] } }\n",
@@ -730,8 +732,8 @@ fn the_assertion_is_one_family_of_one_shape() {
     );
     refused(
         "    assert: { set: { field: dependency, equal_to: { group: x } } }\n",
-        "`assert.set.equal_to`: a reference group (`{ group: ... }`) is a value of the \
-         `group_by:` field, and this `set` has no `group_by:`",
+        "`assert.set.equal_to`: a reference group (`{ group: ... }`) is a value of `group_by:`, \
+         and this `set` has no `group_by:`",
     );
     refused(
         "    assert: { set: { field: dependency, group_by: dependency, equal_to: { group: x } \
@@ -745,8 +747,8 @@ fn the_assertion_is_one_family_of_one_shape() {
     );
     refused(
         "    assert: { set: { field: dependency, group_by: range, equal_to: {} } }\n",
-        "`assert.set.equal_to`: names the other set: `{ group: literal }` (a group of this \
-         relation) or `{ relation: R, field: F }` (every value of another relation's field)",
+        "`assert.set.equal_to`: names the other set: `{ group: literal }`, `{ values: [...] }`, \
+         or `{ relation: R, field: F }`",
     );
 }
 
@@ -794,7 +796,7 @@ fn plurals_cldr_merges_the_key_paths_of_an_entry_path_field_against_a_group() {
          key }, plurals: cldr } }\n",
         "assert.set.plurals",
         "`plurals: cldr` decides each plural group over the key paths of two groups of one \
-         relation, so it takes a `{ group: }` target, not `{ relation: R, field: F }`",
+         relation, so it takes a `{ group: }` target, not `{ relation: }` or `{ values: }`",
     );
     // An `entry.path` field, after `strip-root`, or a join's copy of one.
     for input in ["keys", "joined"] {
@@ -820,8 +822,7 @@ fn groups_lists_literals_of_the_group_by_field_once_each() {
     refused(
         &set("subset_of: { relation: deps, field: dependency }, groups: [x]"),
         "assert.set.groups",
-        "names groups, which are values of the `group_by:` field, and this `set` has no \
-         `group_by:`",
+        "names groups, which are values of `group_by:`, and this `set` has no `group_by:`",
     );
     // `subset_of:` and `disjoint_from:` find nothing in a group without
     // rows, so a group that must exist needs `equal_to:`.
@@ -903,8 +904,8 @@ fn a_set_against_another_relation_names_the_relation_and_its_field() {
     refused(
         &set("{ group: x, relation: names, field: name }"),
         "assert.set.subset_of",
-        "names one other set: `{ group: literal }` (a group of this relation) or `{ relation: \
-         R, field: F }` (every value of another relation's field), not both",
+        "names one other set (`{ group: literal }`, `{ values: [...] }`, or `{ relation: R, \
+         field: F }`), not a combination",
     );
     refused(
         &set("{ relation: names, field: nmae }"),
@@ -1047,7 +1048,7 @@ fn a_set_grouped_by_a_path_token_reads_the_resources_its_relation_lists() {
         &set("theirs"),
         "assert.set.group_by",
         "`theirs` is a path token that relation `linked` (.alint.yml) copies from its \
-         `unique:` side; a `set` grouped by a path token gives every resource the relation \
+         `unique:` side; grouping by a path token gives every resource the relation \
          reads a group, and a join reads the resources of its other side, so group by a field \
          of that side",
     );
@@ -1070,7 +1071,7 @@ fn a_set_grouped_by_a_path_token_reads_the_resources_its_relation_lists() {
          relation: names, field: name } } }\n",
         "assert.set.group_by",
         "`copied` is a path token that relation `outer` (.alint.yml) copies from its `unique:` \
-         side; a `set` grouped by a path token gives every resource the relation reads a group, \
+         side; grouping by a path token gives every resource the relation reads a group, \
          and a join reads the resources of its other side, so group by a field of that side",
     );
     // What a join copies holds what its side's field holds: a boolean never
@@ -1224,7 +1225,7 @@ fn message_value_placeholder_is_allowed_only_on_set_and_leaves_other_tokens_lite
             "c",
         );
         assert!(
-            err.contains("`{{value}}` is only available on `set` assertions"),
+            err.contains("`{{value}}` is only available on `set` and `reference` assertions"),
             "{label}: {err}"
         );
         // Non-alint `{{name}}` remains accepted on every assertion family.

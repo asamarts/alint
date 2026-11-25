@@ -285,6 +285,28 @@ pub(crate) fn entry_table(
     if format == Format::Toml {
         return TomlRowsAdapter::values(text, limits);
     }
+    extract_entry_table_non_toml(format, text, limits)
+}
+
+/// Like [`entry_table`], also descending into TOML arrays of tables and inline
+/// tables inside arrays (JSON and YAML already descend arrays). Used by
+/// `records:` extraction and span verification (#592).
+pub(crate) fn entry_table_with_arrays(
+    format: Format,
+    text: &str,
+    limits: &Limits,
+) -> Result<EntryTable, AdapterError> {
+    if format == Format::Toml {
+        return TomlRowsAdapter::values_with_arrays(text, limits);
+    }
+    extract_entry_table_non_toml(format, text, limits)
+}
+
+fn extract_entry_table_non_toml(
+    format: Format,
+    text: &str,
+    limits: &Limits,
+) -> Result<EntryTable, AdapterError> {
     let max = limits.get(LimitKind::RowsPerExtractor);
     extract_entry_values_bounded(format, text, max).map_err(|error| match error {
         EntryRowsError::Limit { limit } => AdapterError::Limit(LimitExceeded {
@@ -380,12 +402,12 @@ impl<'d> Document<'d> {
     }
 
     /// Whether the tree holds an empty object or an empty array at `at`.
-    fn is_empty(&self, at: PathId) -> bool {
+    pub(super) fn is_empty(&self, at: PathId) -> bool {
         self.empty[at.index()]
     }
 
     /// `node`'s place in document order.
-    fn rank(&self, node: &serde_json::Value) -> usize {
+    pub(super) fn rank(&self, node: &serde_json::Value) -> usize {
         self.nodes
             .get(&std::ptr::from_ref(node))
             .map_or(usize::MAX, |(rank, _)| *rank)
@@ -551,7 +573,7 @@ fn error_row(resource: &Resource, pointer: Pointer, label: &str, kind: &str) -> 
     .with_label(label)
 }
 
-fn pointer_of(path: &serde_json_path::NormalizedPath<'_>) -> Pointer {
+pub(super) fn pointer_of(path: &serde_json_path::NormalizedPath<'_>) -> Pointer {
     Pointer::from_segments(
         path.iter()
             .map(|element| match element {
@@ -576,7 +598,7 @@ const fn toml_datetime_key() -> &'static str {
 }
 
 /// What an `at:` path selected when it is not an object.
-fn non_object(format: Format, node: &serde_json::Value) -> Option<&'static str> {
+pub(super) fn non_object(format: Format, node: &serde_json::Value) -> Option<&'static str> {
     use serde_json::Value;
     match node {
         Value::Object(_) if is_toml_datetime(format, node) => Some(DATETIME),
@@ -592,7 +614,7 @@ fn non_object(format: Format, node: &serde_json::Value) -> Option<&'static str> 
 /// A scalar no entry holds (the root, or an array's element), from the
 /// tree. A number there has lost its lexeme (`1.10` reads as `1.1`), so it
 /// is not a value.
-fn tree_scalar(
+pub(super) fn tree_scalar(
     format: Format,
     node: &serde_json::Value,
 ) -> Result<crate::relation::Value, &'static str> {
