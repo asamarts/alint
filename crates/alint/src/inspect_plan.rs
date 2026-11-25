@@ -204,6 +204,10 @@ struct FieldView {
     name: String,
     /// The source as the config writes it (`entry.key`, `bound: $.name`).
     source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    optional: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    on_missing: Option<&'static str>,
     transforms: Shown<Vec<&'static str>>,
     sensitive: bool,
 }
@@ -1003,22 +1007,40 @@ fn fields(relation: &RelationDef, hidden: bool) -> Vec<FieldView> {
     relation
         .fields
         .iter()
-        .map(|(name, field)| FieldView {
-            name: name.clone(),
-            source: field_source(&field.source, hidden),
-            // Whether a field has transforms is written literally; which
-            // ones a sensitive field has may be the environment's.
-            transforms: Shown::hidden_if(
-                field.sensitive && !relation.transforms_of(name).is_empty(),
-                || {
-                    relation
-                        .transforms_of(name)
-                        .iter()
-                        .map(|transform| transform_name(*transform))
-                        .collect()
-                },
-            ),
-            sensitive: field.sensitive,
+        .map(|(name, field)| {
+            let (optional, on_missing) = match &field.source {
+                FieldSource::Bound {
+                    optional: true,
+                    on_missing,
+                    ..
+                } if !hidden => (
+                    Some(true),
+                    Some(match on_missing {
+                        alint_core::relation::plan::BoundMissing::Skip => "skip",
+                        alint_core::relation::plan::BoundMissing::Missing => "missing",
+                    }),
+                ),
+                _ => (None, None),
+            };
+            FieldView {
+                name: name.clone(),
+                source: field_source(&field.source, hidden),
+                optional,
+                on_missing,
+                // Whether a field has transforms is written literally; which
+                // ones a sensitive field has may be the environment's.
+                transforms: Shown::hidden_if(
+                    field.sensitive && !relation.transforms_of(name).is_empty(),
+                    || {
+                        relation
+                            .transforms_of(name)
+                            .iter()
+                            .map(|transform| transform_name(*transform))
+                            .collect()
+                    },
+                ),
+                sensitive: field.sensitive,
+            }
         })
         .collect()
 }
@@ -1042,23 +1064,11 @@ fn field_source(source: &FieldSource, hidden: bool) -> String {
         FieldSource::EntryRoot => "entry.root".into(),
         FieldSource::EntryPath => "entry.path".into(),
         FieldSource::Value => "value".into(),
-        FieldSource::Bound {
-            query,
-            optional,
-            on_missing,
-        } => {
-            let shown = if hidden { REDACTED } else { query };
-            if *optional {
-                match on_missing {
-                    alint_core::relation::plan::BoundMissing::Skip => {
-                        format!("bound: {shown} (optional)")
-                    }
-                    alint_core::relation::plan::BoundMissing::Missing => {
-                        format!("bound: {shown} (optional, on_missing: missing)")
-                    }
-                }
+        FieldSource::Bound { query, .. } => {
+            if hidden {
+                format!("bound: {REDACTED}")
             } else {
-                format!("bound: {shown}")
+                format!("bound: {query}")
             }
         }
         FieldSource::Side(JoinSide::Left, field) => format!("left.{field}"),
@@ -1235,6 +1245,12 @@ fn write_fields(out: &mut impl Write, fields: &[FieldView]) -> Result<()> {
     writeln!(out, "      {dim}fields:{dim:#}")?;
     for field in fields {
         let mut notes = Vec::new();
+        if field.optional == Some(true) {
+            match field.on_missing {
+                Some("missing") => notes.push("optional, on_missing: missing".into()),
+                _ => notes.push("optional".into()),
+            }
+        }
         match &field.transforms {
             Shown::Value(transforms) if transforms.is_empty() => {}
             Shown::Value(transforms) => notes.push(format!("transform: {}", transforms.join(", "))),

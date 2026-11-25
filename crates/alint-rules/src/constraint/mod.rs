@@ -44,13 +44,12 @@ mod options;
 mod places;
 mod values;
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use alint_core::relation::eval::{self, RelationNote, Skipped};
 use alint_core::relation::plan::{PathToken, Plan, RelationId};
 use alint_core::relation::{RelPath, Resource, StringTransform, TriggerScope, Value};
-use alint_core::template::PathTokens;
 use alint_core::{AnalysisFailureKind, Context, Error, Level, Result, Rule, RuleSpec, Violation};
 
 pub use options::options_schema;
@@ -127,6 +126,38 @@ struct ResourceGroups {
     transforms: Vec<StringTransform>,
 }
 
+/// Precomputed structural counterpart lookup for one target group (#595),
+/// mapping each non-token path signature to `Some(unique_path)` or `None` when
+/// two or more resources in the group share that signature.
+pub(super) struct CounterpartIndex<'r> {
+    token: PathToken,
+    by_signature: HashMap<(&'r str, &'r str), Option<&'r RelPath>>,
+}
+
+impl<'r> CounterpartIndex<'r> {
+    fn build(token: PathToken, candidates: &BTreeSet<&'r RelPath>) -> Self {
+        let mut by_signature: HashMap<(&'r str, &'r str), Option<&'r RelPath>> =
+            HashMap::with_capacity(candidates.len());
+        for &candidate in candidates {
+            if let Some(sig) = structural_signature(token, candidate.as_str()) {
+                by_signature
+                    .entry(sig)
+                    .and_modify(|slot| *slot = None)
+                    .or_insert(Some(candidate));
+            }
+        }
+        Self {
+            token,
+            by_signature,
+        }
+    }
+
+    fn lookup(&self, ref_path: &RelPath) -> Option<&'r RelPath> {
+        let sig = structural_signature(self.token, ref_path.as_str())?;
+        self.by_signature.get(&sig).copied().flatten()
+    }
+}
+
 impl ResourceGroups {
     fn group_of(&self, resource: &Resource) -> String {
         let mut text = eval::path_token(resource, self.token);
@@ -136,46 +167,39 @@ impl ResourceGroups {
         text
     }
 
-    /// Structural path-component counterpart of `ref_path` inside a target
-    /// group's `candidates` (#595): matches candidates whose non-token path
-    /// components equal `ref_path`'s, returning `Some(path)` only when
-    /// **exactly one** candidate matches so callers fall back to `group.first`
-    /// on any ambiguity or non-matching layout.
-    fn structural_counterpart<'r>(
-        &self,
-        ref_path: &RelPath,
-        candidates: &BTreeSet<&'r RelPath>,
-    ) -> Option<&'r RelPath> {
-        let expected = structural_signature(self.token, ref_path)?;
-        let mut matched: Option<&'r RelPath> = None;
-        for &candidate in candidates {
-            if structural_signature(self.token, candidate).as_ref() == Some(&expected) {
-                if matched.is_some() {
-                    return None;
-                }
-                matched = Some(candidate);
-            }
-        }
-        matched
+    /// Build an `O(1)` lookup index of unique structural path-component
+    /// counterparts over a target group's `candidates` (#595).
+    fn counterpart_index<'r>(&self, candidates: &BTreeSet<&'r RelPath>) -> CounterpartIndex<'r> {
+        CounterpartIndex::build(self.token, candidates)
     }
 }
 
-/// The path components outside `token` that identify a counterpart file across
-/// groups built by `token` (#595).
-fn structural_signature(token: PathToken, path: &RelPath) -> Option<(String, String)> {
-    let tokens = PathTokens::from_path(path.as_path());
+/// Split `basename` into `(stem, ext)` matching `std::path::Path::file_stem`
+/// and `Path::extension` on `/`-normalized `RelPath` names (dotfiles such as
+/// `.env` have empty extension).
+fn split_stem_ext(basename: &str) -> (&str, &str) {
+    match basename.rsplit_once('.') {
+        Some(("", _)) | None => (basename, ""),
+        Some((stem, ext)) => (stem, ext),
+    }
+}
+
+/// Zero-allocation non-token path signature for a `/`-normalized `RelPath`
+/// (#595).
+fn structural_signature(token: PathToken, path: &str) -> Option<(&str, &str)> {
+    let (dir, basename) = path.rsplit_once('/').unwrap_or(("", path));
     match token {
         PathToken::ParentName => {
-            if tokens.parent_name.is_empty() || tokens.dir.is_empty() || tokens.dir == "." {
+            if dir.is_empty() || dir == "." {
                 return None;
             }
-            let grandparent = tokens.dir.rsplit_once('/').map_or("", |(g, _)| g);
-            Some((grandparent.to_string(), tokens.basename))
+            let grandparent = dir.rsplit_once('/').map_or("", |(g, _)| g);
+            Some((grandparent, basename))
         }
-        PathToken::Dir => Some((String::new(), tokens.basename)),
-        PathToken::Basename => Some((tokens.dir, String::new())),
-        PathToken::Stem => Some((tokens.dir, tokens.ext)),
-        PathToken::Ext => Some((tokens.dir, tokens.stem)),
+        PathToken::Dir => Some(("", basename)),
+        PathToken::Basename => Some((dir, "")),
+        PathToken::Stem => Some((dir, split_stem_ext(basename).1)),
+        PathToken::Ext => Some((dir, split_stem_ext(basename).0)),
         PathToken::Path => None,
     }
 }
@@ -226,6 +250,12 @@ pub struct ConstraintRule {
     /// its spec, which no run does; it keeps those literals out if the
     /// whole-rule redaction ever narrows.
     hide_literals: bool,
+    /// Rule-level `sensitive: true`: defence-in-depth redaction even when
+    /// `Rule::evaluate` is invoked directly without the engine's `RuleSpec`
+    /// redaction wrapper (#594). Env-derived `assert:` literals are tracked
+    /// separately via [`Self::hide_literals`] so fine-grained literal hiding
+    /// keeps working when `Rule::evaluate` runs directly.
+    explicit_sensitive: bool,
 }
 
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
@@ -262,6 +292,7 @@ fn build_rule(spec: &RuleSpec) -> Result<ConstraintRule> {
         trigger,
         assertion,
         hide_literals: spec.field_is_environment_derived("assert"),
+        explicit_sensitive: spec.sensitive,
     })
 }
 
@@ -518,10 +549,17 @@ mod tests {
 
     #[test]
     fn structural_counterpart_handles_all_tokens_ambiguity_and_root_files() {
-        let rg = |token| ResourceGroups {
-            token,
-            transforms: Vec::new(),
-        };
+        fn lookup<'a>(
+            token: PathToken,
+            ref_s: &str,
+            cands: &BTreeSet<&'a RelPath>,
+        ) -> Option<&'a RelPath> {
+            let rg = ResourceGroups {
+                token,
+                transforms: Vec::new(),
+            };
+            rg.counterpart_index(cands).lookup(&rp(ref_s))
+        }
 
         // `parent_name`: unique match, `en/en.json`, root-level sibling dir, and ambiguity.
         let p_auth = rp("locales/fr/auth.json");
@@ -530,58 +568,58 @@ mod tests {
         let p_en_file = rp("locales/fr/en.json");
         let cands = BTreeSet::from([&p_auth, &p_err, &p_en_file]);
         assert_eq!(
-            rg(PathToken::ParentName).structural_counterpart(&rp("locales/EN/errors.json"), &cands),
+            lookup(PathToken::ParentName, "locales/EN/errors.json", &cands),
             Some(&p_err)
         );
         assert_eq!(
-            rg(PathToken::ParentName).structural_counterpart(&rp("locales/en/en.json"), &cands),
+            lookup(PathToken::ParentName, "locales/en/en.json", &cands),
             Some(&p_en_file)
         );
         assert_eq!(
-            rg(PathToken::ParentName)
-                .structural_counterpart(&rp("locales/en/missing.json"), &cands),
+            lookup(PathToken::ParentName, "locales/en/missing.json", &cands),
             None
         );
         // Root-level file has no parent_name -> None.
-        assert_eq!(
-            rg(PathToken::ParentName).structural_counterpart(&rp("errors.json"), &cands),
-            None
-        );
+        assert_eq!(lookup(PathToken::ParentName, "errors.json", &cands), None);
         // Ambiguous two matches in the same group -> None (falls back to group.first).
         let ambig = BTreeSet::from([&p_auth, &p_err, &p_err_upper]);
         assert_eq!(
-            rg(PathToken::ParentName).structural_counterpart(&rp("locales/EN/errors.json"), &ambig),
+            lookup(PathToken::ParentName, "locales/EN/errors.json", &ambig),
             None
         );
 
-        // `stem`, `ext`, `dir`, `basename`, `path`.
+        // `stem`, `ext`, `dir`, `basename`, `path`, plus dotfiles & multi-dots.
         let s1 = rp("locales/fr.json");
         let s2 = rp("locales/fr.yaml");
         let stem_cands = BTreeSet::from([&s1, &s2]);
         assert_eq!(
-            rg(PathToken::Stem).structural_counterpart(&rp("locales/en.json"), &stem_cands),
+            lookup(PathToken::Stem, "locales/en.json", &stem_cands),
             Some(&s1)
         );
         let e1 = rp("schemas/a.yaml");
         let e2 = rp("schemas/user.yaml");
         let ext_cands = BTreeSet::from([&e1, &e2]);
         assert_eq!(
-            rg(PathToken::Ext).structural_counterpart(&rp("schemas/user.json"), &ext_cands),
+            lookup(PathToken::Ext, "schemas/user.json", &ext_cands),
             Some(&e2)
         );
         assert_eq!(
-            rg(PathToken::Dir).structural_counterpart(&rp("apps/web/errors.json"), &cands),
+            lookup(PathToken::Dir, "apps/web/errors.json", &cands),
             Some(&p_err)
         );
         let b1 = rp("locales/fr/a.json");
         let b_cands = BTreeSet::from([&b1]);
         assert_eq!(
-            rg(PathToken::Basename).structural_counterpart(&rp("locales/fr/b.json"), &b_cands),
+            lookup(PathToken::Basename, "locales/fr/b.json", &b_cands),
             Some(&b1)
         );
         assert_eq!(
-            rg(PathToken::Path).structural_counterpart(&rp("locales/en/errors.json"), &cands),
+            lookup(PathToken::Path, "locales/en/errors.json", &cands),
             None
         );
+        assert_eq!(split_stem_ext(".env"), (".env", ""));
+        assert_eq!(split_stem_ext(".eslintrc.json"), (".eslintrc", "json"));
+        assert_eq!(split_stem_ext("app.tar.gz"), ("app.tar", "gz"));
+        assert_eq!(split_stem_ext("Makefile"), ("Makefile", ""));
     }
 }

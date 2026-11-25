@@ -1276,7 +1276,10 @@ relations:
   tokens:
     from: { paths: "secrets/*.json" }
     entries: { format: toml, at: "$" }
-    fields: { key: entry.key, token: { source: entry.value, sensitive: true }, flag: "bound: $.private" }
+    fields:
+      key: entry.key
+      token: { source: entry.value, sensitive: true }
+      flag: { source: "bound: $.private", optional: true, on_missing: missing }
     transform: { token: [trim] }
     where:
       token: { not_in: ["x", { relation: workspaces, field: name }], matches: "^t" }
@@ -1524,4 +1527,75 @@ fn the_trace_schema_describes_the_plan_key_by_key() {
     .map(String::from)
     .collect();
     assert_eq!(redacted, every_form);
+}
+
+#[test]
+fn an_optional_bound_field_shows_its_mode_and_redacts_when_env_driven() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".alint.yml",
+        "version: 2\n\
+         relations:\n\
+         \x20 deps:\n\
+         \x20   from: { paths: 'packages/*/package.json' }\n\
+         \x20   entries: { format: json, at: $.dependencies }\n\
+         \x20   fields:\n\
+         \x20     dep: entry.key\n\
+         \x20     pkg: { source: 'bound: $.name', optional: true }\n\
+         \x20     license: { source: 'bound: $.license', optional: true, on_missing: missing, sensitive: true }\n\
+         \x20 env_deps:\n\
+         \x20   from: { paths: 'packages/*/package.json' }\n\
+         \x20   entries: { format: json, at: $.dependencies }\n\
+         \x20   fields:\n\
+         \x20     dep: entry.key\n\
+         \x20     pkg: { source: 'bound: $.name', optional: '{{env.IS_OPT}}', on_missing: '{{env.MODE}}' }\n\
+         rules:\n\
+         \x20 - id: plain\n\
+         \x20   kind: constraint\n\
+         \x20   input: deps\n\
+         \x20   assert: { unique: { key: [dep] } }\n\
+         \x20   level: error\n\
+         \x20 - id: env-driven\n\
+         \x20   kind: constraint\n\
+         \x20   input: env_deps\n\
+         \x20   assert: { unique: { key: [dep] } }\n\
+         \x20   level: error\n",
+    );
+    let env = [("IS_OPT", "true"), ("MODE", "missing")];
+    let (human, json) = explain(root, "plain", &env);
+    assert!(
+        human.contains("        pkg: bound: $.name  (optional)\n"),
+        "{human}"
+    );
+    assert!(
+        human.contains(
+            "        license: bound: $.license  (optional, on_missing: missing; sensitive)\n"
+        ),
+        "{human}"
+    );
+    let fields = &json["plan"]["relations"][0]["fields"];
+    assert_eq!(fields[1]["source"], "bound: $.name");
+    assert_eq!(fields[1]["optional"], true);
+    assert_eq!(fields[1]["on_missing"], "skip");
+    assert_eq!(fields[2]["source"], "bound: $.license");
+    assert_eq!(fields[2]["optional"], true);
+    assert_eq!(fields[2]["on_missing"], "missing");
+    assert_eq!(fields[2]["sensitive"], true);
+
+    // When the relation definition reads the environment (here via `optional:`
+    // and `on_missing:`), neither `optional` nor `on_missing` leaks in human or
+    // JSON `explain` output.
+    let (env_human, env_json) = explain(root, "env-driven", &env);
+    assert!(
+        env_human.contains("        pkg: bound: <redacted>\n"),
+        "{env_human}"
+    );
+    assert!(!env_human.contains("on_missing"), "{env_human}");
+    assert!(!env_human.contains("(optional)"), "{env_human}");
+    let env_field = &env_json["plan"]["relations"][0]["fields"][1];
+    assert_eq!(env_field["source"], "bound: <redacted>");
+    assert!(env_field.get("optional").is_none(), "{env_field}");
+    assert!(env_field.get("on_missing").is_none(), "{env_field}");
 }

@@ -8692,7 +8692,7 @@
           "$ref": "#/$defs/v2_entries"
         },
         "fields": {
-          "description": "The row's named fields: a map from each field's name to its source, or to `{ source, sensitive }`.",
+          "description": "The row's named fields: a map from each field's name to its source, or to `{ source, sensitive, optional, on_missing }`.",
           "minProperties": 1,
           "propertyNames": {
             "$ref": "#/$defs/v2_name"
@@ -8809,7 +8809,7 @@
       "type": "object"
     },
     "v2_source_bound": {
-      "description": "`bound: <JSONPath>`: a value read once per file (a manifest's `$.name`), which must match exactly once in each file.",
+      "description": "`bound: <JSONPath>`: a scalar value read once per file (a manifest's `$.name`). Must match exactly once unless `optional: true` is set (see `on_missing`).",
       "pattern": "^bound:\\s*\\S",
       "type": "string"
     },

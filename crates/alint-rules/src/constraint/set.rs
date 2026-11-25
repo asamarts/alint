@@ -27,7 +27,7 @@ use alint_core::relation::{LimitKind, Pointer, RelPath, Resource, Value};
 
 use super::{Groups, Place, Run, literal_type, spot_in, type_of};
 use crate::constraint::values::{Key, Kind, Scalar};
-use crate::constraint::{SetAssertion, SetMode, SetTarget};
+use crate::constraint::{CounterpartIndex, SetAssertion, SetMode, SetTarget};
 use crate::plural_groups::{Keys, Probe, Side};
 
 /// One group of a `set`.
@@ -328,7 +328,7 @@ impl<'r> Run<'r> {
             .expect("a group target has `group_by:`");
         let group_at = self.rows.field(group_by)?;
         let reference = Scalar::of_value(reference).expect("the builder takes scalar literals");
-        let shown = if self.rule.hide_literals || self.sensitive(group_at) {
+        let shown = if self.redact_all || self.rule.hide_literals || self.sensitive(group_at) {
             "<redacted>".to_string()
         } else {
             reference.show(false)
@@ -491,7 +491,37 @@ impl<'r> Run<'r> {
     /// `assert:` redacts every message of the rule already
     /// ([`ConstraintRule::hide_literals`](crate::constraint::ConstraintRule)).
     fn group_hidden(&self, group: &SetGroup<'_>, group_at: usize) -> bool {
-        self.sensitive(group_at) || (group.literal && self.rule.hide_literals)
+        self.redact_all || self.sensitive(group_at) || (group.literal && self.rule.hide_literals)
+    }
+
+    /// Whether a compared value stays out of generated messages and baseline
+    /// keys (ADR-0050 D9).
+    fn value_hidden(&self, compared: &Compared<'_, '_>) -> bool {
+        self.redact_all
+            || self.sensitive(compared.field_at)
+            || compared.other.rows.fields[compared.other.at].sensitive
+    }
+
+    /// Whether `{{value}}` in a custom `message:` stays redacted (ADR-0050 D9):
+    /// also redacts whenever `assert:` holds environment-derived literals.
+    fn placeholder_value_hidden(&self, compared: &Compared<'_, '_>) -> bool {
+        self.value_hidden(compared) || self.rule.hide_literals
+    }
+
+    /// Precompute a per-group `O(1)` structural counterpart index when
+    /// comparing against a same-relation `{ group: ... }` target (#595).
+    /// Cross-relation `{ relation: R, field: F }` targets fall back to
+    /// `group.first` (ADR-0050 D9).
+    fn counterpart_index(
+        compared: &Compared<'_, 'r>,
+        group: &SetGroup<'r>,
+    ) -> Option<CounterpartIndex<'r>> {
+        compared.other.group?;
+        compared
+            .set
+            .resource_groups
+            .as_ref()
+            .map(|by_resource| by_resource.counterpart_index(&group.resources))
     }
 
     /// A finding's key: `set`, the group, the value and `what`.
@@ -511,40 +541,36 @@ impl<'r> Run<'r> {
                 key.part("all");
             }
         }
-        key.value(value, self.sensitive(compared.field_at))
-            .part(what);
+        key.value(value, self.value_hidden(compared)).part(what);
         key
     }
 
     /// Value `value` of the other set, held by its row `theirs`, which group
-    /// `group` lacks: at the structural counterpart in `group.resources` when
-    /// unique (#595), else the group's first resource, related to `theirs`.
+    /// `group` lacks: at the structural counterpart in `counterparts` when
+    /// unique (same-relation `{ group: }` targets only, #595), else the
+    /// group's first resource, related to `theirs`.
     fn missing(
         &mut self,
         compared: &Compared<'_, 'r>,
-        group: &SetGroup<'_>,
+        group: &SetGroup<'r>,
+        counterparts: Option<&CounterpartIndex<'r>>,
         value: &Scalar,
         theirs: usize,
     ) {
         let other = compared.other;
+        let hide_value = self.value_hidden(compared);
         let message = format!(
             "{} lacks `{}` {}, which {} holds",
             self.subject(compared, group),
             compared.set.field,
-            value.show(self.sensitive(compared.field_at)),
+            value.show(hide_value),
             other.shown
         );
         let ref_path = other.rows.rows[theirs].at.resource.path();
-        let target_path = compared
-            .set
-            .resource_groups
-            .as_ref()
-            .and_then(|by_resource| by_resource.structural_counterpart(ref_path, &group.resources))
+        let target_path = counterparts
+            .and_then(|index| index.lookup(ref_path))
             .or(group.first);
         let at = target_path.map_or(Place::Nowhere, |path| Place::Resource(path.as_path()));
-        let hide_value = self.sensitive(compared.field_at)
-            || other.rows.fields[other.at].sensitive
-            || self.rule.hide_literals;
         let hide_other = self.hide_keys || hide_value;
         let holder = spot_in(other.rows, theirs, other.at, hide_other);
         let related = self.related_at(vec![(holder, other.label.as_str())], 0);
@@ -558,7 +584,7 @@ impl<'r> Run<'r> {
             key,
             related,
             reported,
-            Some((value, hide_value)),
+            Some((value, self.placeholder_value_hidden(compared))),
         );
     }
 
@@ -579,26 +605,24 @@ impl<'r> Run<'r> {
             .map(|&row| (self.spot(row, field_at), "another row of the group with it"))
             .collect();
         let omitted = others.len() - places.len();
+        let hide_value = self.value_hidden(compared);
         let message = format!(
             "{} holds `{}` {}, which {} lacks",
             self.subject(compared, group),
             compared.set.field,
-            value.show(self.sensitive(field_at)),
+            value.show(hide_value),
             compared.other.shown
         );
         let related = self.related_at(places, omitted);
         let key = self.set_key(compared, group, value, "extra");
         let at = self.spot(row, field_at);
-        let hide_value = self.sensitive(field_at)
-            || compared.other.rows.fields[compared.other.at].sensitive
-            || self.rule.hide_literals;
         self.report(
             at,
             message,
             key,
             related,
             Some(row),
-            Some((value, hide_value)),
+            Some((value, self.placeholder_value_hidden(compared))),
         );
     }
 
@@ -613,16 +637,14 @@ impl<'r> Run<'r> {
         theirs: usize,
     ) {
         let other = compared.other;
+        let hide_value = self.value_hidden(compared);
         let message = format!(
             "{} and {} both hold `{}` {}",
             self.subject(compared, group),
             other.shown,
             compared.set.field,
-            value.show(self.sensitive(compared.field_at))
+            value.show(hide_value)
         );
-        let hide_value = self.sensitive(compared.field_at)
-            || other.rows.fields[other.at].sensitive
-            || self.rule.hide_literals;
         let hide_other = self.hide_keys || hide_value;
         let holder = spot_in(other.rows, theirs, other.at, hide_other);
         let related = self.related_at(vec![(holder, other.label.as_str())], 0);
@@ -634,16 +656,17 @@ impl<'r> Run<'r> {
             key,
             related,
             Some(row),
-            Some((value, hide_value)),
+            Some((value, self.placeholder_value_hidden(compared))),
         );
     }
 
     /// Group `group` against the other set, values compared as they are.
-    fn exact_group(&mut self, compared: &Compared<'_, 'r>, group: &SetGroup<'_>) {
+    fn exact_group(&mut self, compared: &Compared<'_, 'r>, group: &SetGroup<'r>) {
         let ours = held(&group.rows, compared.values);
         let other = compared.other;
         let mode = compared.set.mode;
         if mode == SetMode::EqualTo {
+            let counterparts = Self::counterpart_index(compared, group);
             for (idx, (value, holders)) in other.held.iter().enumerate() {
                 if !ours.rows.contains_key(value) {
                     if self.at_finding_cap() {
@@ -654,7 +677,13 @@ impl<'r> Run<'r> {
                         }
                         return;
                     }
-                    self.missing(compared, group, &value[0], holders[0]);
+                    self.missing(
+                        compared,
+                        group,
+                        counterparts.as_ref(),
+                        &value[0],
+                        holders[0],
+                    );
                 }
             }
         }
@@ -710,7 +739,7 @@ impl<'r> Run<'r> {
     fn plural_group(
         &mut self,
         compared: &Compared<'_, 'r>,
-        group: &SetGroup<'_>,
+        group: &SetGroup<'r>,
         reference: &Keys<'r, usize>,
     ) {
         let Some(peer) = self.key_paths(&group.rows, compared.field_at) else {
@@ -724,6 +753,7 @@ impl<'r> Run<'r> {
         };
         let mode = compared.set.mode;
         if mode == SetMode::EqualTo {
+            let counterparts = Self::counterpart_index(compared, group);
             let mut missing: Vec<(usize, Scalar)> = probe
                 .merged(Side::Reference)
                 .into_iter()
@@ -737,7 +767,7 @@ impl<'r> Run<'r> {
                     self.suppress_findings(total_missing - idx, !merged.is_empty());
                     return;
                 }
-                self.missing(compared, group, &value, theirs);
+                self.missing(compared, group, counterparts.as_ref(), &value, theirs);
             }
         }
         let mut found: Vec<(usize, Scalar, Option<usize>)> = Vec::new();

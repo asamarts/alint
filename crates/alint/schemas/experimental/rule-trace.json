@@ -933,6 +933,15 @@
                             "name": {
                               "type": "string"
                             },
+                            "on_missing": {
+                              "enum": [
+                                "skip",
+                                "missing"
+                              ]
+                            },
+                            "optional": {
+                              "type": "boolean"
+                            },
                             "sensitive": {
                               "type": "boolean"
                             },

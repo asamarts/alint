@@ -615,14 +615,29 @@ impl<'p> Checker<'p> {
         Holds::Any
     }
 
-    /// Whether field `name` of relation `id` reads `entry.root` directly
-    /// (never across a join, whose inner match drops zero-row stubs).
+    /// Whether field `name` of relation `id` reads `entry.root` directly or
+    /// copies an `entry.root` field through a `join:` (which may itself run
+    /// `strip-root` on an untransformed `entry.path`, #598).
     fn is_entry_root(&self, id: RelationId, name: &str) -> bool {
-        let relation = &self.plan.relation(id).relation;
-        matches!(
-            relation.field(name).map(|field| &field.source),
-            Some(FieldSource::EntryRoot)
-        )
+        let mut at = (id, name.to_string());
+        for _ in 0..=self.plan.relations.len() {
+            let relation = &self.plan.relation(at.0).relation;
+            match (
+                relation.field(&at.1).map(|field| &field.source),
+                &relation.rows,
+            ) {
+                (Some(FieldSource::EntryRoot), _) => return true,
+                (Some(FieldSource::Side(side, copied)), Rows::Join(join)) => {
+                    let next = match side {
+                        JoinSide::Left => join.left.id,
+                        JoinSide::Right => join.right.id,
+                    };
+                    at = (next, copied.clone());
+                }
+                _ => return false,
+            }
+        }
+        false
     }
 
     /// Whether field `name` of relation `id` is `path` or a path token, or a

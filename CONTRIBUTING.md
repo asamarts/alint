@@ -61,7 +61,7 @@ against pushes to `main`:
 
 ```sh
 ci/scripts/preflight.sh   # fmt + clippy + test + docs + docs-overlay + version-pins
-                          #   + dep-floors + secrets-inv + dogfood
+                          #   + v2-schema-id + dep-floors + secrets-inv + dogfood
 ```
 
 Under the hood it runs:
@@ -75,12 +75,13 @@ ci/scripts/test.sh                         # cargo test --workspace + bash CLI t
 ci/scripts/docs.sh                         # cargo doc -D warnings + public-api-parser-gate
                                            #   + docs-export/gen-schema/gen-facts/gen-categories/
                                            #     gen-roadmap/gen-arch/gen-model --check
-                                           #   + check-version-pins.sh + likec4 validate
-                                           #   + gen-mermaid --check + strip-since tests
-                                           #   + test-pin-docs-counts.sh
+                                           #   + check-version-pins.sh + check-v2-schema-id.sh
+                                           #   + likec4 validate + gen-mermaid --check
+                                           #   + strip-since tests + test-pin-docs-counts.sh
 ci/scripts/check-docs-overlay-since.py     # lines added since the latest v* tag in the pages
                                            #   alint.org overlays from main sit in since-blocks
 ci/scripts/check-version-pins.sh           # README/SECURITY/docs/site install snippets + npm pin to workspace version
+ci/scripts/check-v2-schema-id.sh           # draft v2 schema $id matches gen_schema_v2 RELEASE + docs modelines
 ci/scripts/check-workspace-dep-floors.sh   # [workspace.dependencies] floors <= workspace.package.version
 ci/scripts/dogfood.sh                      # cargo build --release + alint check on this repo
 ```
