@@ -1024,10 +1024,11 @@ fn close_sensitivity(plan: &mut Plan, order: &[RelationId]) {
                     continue;
                 }
                 match &field.source {
-                    plan::FieldSource::EntryValue
-                    | plan::FieldSource::Value
-                    | plan::FieldSource::Bound { .. } => {
+                    plan::FieldSource::EntryValue | plan::FieldSource::Value => {
                         exact_sources.push(&field.source);
+                    }
+                    plan::FieldSource::Bound { query, .. } => {
+                        filtered.insert(Family::Bound(query));
                     }
                     plan::FieldSource::Path(token) => {
                         exact_sources.push(&field.source);

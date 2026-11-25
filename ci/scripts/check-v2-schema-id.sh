@@ -14,25 +14,33 @@
 #     4. Finds the latest prior `v*.*.*` tag strictly less than `<tag>` that
 #        contains `schemas/v2/config.json`.
 #     5. Normalizes `$id` out of both `<prev_tag>:schemas/v2/config.json` and
-#        working-tree `schemas/v2/config.json`; if the schema body changed (or
-#        no prior tag had the v2 schema), requires `RELEASE == <tag>`. If the
-#        schema body is identical to `<prev_tag>`, passes without forcing a
-#        spurious `$id` bump.
+#        working-tree `schemas/v2/config.json` using type-faithful canonical
+#        JSON; if the schema body changed (or no prior tag had the v2 schema),
+#        requires `RELEASE == <tag>`. If the schema body is identical to
+#        `<prev_tag>`, passes without forcing a spurious `$id` bump.
 #
 # Override the repository root for hermetic tests via `V2_SCHEMA_REPO_ROOT`.
 
 set -euo pipefail
 
-MODE="dev"
+MODE=""
 RELEASE_TAG=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dev)
+      if [[ -n "$MODE" ]]; then
+        echo "[check-v2-schema-id] conflicting or duplicate mode flag: $1" >&2
+        exit 2
+      fi
       MODE="dev"
       shift
       ;;
     --release)
+      if [[ -n "$MODE" ]]; then
+        echo "[check-v2-schema-id] conflicting or duplicate mode flag: $1" >&2
+        exit 2
+      fi
       if [[ $# -lt 2 ]]; then
         echo "[check-v2-schema-id] --release requires a tag argument (e.g. v0.24.0)" >&2
         exit 2
@@ -51,6 +59,8 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+MODE="${MODE:-dev}"
 
 SCRIPT_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ROOT="${V2_SCHEMA_REPO_ROOT:-$SCRIPT_ROOT}"
@@ -71,9 +81,12 @@ RELEASE_CONST_RE = re.compile(
     r'^\s*(?:pub(?:\([^)]*\))?\s+)?const\s+RELEASE:\s*&str\s*=\s*"([^"]+)"\s*;',
     re.MULTILINE,
 )
-MODELINE_RE = re.compile(
-    r"^#\s*yaml-language-server:\s*\$schema=(\S+/schemas/v2/config\.json)\s*$",
-    re.MULTILINE,
+ANY_V2_MODELINE_LINE_RE = re.compile(
+    r"^\s*#\s*yaml-language-server:.*schemas/v2.*$",
+    re.MULTILINE | re.IGNORECASE,
+)
+STRICT_MODELINE_RE = re.compile(
+    r"^\s*#\s*yaml-language-server:\s*\$schema=(\S+)\s*$"
 )
 ID_PREFIX = "https://raw.githubusercontent.com/asamarts/alint/"
 ID_SUFFIX = "/schemas/v2/config.json"
@@ -94,6 +107,12 @@ def parse_semver(tag: str):
 def fail(msg: str) -> None:
     print(f"[check-v2-schema-id] FAIL: {msg}", file=sys.stderr)
     sys.exit(1)
+
+
+def canonical_body(obj: dict) -> str:
+    body = dict(obj)
+    body.pop("$id", None)
+    return json.dumps(body, sort_keys=True, separators=(",", ":"))
 
 
 gen_file = root / "xtask/src/gen_schema_v2.rs"
@@ -118,6 +137,8 @@ try:
     cur_schema = json.loads(schema_file.read_text(encoding="utf-8"))
 except Exception as exc:
     fail(f"could not parse {schema_file} as JSON: {exc}")
+if not isinstance(cur_schema, dict):
+    fail(f"{schema_file} top-level JSON value must be an object, got {type(cur_schema).__name__}")
 
 actual_id = cur_schema.get("$id")
 if actual_id != expected_id:
@@ -131,13 +152,20 @@ for rel_doc in MODELINE_DOCS:
     doc_path = root / rel_doc
     if not doc_path.is_file():
         fail(f"missing documented modeline file {rel_doc}")
-    matches = MODELINE_RE.findall(doc_path.read_text(encoding="utf-8"))
-    if not matches:
+    lines = ANY_V2_MODELINE_LINE_RE.findall(doc_path.read_text(encoding="utf-8"))
+    if not lines:
         fail(
             f"{rel_doc} has no `# yaml-language-server: $schema=.../schemas/v2/config.json` "
             "modeline"
         )
-    for found in matches:
+    for line in lines:
+        m_strict = STRICT_MODELINE_RE.match(line)
+        if not m_strict:
+            fail(
+                f"{rel_doc} has malformed v2 schema modeline {line.strip()!r}; "
+                f"expected `# yaml-language-server: $schema={expected_id}`"
+            )
+        found = m_strict.group(1)
         if found != expected_id:
             fail(
                 f"{rel_doc} modeline names {found!r}, expected {expected_id!r} "
@@ -178,18 +206,43 @@ prior_tags.sort(reverse=True)
 prev_tag = None
 prev_schema = None
 for _, candidate in prior_tags:
+    commit_ok = subprocess.run(
+        ["git", "-C", str(root), "cat-file", "-e", f"{candidate}^{{commit}}"],
+        capture_output=True,
+        text=True,
+    )
+    if commit_ok.returncode != 0:
+        fail(
+            f"git history for prior tag {candidate} is unavailable (shallow clone? "
+            "run `git fetch --tags --unshallow` or checkout with `fetch-depth: 0`)"
+        )
+    ls = subprocess.run(
+        ["git", "-C", str(root), "ls-tree", "-r", "--name-only", candidate, "--", "schemas/v2/config.json"],
+        capture_output=True,
+        text=True,
+    )
+    if ls.returncode != 0:
+        fail(f"git ls-tree failed for tag {candidate}: {ls.stderr.strip()}")
+    if "schemas/v2/config.json" not in ls.stdout.splitlines():
+        continue
     show = subprocess.run(
         ["git", "-C", str(root), "show", f"{candidate}:schemas/v2/config.json"],
         capture_output=True,
         text=True,
     )
-    if show.returncode == 0:
-        prev_tag = candidate
-        try:
-            prev_schema = json.loads(show.stdout)
-        except Exception as exc:
-            fail(f"could not parse {candidate}:schemas/v2/config.json as JSON: {exc}")
-        break
+    if show.returncode != 0:
+        fail(f"git show {candidate}:schemas/v2/config.json failed: {show.stderr.strip()}")
+    prev_tag = candidate
+    try:
+        prev_schema = json.loads(show.stdout)
+    except Exception as exc:
+        fail(f"could not parse {candidate}:schemas/v2/config.json as JSON: {exc}")
+    if not isinstance(prev_schema, dict):
+        fail(
+            f"{candidate}:schemas/v2/config.json top-level JSON value must be an object, "
+            f"got {type(prev_schema).__name__}"
+        )
+    break
 
 if prev_tag is None:
     if schema_release != release_tag:
@@ -203,12 +256,7 @@ if prev_tag is None:
     )
     sys.exit(0)
 
-cur_body = dict(cur_schema)
-prev_body = dict(prev_schema)
-cur_body.pop("$id", None)
-prev_body.pop("$id", None)
-
-if cur_body != prev_body:
+if canonical_body(cur_schema) != canonical_body(prev_schema):
     if schema_release != release_tag:
         fail(
             f"schemas/v2/config.json changed since {prev_tag}, but "

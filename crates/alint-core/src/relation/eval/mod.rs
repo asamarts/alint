@@ -552,13 +552,14 @@ impl Evaluator<'_> {
             }
             super::plan::Rows::Union(parts) => Some(self.parts(&site, named, parts, &mut failures)),
         };
-        let rows = rows.and_then(|rows| self.refine(&site, named, rows, &mut failures));
+        let rows = rows.and_then(|rows| self.refine(&site, id, named, rows, &mut failures));
         match rows {
             Some(mut rows) if failures.is_empty() => {
                 // The memo holds the rows for the run: with no spare room,
                 // what they hold stays within their cells' budget however
                 // few rows a relation has.
                 rows.rows.shrink_to_fit();
+                rows.stub_rows.shrink_to_fit();
                 Ok(Arc::new(rows))
             }
             None if failures.is_empty() => {

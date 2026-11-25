@@ -74,13 +74,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `constraint` `set` rules now support `{{value}}` (and `{{ value }}`) in custom `message:`
   templates for missing, extra, and shared values with single-pass expansion (never re-expanding
   substituted values), 64-character truncation, invisible-character escaping, and `<redacted>`
-  redaction for sensitive fields and environment-derived literals, rejecting `{{value}}` at load
-  time on `equal` and `unique` assertions while leaving non-alint `{{...}}` tokens literal (#594).
-- `constraint` `set` missing-value findings grouped by a path token (`parent_name`, `dir`,
-  `basename`, `stem`, `ext`) now anchor at the unique structural counterpart file in the target
-  group whose non-token path components match the reference file (for example
-  `locales/fr/errors.json` for a key from `locales/en/errors.json`), falling back to the group's
-  first file on ambiguity or missing counterparts while keeping baseline keys path-free (#595).
+  redaction for sensitive fields, environment-derived relations/literals, and `sensitive: true`
+  rules, rejecting `{{value}}` at load time on `equal` and `unique` assertions while leaving
+  non-alint `{{...}}` tokens literal (#594).
+- `constraint` `set` missing-value findings against same-relation `{ group: ... }` targets grouped
+  by a path token (`parent_name`, `dir`, `basename`, `stem`, `ext`) now anchor at the unique
+  structural counterpart file in the target group whose non-token path components match the
+  reference file (for example `locales/fr/errors.json` for a key from `locales/en/errors.json`),
+  falling back to the group's first file on ambiguity, missing counterparts, or cross-relation
+  targets while keeping baseline keys path-free (#595).
 - `constraint` `set` rules grouped by `entry.root` under `strip-root` now form zero-row groups
   anchored at single-root stub files (`fr:`, `fr: {}`, `fr: []`) that survive `entry.root`,
   path-token, and `bound:` transforms and `where:` filters, both with and without `groups:`, while

@@ -31,6 +31,10 @@ if [[ -z "$NEW" ]]; then
   echo "usage: $0 <new-version, e.g. 0.9.21>" >&2
   exit 2
 fi
+if [[ ! "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "invalid version '$NEW': expected X.Y.Z without a leading 'v'" >&2
+  exit 2
+fi
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO_ROOT"
@@ -95,7 +99,7 @@ cargo run -q -p xtask -- gen-facts
 #     modelines, and regenerate `schemas/v2/config.json`.
 if [[ -f schemas/v2/config.json && -f xtask/src/gen_schema_v2.rs ]]; then
   NEW_TAG="v${NEW}"
-  if python3 - "$NEW_TAG" <<'PY'
+  V2_SCHEMA_STATE=$(python3 - "$NEW_TAG" <<'PY'
 import json
 import re
 import subprocess
@@ -109,12 +113,20 @@ def parse(tag):
     m = semver_re.match(tag)
     return tuple(int(x) for x in m.groups()) if m else None
 
+def canonical_body(obj):
+    body = dict(obj)
+    body.pop("$id", None)
+    return json.dumps(body, sort_keys=True, separators=(",", ":"))
+
 new_ver = parse(new_tag)
 if new_ver is None:
-    sys.exit(1)
+    print(f"invalid target tag {new_tag!r}", file=sys.stderr)
+    sys.exit(2)
 
 cur = json.loads(Path("schemas/v2/config.json").read_text(encoding="utf-8"))
-cur.pop("$id", None)
+if not isinstance(cur, dict):
+    print("schemas/v2/config.json top-level value is not an object", file=sys.stderr)
+    sys.exit(2)
 
 tags = subprocess.run(
     ["git", "tag", "-l", "v*.*.*"],
@@ -127,25 +139,47 @@ prior = sorted(
     reverse=True,
 )
 for _, tag in prior:
+    subprocess.run(
+        ["git", "cat-file", "-e", f"{tag}^{{commit}}"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    ls = subprocess.run(
+        ["git", "ls-tree", "-r", "--name-only", tag, "--", "schemas/v2/config.json"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    if "schemas/v2/config.json" not in ls.stdout.splitlines():
+        continue
     show = subprocess.run(
         ["git", "show", f"{tag}:schemas/v2/config.json"],
         capture_output=True,
         text=True,
+        check=True,
     )
-    if show.returncode == 0:
-        prev = json.loads(show.stdout)
-        prev.pop("$id", None)
-        sys.exit(0 if cur != prev else 1)
-sys.exit(0)
+    prev = json.loads(show.stdout)
+    if not isinstance(prev, dict):
+        print(f"{tag}:schemas/v2/config.json top-level value is not an object", file=sys.stderr)
+        sys.exit(2)
+    print("changed" if canonical_body(cur) != canonical_body(prev) else "unchanged")
+    sys.exit(0)
+print("changed")
 PY
-  then
-    OLD_V2_REL=$(sed -nE 's/^[[:space:]]*pub\(crate\) const RELEASE: &str = "(v[0-9]+\.[0-9]+\.[0-9]+)";/\1/p' xtask/src/gen_schema_v2.rs | head -n1)
-    if [[ -n "$OLD_V2_REL" && "$OLD_V2_REL" != "$NEW_TAG" ]]; then
+  )
+  if [[ "$V2_SCHEMA_STATE" == "changed" ]]; then
+    OLD_V2_REL=$(sed -nE 's/^[[:space:]]*(pub(\([^)]*\))?[[:space:]]+)?const[[:space:]]+RELEASE:[[:space:]]*&str[[:space:]]*=[[:space:]]*"(v[0-9]+\.[0-9]+\.[0-9]+)";/\3/p' xtask/src/gen_schema_v2.rs | head -n1)
+    if [[ -z "$OLD_V2_REL" ]]; then
+      echo "could not read const RELEASE from xtask/src/gen_schema_v2.rs" >&2
+      exit 2
+    fi
+    if [[ "$OLD_V2_REL" != "$NEW_TAG" ]]; then
       echo "==> refreshing draft v2 schema \$id: $OLD_V2_REL -> $NEW_TAG"
       OLD_V2_ESC="${OLD_V2_REL//./\\.}"
-      sed -i -E "s|(pub\\(crate\\) const RELEASE: &str = )\"${OLD_V2_ESC}\";|\\1\"${NEW_TAG}\";|" xtask/src/gen_schema_v2.rs
+      sed -i -E "s|(const[[:space:]]+RELEASE:[[:space:]]*&str[[:space:]]*=[[:space:]]*)\"${OLD_V2_ESC}\";|\\1\"${NEW_TAG}\";|" xtask/src/gen_schema_v2.rs
       if [[ -f xtask/src/gen_schema_v2_tests.rs ]]; then
-        sed -i -E "s|(https://raw\\.githubusercontent\\.com/asamarts/alint/)${OLD_V2_ESC}(/schemas/v2/config\\.json)|\\1${NEW_TAG}\\2|g" xtask/src/gen_schema_v2_tests.rs
+        sed -i -E "s|(https://[^\"]+/)${OLD_V2_ESC}(/schemas/v2/config\\.json)|\\1${NEW_TAG}\\2|g" xtask/src/gen_schema_v2_tests.rs
       fi
       for doc in docs/site/configuration/version-2.md docs/development/CONFIG-AUTHORING.md; do
         if [[ -f "$doc" ]]; then
@@ -154,6 +188,9 @@ PY
       done
       cargo run -q -p xtask -- gen-schema
     fi
+  elif [[ "$V2_SCHEMA_STATE" != "unchanged" ]]; then
+    echo "unexpected v2 schema state: $V2_SCHEMA_STATE" >&2
+    exit 2
   fi
 fi
 

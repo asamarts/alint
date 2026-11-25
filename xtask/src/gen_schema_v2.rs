@@ -681,8 +681,9 @@ fn field_defs() -> Vec<(String, Value)> {
             json!({
                 "type": "string",
                 "pattern": "^bound:\\s*\\S",
-                "description": "`bound: <JSONPath>`: a value read once per file (a manifest's \
-                    `$.name`), which must match exactly once in each file.",
+                "description": "`bound: <JSONPath>`: a scalar value read once per file (a \
+                    manifest's `$.name`). Must match exactly once unless `optional: true` is \
+                    set (see `on_missing`).",
             }),
         ),
         (
@@ -868,7 +869,7 @@ fn relation() -> Value {
                 "minProperties": 1,
                 "propertyNames": { "$ref": "#/$defs/v2_name" },
                 "description": "The row's named fields: a map from each field's name to its \
-                    source, or to `{ source, sensitive }`.",
+                    source, or to `{ source, sensitive, optional, on_missing }`.",
             },
             "transform": { "$ref": "#/$defs/v2_transforms" },
             "where": { "$ref": "#/$defs/v2_filters" },

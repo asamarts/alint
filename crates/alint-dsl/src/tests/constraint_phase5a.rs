@@ -693,3 +693,378 @@ rules:
     assert!(errs[0].contains("locales/bad.yml"), "{errs:?}");
     assert!(errs[0].contains("`fr`, `de`"), "{errs:?}");
 }
+
+// ---------------------------------------------------------------------------
+// Post-Batch-5a adversarial audit regressions
+// ---------------------------------------------------------------------------
+
+#[test]
+fn sensitive_bound_propagates_across_different_optional_and_on_missing_siblings() {
+    let config = "\
+version: 2
+relations:
+  r:
+    from: { paths: '*.json' }
+    entries: { format: json, at: $.deps }
+    fields:
+      secret_tok: { source: 'bound: $.api_token', sensitive: true }
+      leaked_skip: { source: 'bound: $.api_token', optional: true }
+      leaked_missing: { source: 'bound: $.api_token', optional: true, on_missing: missing }
+      dep: entry.key
+rules:
+  - id: leak-check
+    kind: constraint
+    input: r
+    assert:
+      set:
+        field: leaked_missing
+        group_by: dep
+        equal_to: { group: a }
+    message: 'val={{value}} row={{row.leaked_skip}}'
+    level: error
+";
+    let results = run(
+        config,
+        &[
+            (
+                "a.json",
+                r#"{"api_token": "SECRET_CANARY_99", "deps": {"a": "1"}}"#,
+            ),
+            (
+                "b.json",
+                r#"{"api_token": "OTHER_SECRET_77", "deps": {"b": "1"}}"#,
+            ),
+        ],
+    );
+    let vs = &result(&results, "leak-check").violations;
+    assert_eq!(vs.len(), 2, "{vs:?}");
+    for v in vs {
+        assert!(v.message.contains("val=<redacted>"), "{v:?}");
+        assert!(v.message.contains("row=<redacted>"), "{v:?}");
+        assert!(!v.message.contains("SECRET_CANARY_99"), "{v:?}");
+        assert!(!v.message.contains("OTHER_SECRET_77"), "{v:?}");
+        let key = v.baseline_key.as_deref().unwrap_or("");
+        assert!(!key.contains("SECRET_CANARY_99"), "{key}");
+        assert!(!key.contains("OTHER_SECRET_77"), "{key}");
+    }
+}
+
+#[test]
+fn missing_bound_in_union_names_bound_query_and_preserves_read_row_zero_span() {
+    // 1. In a `union:`, a missing `bound:` (`on_missing: missing`) blames
+    //    `bound: $.license` rather than `entries.at: $.dependencies`.
+    let union_cfg = "\
+version: 2
+relations:
+  deps:
+    union:
+      - { from: { paths: 'a/*.json' }, entries: { format: json, at: $.dependencies } }
+      - { from: { paths: 'b/*.json' }, entries: { format: json, at: $.dependencies } }
+    fields:
+      license: { source: 'bound: $.license', optional: true, on_missing: missing }
+      dep: entry.key
+rules:
+  - id: same-license
+    kind: constraint
+    input: deps
+    assert: { equal: { field: license } }
+    level: error
+";
+    let res = run(
+        union_cfg,
+        &[
+            ("a/pkg.json", r#"{"dependencies": {"react": "18"}}"#),
+            (
+                "b/pkg.json",
+                r#"{"license": "MIT", "dependencies": {"react": "18"}}"#,
+            ),
+        ],
+    );
+    let found = findings(&res, "same-license");
+    assert!(
+        found.iter().any(
+            |f| f.contains("`bound: $.license`, matched nothing") && !f.contains("entries.at:")
+        ),
+        "{found:?}"
+    );
+
+    // 2. Under `read:`, a missing `bound:` cell does not collide with row 0's
+    //    provenance, so BOTH row 0 and row 1 keep their `:line:col` spans.
+    let read_cfg = "\
+version: 2
+relations:
+  deps:
+    from: { paths: '*.json' }
+    read: { json: '$.deps.*' }
+    fields:
+      license: { source: 'bound: $.license', optional: true, on_missing: missing }
+      ver: value
+rules:
+  - id: same-license
+    kind: constraint
+    input: deps
+    assert:
+      equal:
+        field: license
+        to: { row: { ver: '18.0.0' } }
+    level: error
+";
+    let res = run(
+        read_cfg,
+        &[
+            (
+                "a.json",
+                "{\n  \"license\": \"MIT\",\n  \"deps\": {\"r\": \"18.0.0\"}\n}\n",
+            ),
+            (
+                "b.json",
+                "{\n  \"deps\": {\n    \"x\": \"1.0.0\",\n    \"y\": \"2.0.0\"\n  }\n}\n",
+            ),
+        ],
+    );
+    let vs = &result(&res, "same-license").violations;
+    assert_eq!(vs.len(), 2, "{vs:?}");
+    assert!(
+        vs[0].line.is_some() && vs[0].column.is_some(),
+        "row 0 lost span: {vs:?}"
+    );
+    assert!(
+        vs[1].line.is_some() && vs[1].column.is_some(),
+        "row 1 lost span: {vs:?}"
+    );
+}
+
+#[test]
+fn set_cross_relation_target_does_not_misplace_by_basename_and_redacts_direct_evaluate() {
+    // 1. Cross-relation target `{ relation: R, field: F }` sharing a basename
+    //    under `group_by: dir` MUST fall back to `group.first`, never blame
+    //    an unrelated file by accidental basename collision.
+    let cross_cfg = "\
+version: 2
+relations:
+  registry:
+    from: { paths: 'config/common.json' }
+    entries: { format: json, at: $ }
+    fields: { key: entry.key }
+  locales:
+    from: { paths: 'locales/*/*.json' }
+    entries: { format: json, at: $ }
+    fields:
+      dir: dir
+      key: entry.key
+rules:
+  - id: all-keys
+    kind: constraint
+    input: locales
+    assert:
+      set:
+        field: key
+        group_by: dir
+        equal_to: { relation: registry, field: key }
+    level: error
+";
+    let res = run(
+        cross_cfg,
+        &[
+            ("config/common.json", r#"{"auth_title": 1}"#),
+            ("locales/fr/auth.json", "{}"),
+            ("locales/fr/common.json", "{}"),
+        ],
+    );
+    let found = findings(&res, "all-keys");
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(
+        found[0].starts_with("locales/fr/auth.json: "),
+        "cross-relation target must fall back to group.first: {found:?}"
+    );
+
+    // 2. Direct `Rule::evaluate(&ctx)` (without `RuleSpec` wrapping) redacts
+    //    `{{value}}` and `{{row.FIELD}}` for `sensitive: true` rules AND
+    //    `reads_environment` relations.
+    let sens_rule_cfg = "\
+version: 2
+relations:
+  keys:
+    from: { paths: 'locales/*.json' }
+    entries: { format: json, at: $ }
+    fields: { locale: stem, key: entry.key }
+rules:
+  - id: sens
+    kind: constraint
+    sensitive: true
+    input: keys
+    assert:
+      set:
+        field: key
+        group_by: locale
+        equal_to: { group: en }
+    message: 'v={{value}} r={{row.key}}'
+    level: error
+";
+    let res = run(
+        sens_rule_cfg,
+        &[
+            ("locales/en.json", r#"{"TOP_SECRET_KEY": 1}"#),
+            ("locales/fr.json", "{}"),
+        ],
+    );
+    let found = findings(&res, "sens");
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(found[0].contains("v=<redacted> r=<redacted>"), "{found:?}");
+    assert!(!found[0].contains("TOP_SECRET_KEY"), "{found:?}");
+}
+
+#[test]
+fn strip_root_stubs_work_with_entry_value_joins_plurals_and_all_stub_inputs() {
+    // 1. Binding `entry.value` alongside `strip-root` treats `fr:`, `fr: {}`,
+    //    and `fr: []` uniformly as stub roots.
+    let val_cfg = "\
+version: 2
+relations:
+  keys:
+    from: { paths: 'locales/*.yml' }
+    entries: { format: yaml, at: $, leaves: true }
+    fields:
+      locale: entry.root
+      key: entry.path
+      val: entry.value
+    transform:
+      key: [strip-root]
+rules:
+  - id: i18n
+    kind: constraint
+    input: keys
+    assert:
+      set:
+        field: key
+        group_by: locale
+        equal_to: { group: en }
+        plurals: cldr
+    level: error
+";
+    let res = run(
+        val_cfg,
+        &[
+            (
+                "locales/en.yml",
+                "en:\n  inbox:\n    one: '1'\n    other: 'n'\n",
+            ),
+            ("locales/fr.yml", "fr: {}\n"),
+            ("locales/de.yml", "de: []\n"),
+            ("locales/it.yml", "it:\n"),
+        ],
+    );
+    let found = findings(&res, "i18n");
+    assert_eq!(found.len(), 3, "{found:?}");
+    for (file, locale) in [
+        ("locales/fr.yml", "fr"),
+        ("locales/de.yml", "de"),
+        ("locales/it.yml", "it"),
+    ] {
+        assert!(
+            found.iter().any(|f| f.starts_with(&format!(
+                "{file}: `locale` \"{locale}\" lacks `key` \"inbox\""
+            ))),
+            "{found:?}"
+        );
+    }
+
+    // 2. `join:` applying `transform: { key: [strip-root], locale: [lower] }`
+    //    with `where:` transforms, filters, and surfaces surviving stub groups.
+    let join_cfg = "\
+version: 2
+relations:
+  raw:
+    from: { paths: 'locales/*.yml' }
+    entries: { format: yaml, at: $, leaves: true }
+    fields: { locale: entry.root, key: entry.path }
+  active:
+    from: { paths: 'active.json' }
+    entries: { format: json, at: $ }
+    fields: { locale: entry.key }
+  joined:
+    join: { left: raw, right: active, on: { locale: locale }, unique: right }
+    fields: { locale: left.locale, key: left.key }
+    transform:
+      key: [strip-root]
+      locale: [lower]
+    where:
+      locale: { not_in: [skip] }
+rules:
+  - id: joined-i18n
+    kind: constraint
+    input: joined
+    assert:
+      set:
+        field: key
+        group_by: locale
+        equal_to: { group: en }
+    level: error
+";
+    let res = run(
+        join_cfg,
+        &[
+            ("active.json", r#"{"en": 1, "FR": 1, "skip": 1}"#),
+            ("locales/en.yml", "en:\n  home: Home\n"),
+            ("locales/fr.yml", "FR: {}\n"),
+            ("locales/skip.yml", "skip: {}\n"),
+        ],
+    );
+    let found = findings(&res, "joined-i18n");
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(
+        found[0].starts_with("locales/fr.yml: `locale` \"fr\" lacks `key` \"home\""),
+        "{found:?}"
+    );
+
+    // 3. All-stub input against `{ relation: R, field: F }` still reports
+    //    missing values anchored at the stub file; stub reference group fails loud.
+    let all_stub_cfg = "\
+version: 2
+relations:
+  required:
+    from: { paths: 'req.json' }
+    entries: { format: json, at: $ }
+    fields: { key: entry.key }
+  locales:
+    from: { paths: 'locales/*.yml' }
+    entries: { format: yaml, at: $, leaves: true }
+    fields: { locale: entry.root, key: entry.path }
+    transform: { key: [strip-root] }
+rules:
+  - id: all-stub
+    kind: constraint
+    input: locales
+    assert:
+      set:
+        field: key
+        group_by: locale
+        equal_to: { relation: required, field: key }
+    level: error
+  - id: stub-ref
+    kind: constraint
+    input: locales
+    assert:
+      set:
+        field: key
+        group_by: locale
+        equal_to: { group: en }
+    level: error
+";
+    let res = run(
+        all_stub_cfg,
+        &[
+            ("req.json", r#"{"home": 1}"#),
+            ("locales/en.yml", "en: {}\n"),
+        ],
+    );
+    let found = findings(&res, "all-stub");
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(
+        found[0].starts_with("locales/en.yml: `locale` \"en\" lacks `key` \"home\""),
+        "{found:?}"
+    );
+    let ref_errs = failures(&res, "stub-ref");
+    assert_eq!(ref_errs.len(), 1, "{ref_errs:?}");
+    assert!(ref_errs[0].contains("has no rows"), "{ref_errs:?}");
+}

@@ -188,6 +188,7 @@ impl Evaluator<'_> {
     pub(super) fn refine(
         &self,
         site: &Site,
+        id: RelationId,
         named: &NamedRelation,
         mut rows: RelationRows,
         failures: &mut Failures,
@@ -201,19 +202,27 @@ impl Evaluator<'_> {
         // `strip-root` runs, while surviving single-root stubs keep their
         // `entry.root` / path-token values for `set` `group_by: entry.root` (#598).
         let mut stubs = take_stub_roots(&mut rows, relation);
-        for (field, transforms) in &relation.transforms {
-            let position = rows.field(field)?;
-            let applies_to_stubs = relation.field(field).is_some_and(|def| {
+        let retain_stubs = !stubs.is_empty()
+            && relation.fields.iter().any(|(field, _)| {
                 matches!(
-                    def.source,
-                    FieldSource::EntryRoot | FieldSource::Path(_) | FieldSource::Bound { .. }
+                    field_origin_source(self.plan, id, field),
+                    Some(FieldSource::EntryRoot)
                 )
             });
+        for (field, transforms) in &relation.transforms {
+            let position = rows.field(field)?;
+            let applies_to_stubs = retain_stubs
+                && field_origin_source(self.plan, id, field).is_some_and(|src| {
+                    matches!(
+                        src,
+                        FieldSource::EntryRoot | FieldSource::Path(_) | FieldSource::Bound { .. }
+                    )
+                });
             for transform in transforms {
                 match string_transform(*transform) {
                     Some(transform) => {
                         self.transform_field(site, &mut rows, position, field, transform, failures);
-                        if applies_to_stubs && !stubs.is_empty() && failures.is_empty() {
+                        if applies_to_stubs && failures.is_empty() {
                             self.transform_rows(
                                 site, &mut stubs, position, field, transform, failures,
                             );
@@ -225,6 +234,9 @@ impl Evaluator<'_> {
         }
         if !failures.is_empty() {
             return None;
+        }
+        if !retain_stubs {
+            stubs.clear();
         }
         let tests = self.tests(site, &rows, &relation.filters, failures)?;
         if !failures.is_empty() {
@@ -258,9 +270,9 @@ impl Evaluator<'_> {
             let stub_tests: Vec<&Test<'_>> = tests
                 .iter()
                 .filter(|test| {
-                    relation.field(test.field).is_some_and(|def| {
+                    field_origin_source(self.plan, id, test.field).is_some_and(|src| {
                         matches!(
-                            def.source,
+                            src,
                             FieldSource::EntryRoot
                                 | FieldSource::Path(_)
                                 | FieldSource::Bound { .. }
@@ -1036,6 +1048,31 @@ impl Test<'_> {
             detail,
         )
     }
+}
+
+/// Trace a field's underlying non-join [`FieldSource`] through any chain of
+/// `join:` relations.
+fn field_origin_source<'p>(
+    plan: &'p crate::relation::plan::Plan,
+    mut id: RelationId,
+    name: &str,
+) -> Option<&'p FieldSource> {
+    let mut current = name;
+    for _ in 0..=plan.relations.len() {
+        let relation = &plan.relation(id).relation;
+        let source = &relation.field(current)?.source;
+        match (source, &relation.rows) {
+            (FieldSource::Side(side, copied), Rows::Join(join)) => {
+                id = match side {
+                    JoinSide::Left => join.left.id,
+                    JoinSide::Right => join.right.id,
+                };
+                current = copied.as_str();
+            }
+            _ => return Some(source),
+        }
+    }
+    None
 }
 
 /// Filter `input` through `tests`, reporting at most one type error per

@@ -1,6 +1,7 @@
 //! A relation's parts: the resources a selector picks, read and decoded
 //! through the run's caches, and the rows of each, one cell per field.
 
+use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::path::Path;
 use std::sync::Arc;
@@ -17,7 +18,7 @@ use crate::relation::limits::{LimitExceeded, LimitKind, Limits};
 use crate::relation::path::RelPath;
 use crate::relation::plan::{
     BoundMissing, Entries, EntriesFormat, FieldDef, FieldSource, NamedRelation, Part, PathToken,
-    Read, Reader, RelationDef, SelectorRef,
+    Read, Reader, RelationDef, SelectorRef, Transform,
 };
 use crate::relation::pointer::{Pointer, Segment};
 use crate::relation::resource::{Origin, Resource, ResourceId, ResourceRead};
@@ -781,27 +782,26 @@ impl<'r> Rows<'r> {
     /// Each `bound:` field's cell, by field position (`None` for other
     /// fields), from the decode's rows labelled with its path: built once
     /// for the resource and shared by its rows.
+    ///
+    /// Indexes labelled bound rows in one pass, always fails loud on any
+    /// multi-match (`> 1`) or non-scalar bound result regardless of field
+    /// order, and honors `optional: true, on_missing: skip` field-order-
+    /// independently when no bound field has a multi-match or non-scalar error
+    /// (#593).
     fn bound_cells(&self, output: &AdapterOutput) -> Result<BoundCells, Stop> {
-        // Check `optional: true, on_missing: skip` fields first so skipping a
-        // resource never depends on the declaration order of `fields:` (#593).
-        for (_, field) in &self.relation.fields {
-            if let FieldSource::Bound {
-                query,
-                optional: true,
-                on_missing: BoundMissing::Skip,
-            } = &field.source
+        let mut by_query: HashMap<&str, Vec<&Row>> = HashMap::new();
+        for row in &output.rows {
+            if let Some(query) = row
+                .label
+                .as_deref()
+                .and_then(|label| label.strip_prefix(entry_values::BOUND_LABEL))
             {
-                let label = format!("{}{query}", entry_values::BOUND_LABEL);
-                if !output
-                    .rows
-                    .iter()
-                    .any(|row| row.label.as_deref() == Some(label.as_str()))
-                {
-                    return Ok(BoundCells::SkipResource);
-                }
+                by_query.entry(query).or_default().push(row);
             }
         }
         let mut cells = Vec::with_capacity(self.relation.fields.len());
+        let mut skip_resource = false;
+        let mut first_missing_err: Option<String> = None;
         for (name, field) in &self.relation.fields {
             let FieldSource::Bound {
                 query,
@@ -812,34 +812,40 @@ impl<'r> Rows<'r> {
                 cells.push(None);
                 continue;
             };
-            let label = format!("{}{query}", entry_values::BOUND_LABEL);
-            let matches: Vec<&Row> = output
-                .rows
-                .iter()
-                .filter(|row| row.label.as_deref() == Some(label.as_str()))
-                .collect();
-            let row = match matches.as_slice() {
+            let matches = by_query.get(query.as_str()).map_or(&[][..], Vec::as_slice);
+            let row = match matches {
                 [] => {
                     if *optional {
                         match on_missing {
-                            BoundMissing::Skip => return Ok(BoundCells::SkipResource),
+                            BoundMissing::Skip => {
+                                skip_resource = true;
+                                cells.push(None);
+                                continue;
+                            }
                             BoundMissing::Missing => {
+                                // Use `u32::MAX` sentinel ordinal so a missing
+                                // `bound:` cell's provenance never collides
+                                // with `read:` row 0 (`ordinal == 0`).
                                 cells.push(Some(Cell {
                                     span: None,
                                     value: None,
-                                    at: self.provenance(None, 0, false)?,
+                                    at: self.provenance(None, u32::MAX, false)?,
                                     path: None,
                                 }));
                                 continue;
                             }
                         }
                     }
-                    return Err(format!(
-                        "`{name}` (`bound: {query}`) matches nothing; a bound path matches exactly \
-                         once in each resource the relation reads, so fix the path, narrow the \
-                         selector to the files that have it, or mark the field `optional: true`"
-                    )
-                    .into());
+                    first_missing_err.get_or_insert_with(|| {
+                        format!(
+                            "`{name}` (`bound: {query}`) matches nothing; a bound path matches \
+                             exactly once in each resource the relation reads, so fix the path, \
+                             narrow the selector to the files that have it, or mark the field \
+                             `optional: true`"
+                        )
+                    });
+                    cells.push(None);
+                    continue;
                 }
                 [one] => *one,
                 [first, second, ..] => {
@@ -853,36 +859,48 @@ impl<'r> Rows<'r> {
                     .into());
                 }
             };
-            let value = match &row.state {
-                RowState::Value(value) => value.clone(),
-                RowState::Error(kind) if kind.as_ref() == entry_values::ARRAY_NUMBER => {
-                    return Err(format!(
-                        "`{name}` (`bound: {query}`) selects {kind} {}, whose lexeme alint does \
-                         not keep (`1.10` would read as `1.1`); bind an object member instead",
-                        place(row.pointer.as_ref(), self.hide_keys)
-                    )
-                    .into());
-                }
-                RowState::Error(kind) => {
-                    return Err(format!(
-                        "`{name}` (`bound: {query}`) selects {kind} {}; a field holds a scalar \
-                         (null, a boolean, a number or a string), so bind a path that selects one",
-                        place(row.pointer.as_ref(), self.hide_keys)
-                    )
-                    .into());
-                }
-                RowState::Key | RowState::Missing => {
-                    unreachable!("a bound row holds a value or an error")
-                }
-            };
-            cells.push(Some(Cell {
-                span: self.value_span(row, &value),
-                value: Some(value),
-                at: self.provenance(row.pointer.clone(), row.ordinal, false)?,
-                path: None,
-            }));
+            cells.push(Some(self.bound_row_cell(name, query, row)?));
+        }
+        if skip_resource {
+            return Ok(BoundCells::SkipResource);
+        }
+        if let Some(err) = first_missing_err {
+            return Err(err.into());
         }
         Ok(BoundCells::Cells(cells))
+    }
+
+    /// Extracts a scalar cell from one matched `bound:` row, failing loud on
+    /// non-scalar or array-number results.
+    fn bound_row_cell(&self, name: &str, query: &str, row: &Row) -> Result<Cell, Stop> {
+        let value = match &row.state {
+            RowState::Value(value) => value.clone(),
+            RowState::Error(kind) if kind.as_ref() == entry_values::ARRAY_NUMBER => {
+                return Err(format!(
+                    "`{name}` (`bound: {query}`) selects {kind} {}, whose lexeme alint does not \
+                     keep (`1.10` would read as `1.1`); bind an object member instead",
+                    place(row.pointer.as_ref(), self.hide_keys)
+                )
+                .into());
+            }
+            RowState::Error(kind) => {
+                return Err(format!(
+                    "`{name}` (`bound: {query}`) selects {kind} {}; a field holds a scalar \
+                     (null, a boolean, a number or a string), so bind a path that selects one",
+                    place(row.pointer.as_ref(), self.hide_keys)
+                )
+                .into());
+            }
+            RowState::Key | RowState::Missing => {
+                unreachable!("a bound row holds a value or an error")
+            }
+        };
+        Ok(Cell {
+            span: self.value_span(row, &value),
+            value: Some(value),
+            at: self.provenance(row.pointer.clone(), row.ordinal, false)?,
+            path: None,
+        })
     }
 
     /// Fails when an `at:` path selected something other than an object
@@ -923,11 +941,15 @@ impl<'r> Rows<'r> {
     /// An `entries:` part's rows in one resource. Returns `Ok(false)` when an
     /// optional `bound:` field with `on_missing: skip` skipped the resource.
     fn entries(&self, output: &AdapterOutput, out: &mut RelationRows) -> Result<bool, Stop> {
-        self.at_selects_objects(output)?;
+        // Check `bound:` fields before `at:` object validation so a resource
+        // skipped via `optional: true, on_missing: skip` opts out cleanly
+        // (matching `Rows::read`), while multi-match / non-scalar bound errors
+        // still fail loud (#593).
         let bound = match self.bound_cells(output)? {
             BoundCells::SkipResource => return Ok(false),
             BoundCells::Cells(cells) => cells,
         };
+        self.at_selects_objects(output)?;
         for row in output.rows.iter().filter(|row| row.label.is_none()) {
             self.take_row()?;
             let provenance = self.provenance(
@@ -1021,22 +1043,36 @@ impl<'r> Rows<'r> {
                 Some(Segment::Key(name)) => cell(key(name)?, key_span()),
                 _ => return Err(not_a_member(name, pointer, self.hide_keys).into()),
             },
-            FieldSource::EntryValue => match &row.state {
-                // Shared with the decode, which took its bytes.
-                RowState::Value(value) => cell(value.clone(), self.value_span(row, value)),
-                RowState::Error(kind) => {
-                    return Err(format!(
-                        "`{name}` binds `entry.value`, which is {kind} {}; a field holds a \
+            FieldSource::EntryValue => {
+                match &row.state {
+                    // Shared with the decode, which took its bytes.
+                    RowState::Value(value) => cell(value.clone(), self.value_span(row, value)),
+                    // Under `strip-root`, a 1-segment empty root (`fr: {}`, `fr: []`)
+                    // is a stub root that `take_stub_roots` removes before any real
+                    // row sees `entry.value` (matching `fr:` null stubs, #598).
+                    RowState::Error(_)
+                        if entry_values::holds_nothing(&row.state)
+                            && pointer.segments().len() == 1
+                            && self.relation.transforms.iter().any(|(_, transforms)| {
+                                transforms.contains(&Transform::StripRoot)
+                            }) =>
+                    {
+                        cell(Value::Null, None)
+                    }
+                    RowState::Error(kind) => {
+                        return Err(format!(
+                            "`{name}` binds `entry.value`, which is {kind} {}; a field holds a \
                          scalar (null, a boolean, a number or a string), so select the members \
                          below it with `at:`, or bind only `entry.key`",
-                        place(Some(pointer), self.hide_keys)
-                    )
-                    .into());
+                            place(Some(pointer), self.hide_keys)
+                        )
+                        .into());
+                    }
+                    RowState::Key | RowState::Missing => {
+                        unreachable!("an entry row holds a value or an error")
+                    }
                 }
-                RowState::Key | RowState::Missing => {
-                    unreachable!("an entry row holds a value or an error")
-                }
-            },
+            }
             FieldSource::EntryParent => {
                 let segments = pointer.segments();
                 match segments

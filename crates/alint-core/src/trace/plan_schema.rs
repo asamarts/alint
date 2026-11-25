@@ -178,6 +178,8 @@ fn field() -> Value {
         json!({
             "name": { "type": "string" },
             "source": { "type": "string" },
+            "optional": { "type": "boolean" },
+            "on_missing": { "enum": ["skip", "missing"] },
             "transforms": or_redacted(strings()),
             "sensitive": { "type": "boolean" },
         }),

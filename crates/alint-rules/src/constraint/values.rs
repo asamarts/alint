@@ -160,7 +160,8 @@ impl Scalar {
 /// escapes. Quotes and `\` are not: text shown unquoted keeps them as
 /// written.
 fn escaped_in_message(c: char) -> bool {
-    !matches!(c, '"' | '\'' | '\\') && c.escape_debug().nth(1).is_some()
+    !matches!(c, '"' | '\'' | '\\')
+        && (c.escape_debug().nth(1).is_some() || alint_core::invisible::is_deceptive_on_display(c))
 }
 
 /// `text` (a value, a path, or words about a file) as a message shows it
@@ -354,5 +355,23 @@ mod tests {
                 SHOWN_CHARS + 1
             )
         );
+    }
+
+    #[test]
+    fn escaped_covers_every_deceptive_on_display_codepoint() {
+        for code in 0..=0x10_FFFFu32 {
+            let Some(c) = char::from_u32(code) else {
+                continue;
+            };
+            if alint_core::invisible::is_deceptive_on_display(c) {
+                let s = c.to_string();
+                let out = escaped(&s);
+                assert_ne!(
+                    out.as_ref(),
+                    s.as_str(),
+                    "deceptive U+{code:04X} must be escaped by values::escaped()"
+                );
+            }
+        }
     }
 }

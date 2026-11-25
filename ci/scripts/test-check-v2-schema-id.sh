@@ -143,7 +143,84 @@ make_repo "$r8" "v0.25.0" "same"
 git -C "$r8" tag "v0.23.0"
 expect_fail "release mode rejects RELEASE ahead of release tag" "$r8" "is ahead of" --release v0.24.0
 
-# 9. Live repository passes dev mode right now.
+# 9. First v2 release (prior tag exists WITHOUT schemas/v2/config.json):
+#    passes when RELEASE == tag, fails when mismatched.
+r9="$TMP_BASE/r9"
+mkdir -p "$r9"
+git -C "$r9" init -q
+git -C "$r9" config user.name "test"
+git -C "$r9" config user.email "test@example.invalid"
+echo "v1" > "$r9/README.md"
+git -C "$r9" add -A && git -C "$r9" commit -q -m "pre-v2"
+git -C "$r9" tag "v0.22.0"
+make_repo "$r9" "v0.23.0" "first"
+expect_pass "first v2 release passes when RELEASE matches tag" "$r9" --release v0.23.0
+expect_fail "first v2 release fails when RELEASE differs from tag" "$r9" "no prior v*.*.* tag contains" --release v0.24.0
+
+# 10. Prerelease tags in git history are ignored when finding prev_tag, and
+#     --release rejects prerelease tags.
+r10="$TMP_BASE/r10"
+make_repo "$r10" "v0.23.0" "old"
+git -C "$r10" tag "v0.23.0"
+make_repo "$r10" "v0.23.0" "changed"
+git -C "$r10" tag "v0.24.0-rc.1"
+expect_fail "release mode ignores prerelease tag and compares against v0.23.0" "$r10" "changed since v0.23.0" --release v0.24.0
+expect_fail "release mode rejects prerelease --release argument" "$r10" "invalid --release tag" --release v0.24.0-rc.1
+
+# 11. Backport release (--release v0.23.1 when v0.24.0 tag exists) compares
+#     strictly against v0.23.0 (< v0.23.1).
+r11="$TMP_BASE/r11"
+make_repo "$r11" "v0.23.0" "base"
+git -C "$r11" tag "v0.23.0"
+make_repo "$r11" "v0.24.0" "future"
+git -C "$r11" tag "v0.24.0"
+make_repo "$r11" "v0.23.0" "base"
+expect_pass "backport release compares against v0.23.0 ignoring newer v0.24.0 tag" "$r11" --release v0.23.1
+
+# 12. Type-faithful JSON diff: changing integer 1 to boolean true MUST be
+#     detected as a schema change (Python bool == int trap).
+r12="$TMP_BASE/r12"
+make_repo "$r12" "v0.23.0" "x"
+cat > "$r12/schemas/v2/config.json" <<'EOF'
+{
+  "$id": "https://raw.githubusercontent.com/asamarts/alint/v0.23.0/schemas/v2/config.json",
+  "properties": { "flag": { "default": 1 } }
+}
+EOF
+git -C "$r12" add -A && git -C "$r12" commit -q -m "int default"
+git -C "$r12" tag "v0.23.0"
+cat > "$r12/schemas/v2/config.json" <<'EOF'
+{
+  "$id": "https://raw.githubusercontent.com/asamarts/alint/v0.23.0/schemas/v2/config.json",
+  "properties": { "flag": { "default": true } }
+}
+EOF
+expect_fail "release mode detects JSON 1 vs true type change" "$r12" "changed since v0.23.0" --release v0.24.0
+
+# 13. Modeline strictness: indented stale modeline, trailing comment, and
+#     `main`-pointing modeline are all caught.
+r13="$TMP_BASE/r13"
+make_repo "$r13" "v0.23.0" "x"
+cat >> "$r13/docs/site/configuration/version-2.md" <<'EOF'
+  # yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v2/config.json
+EOF
+expect_fail "dev mode catches indented main-pointing second modeline" "$r13" "main/schemas/v2/config.json"
+
+r13b="$TMP_BASE/r13b"
+make_repo "$r13b" "v0.23.0" "x"
+cat > "$r13b/docs/development/CONFIG-AUTHORING.md" <<'EOF'
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/v0.23.0/schemas/v2/config.json # trailing
+EOF
+expect_fail "dev mode rejects malformed trailing-comment modeline" "$r13b" "malformed v2 schema modeline"
+
+# 14. Non-object JSON and conflicting CLI mode flags are rejected cleanly.
+r14="$TMP_BASE/r14"
+make_repo "$r14" "v0.23.0" "x"
+echo '[]' > "$r14/schemas/v2/config.json"
+expect_fail "dev mode rejects non-object schema JSON cleanly" "$r14" "must be an object"
+expect_fail "conflicting --release and --dev flags are rejected" "$r1" "conflicting or duplicate mode flag" --release v0.24.0 --dev
+
+# 15. Live repository passes dev mode right now.
 expect_pass "live repo passes dev mode" "$REPO_ROOT"
 
 echo "[test-check-v2-schema-id] $pass passed, $fail failed"

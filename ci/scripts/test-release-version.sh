@@ -155,5 +155,46 @@ else
   fail=$((fail + 1))
 fi
 
+# Verify bump-version rejects a v-prefixed argument instead of corrupting files.
+if PATH="$TMP_ROOT/fake-bin:$PATH" bash ci/scripts/bump-version.sh "v$NEXT_MINOR" >/dev/null 2>&1; then
+  echo "  FAIL: bump-version should reject v-prefixed version argument" >&2
+  fail=$((fail + 1))
+else
+  echo "  ok: bump-version rejects v-prefixed version argument"
+  pass=$((pass + 1))
+fi
+
+# Verify bump-version updates gen_schema_v2.rs, BOTH $id assertions in
+# gen_schema_v2_tests.rs (including example.invalid), and both docs modelines
+# when schemas/v2/config.json changed since the prior tag (#570).
+if grep -Fq "const RELEASE: &str = \"v$NEXT\";" xtask/src/gen_schema_v2.rs \
+  && grep -Fq "https://raw.githubusercontent.com/asamarts/alint/v$NEXT/schemas/v2/config.json" xtask/src/gen_schema_v2_tests.rs \
+  && grep -Fq "https://example.invalid/alint/v$NEXT/schemas/v2/config.json" xtask/src/gen_schema_v2_tests.rs \
+  && grep -Fq "https://raw.githubusercontent.com/asamarts/alint/v$NEXT/schemas/v2/config.json" docs/site/configuration/version-2.md \
+  && grep -Fq "https://raw.githubusercontent.com/asamarts/alint/v$NEXT/schemas/v2/config.json" docs/development/CONFIG-AUTHORING.md; then
+  echo "  ok: bump-version advances RELEASE, both gen_schema_v2_tests assertions, and docs modelines"
+  pass=$((pass + 1))
+else
+  echo "  FAIL: bump-version left stale v2 schema tag in gen_schema_v2(_tests).rs or docs modelines" >&2
+  fail=$((fail + 1))
+fi
+
+# Verify bump-version leaves v2 schema files untouched when schemas/v2/config.json
+# matches the previous v*.*.* tag (ignoring $id).
+git reset --hard -q HEAD
+cp "$REPO_ROOT/ci/scripts/bump-version.sh" ci/scripts/bump-version.sh
+git tag -f "v$CUR" HEAD >/dev/null
+git add ci/scripts/bump-version.sh
+BEFORE_REL=$(sed -nE 's/^[[:space:]]*(pub(\([^)]*\))?[[:space:]]+)?const[[:space:]]+RELEASE:[[:space:]]*&str[[:space:]]*=[[:space:]]*"(v[0-9]+\.[0-9]+\.[0-9]+)";/\3/p' xtask/src/gen_schema_v2.rs | head -n1)
+PATH="$TMP_ROOT/fake-bin:$PATH" bash ci/scripts/bump-version.sh "$NEXT" >/dev/null
+AFTER_REL=$(sed -nE 's/^[[:space:]]*(pub(\([^)]*\))?[[:space:]]+)?const[[:space:]]+RELEASE:[[:space:]]*&str[[:space:]]*=[[:space:]]*"(v[0-9]+\.[0-9]+\.[0-9]+)";/\3/p' xtask/src/gen_schema_v2.rs | head -n1)
+if [[ "$BEFORE_REL" == "$AFTER_REL" ]]; then
+  echo "  ok: bump-version leaves v2 schema RELEASE unchanged when schema body matches prior tag"
+  pass=$((pass + 1))
+else
+  echo "  FAIL: bump-version spuriously bumped RELEASE ($BEFORE_REL -> $AFTER_REL) on unchanged schema" >&2
+  fail=$((fail + 1))
+fi
+
 echo "[test-release-version] $pass passed, $fail failed"
 [[ "$fail" -eq 0 ]]

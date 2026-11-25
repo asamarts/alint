@@ -38,6 +38,11 @@ pub(super) struct Run<'r> {
     /// (whose findings the engine redacts whole as well, but whose keys and
     /// places this keeps clean before it does).
     hide_keys: bool,
+    /// Rule-level `sensitive: true` / `has_sensitive_evidence()` OR any input
+    /// relation reading the environment (`reads_environment`): defence-in-depth
+    /// redaction for `{{value}}`, `{{row.FIELD}}`, and generated messages even
+    /// when `Rule::evaluate` runs outside the engine's outer spec gate (#594).
+    redact_all: bool,
     /// Number of pre-existing findings (e.g. `Skipped::NonString` from relation
     /// reads) that already count toward [`LimitKind::FindingsPerRule`].
     earlier_findings: usize,
@@ -124,10 +129,16 @@ impl<'r> Run<'r> {
         earlier_findings: usize,
     ) -> Self {
         // A key path of any relation the rule reads may reach a message.
-        let hide_keys = rule.inputs.iter().any(|&id| {
-            rule.plan.relation(id).reads_environment
-                || alint_core::relation::eval::keys_sensitive(&rule.plan, id)
-        });
+        let reads_environment = rule
+            .inputs
+            .iter()
+            .any(|&id| rule.plan.relation(id).reads_environment);
+        let hide_keys = reads_environment
+            || rule
+                .inputs
+                .iter()
+                .any(|&id| alint_core::relation::eval::keys_sensitive(&rule.plan, id));
+        let redact_all = rule.explicit_sensitive || reads_environment;
         let limits = ctx
             .index
             .decode_cache()
@@ -138,6 +149,7 @@ impl<'r> Run<'r> {
             limits,
             places: Places::new(ctx),
             hide_keys,
+            redact_all,
             earlier_findings,
             findings: Vec::new(),
             suppressed_findings: 0,
@@ -306,7 +318,7 @@ impl<'r> Run<'r> {
     /// its resource names the row.
     fn read_nothing(&self, row: usize, position: usize) -> String {
         let plan = &self.rule.plan;
-        let id = reading_relation(plan, self.rule.inputs[0], self.name(position));
+        let (id, field_name) = reading_relation(plan, self.rule.inputs[0], self.name(position));
         let named = plan.relation(id);
         let Rows::Union(parts) = &named.relation.rows else {
             return String::new();
@@ -320,13 +332,14 @@ impl<'r> Run<'r> {
         } else {
             format!("relations.{}.union[{index}]", named.name)
         };
-        if named.reads_environment || self.sensitive(position) {
+        if named.reads_environment || self.redact_all || self.sensitive(position) {
             format!(" (`{at}` matched nothing)")
         } else {
-            format!(
-                " (`{at}`, `{}`, matched nothing)",
-                escaped(&part_text(part))
-            )
+            let query = match named.relation.field(&field_name).map(|f| &f.source) {
+                Some(FieldSource::Bound { query, .. }) => format!("bound: {query}"),
+                _ => part_text(part),
+            };
+            format!(" (`{at}`, `{}`, matched nothing)", escaped(&query))
         }
     }
 
@@ -511,7 +524,7 @@ impl<'r> Run<'r> {
     /// Format one `{{row.FIELD}}` placeholder.
     fn render_row_field(&self, name: &str, row: Option<&FieldRow>) -> Option<String> {
         let position = self.rows.field(name)?;
-        if self.sensitive(position) {
+        if self.redact_all || self.sensitive(position) {
             return Some("<redacted>".to_string());
         }
         let Some(row) = row else {
@@ -1186,9 +1199,10 @@ fn verdict(findings: Vec<Violation>, failures: Vec<Violation>) -> Vec<Violation>
     }
 }
 
-/// The relation that read field `name` of relation `id`: `id`, or, for a
-/// join's copy of a field of a side, the relation that read that field.
-fn reading_relation(plan: &Plan, mut id: RelationId, name: &str) -> RelationId {
+/// The relation and field name that read field `name` of relation `id`: `(id,
+/// name)`, or, for a join's copy of a field of a side, the relation and field
+/// name that read it.
+fn reading_relation(plan: &Plan, mut id: RelationId, name: &str) -> (RelationId, String) {
     let mut name = name.to_string();
     loop {
         let relation = &plan.relation(id).relation;
@@ -1203,7 +1217,7 @@ fn reading_relation(plan: &Plan, mut id: RelationId, name: &str) -> RelationId {
                 };
                 name.clone_from(field);
             }
-            _ => return id,
+            _ => return (id, name),
         }
     }
 }
