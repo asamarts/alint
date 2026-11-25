@@ -19,8 +19,11 @@ points are explicit.
    `alint-zed` entry, and the npm README. It also
    inserts a CHANGELOG stub, refreshes `Cargo.lock` via
    `cargo metadata --offline` (so the workspace internal-crate
-   version entries in the lockfile track the bump), and regenerates the
-   version-bearing `facts.json` discovery contract.
+   version entries in the lockfile track the bump), regenerates the
+   version-bearing `facts.json` discovery contract, and when the draft
+   `schemas/v2/config.json` body changed since the previous release tag,
+   advances `xtask/src/gen_schema_v2.rs::RELEASE`, its unit test, both v2
+   schema YAML modelines, and regenerates `schemas/v2/config.json` (#570).
 
    The baked Action value is deliberately separate from the public `version`
    input's empty default. This lets an explicit `with: version:` override every
@@ -64,7 +67,8 @@ points are explicit.
    ```
 
    Runs the full preflight bundle: fmt + clippy + test + doc +
-   version-pins + dep-floors + secrets-inv + dogfood. The
+   docs-overlay + version-pins + v2-schema-id + dep-floors + secrets-inv +
+   dogfood. The
    `release.yml` `preflight` job runs the same gates remotely, and
    more: the slower, network-bound and release-only ones, such as
    YAML compare mode (`ci/scripts/yaml-compare.sh`), the MSRV build
@@ -141,6 +145,8 @@ points are explicit.
    git add Cargo.toml Cargo.lock facts.json action.yml README.md SECURITY.md CHANGELOG.md \
      docs/design/ROADMAP.md npm/package.json npm/README.md editors/zed/Cargo.toml \
      editors/zed/Cargo.lock editors/zed/extension.toml \
+     schemas/v2/config.json xtask/src/gen_schema_v2.rs xtask/src/gen_schema_v2_tests.rs \
+     docs/development/CONFIG-AUTHORING.md docs/site/configuration/version-2.md \
      docs/site/getting-started/installation.md \
      docs/site/integrations/docker.md docs/site/integrations/pre-commit.md
    # plus every file the steps below touch: raised dependency floors,

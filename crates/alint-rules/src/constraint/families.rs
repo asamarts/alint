@@ -428,7 +428,8 @@ impl<'r> Run<'r> {
     /// A finding at `at`, identified by `key` alone, with `related`
     /// locations, which leave out `omitted` more; its message is the rule's
     /// `message:` rendered for row `reported` (none, for a value only another
-    /// relation holds), or `generated`.
+    /// relation holds) and optional compared value `compared` (`{{value}}`,
+    /// with its redaction flag), or `generated`.
     fn report<'p>(
         &mut self,
         at: impl Into<Place<'p>>,
@@ -436,13 +437,16 @@ impl<'r> Run<'r> {
         key: Key,
         related: Related,
         reported: Option<usize>,
+        compared: Option<(&Scalar, bool)>,
     ) {
         if self.at_finding_cap() {
             self.suppress_findings(1, false);
             return;
         }
         let message = match &self.rule.message {
-            Some(template) => self.render(template, reported.map(|row| &self.rows.rows[row])),
+            Some(template) => {
+                self.render(template, reported.map(|row| &self.rows.rows[row]), compared)
+            }
             None => generated,
         };
         let (finding, asked) = match at.into() {
@@ -471,27 +475,74 @@ impl<'r> Run<'r> {
 
     /// The rule's `message:` with each `{{row.FIELD}}` replaced by the
     /// reported row's value of the field (`<redacted>` for a sensitive
-    /// field's, and `<no row>` without a reported row).
-    fn render(&self, template: &str, row: Option<&FieldRow>) -> String {
-        alint_core::template::render_message(template, |namespace, name| {
-            if namespace != "row" {
-                return None;
-            }
-            let position = self.rows.field(name)?;
-            if self.sensitive(position) {
-                return Some("<redacted>".to_string());
-            }
-            let Some(row) = row else {
-                return Some("<no row>".to_string());
+    /// field's, and `<no row>` without a reported row) and each `{{value}}`
+    /// replaced by the compared value on `set` findings (#594). Single-pass
+    /// left-to-right scan so substituted data values are never re-expanded.
+    fn render(
+        &self,
+        template: &str,
+        row: Option<&FieldRow>,
+        compared: Option<(&Scalar, bool)>,
+    ) -> String {
+        if !template.contains("{{") {
+            return template.to_string();
+        }
+        let mut out = String::with_capacity(template.len());
+        let mut rest = template;
+        while let Some(open) = rest.find("{{") {
+            out.push_str(&rest[..open]);
+            let after = &rest[open + 2..];
+            let Some(close) = after.find("}}") else {
+                out.push_str(&rest[open..]);
+                return out;
             };
-            Some(match &row.cells[position].value {
-                None => "<missing>".to_string(),
-                Some(Value::Null) => "null".to_string(),
-                Some(value) => match Scalar::of_value(value) {
-                    Ok(scalar) => scalar.text_shown(),
-                    Err(_) => alint_core::relation::eval::render_value(value),
-                },
-            })
+            let inner = after[..close].trim();
+            let replacement = if inner == "value" {
+                compared.map(|(value, redact)| {
+                    if redact {
+                        "<redacted>".to_string()
+                    } else if value.is_missing() {
+                        "<missing>".to_string()
+                    } else if matches!(value, Scalar::Null) {
+                        "null".to_string()
+                    } else {
+                        value.text_shown()
+                    }
+                })
+            } else if let Some(("row", name)) = inner
+                .split_once('.')
+                .map(|(namespace, name)| (namespace.trim(), name.trim()))
+            {
+                self.render_row_field(name, row)
+            } else {
+                None
+            };
+            match replacement {
+                Some(text) => out.push_str(&text),
+                None => out.push_str(&rest[open..open + 2 + close + 2]),
+            }
+            rest = &after[close + 2..];
+        }
+        out.push_str(rest);
+        out
+    }
+
+    /// Format one `{{row.FIELD}}` placeholder.
+    fn render_row_field(&self, name: &str, row: Option<&FieldRow>) -> Option<String> {
+        let position = self.rows.field(name)?;
+        if self.sensitive(position) {
+            return Some("<redacted>".to_string());
+        }
+        let Some(row) = row else {
+            return Some("<no row>".to_string());
+        };
+        Some(match &row.cells[position].value {
+            None => "<missing>".to_string(),
+            Some(Value::Null) => "null".to_string(),
+            Some(value) => match Scalar::of_value(value) {
+                Ok(scalar) => scalar.text_shown(),
+                Err(_) => alint_core::relation::eval::render_value(value),
+            },
         })
     }
 
@@ -660,7 +711,7 @@ impl<'r> Run<'r> {
             );
             let related = self.related_at(vec![(first, "the first row with this key")], 0);
             let at = self.spot(row, key_at[0]);
-            self.report(at, message, key.clone(), related, Some(row));
+            self.report(at, message, key.clone(), related, Some(row), None);
         }
     }
 
@@ -816,7 +867,7 @@ impl<'r> Run<'r> {
             for (&position, part) in fields.iter().zip(value) {
                 key.value(part, self.sensitive(position));
             }
-            self.report(at, message, key, related, Some(holders[0]));
+            self.report(at, message, key, related, Some(holders[0]), None);
         }
     }
 
@@ -898,7 +949,7 @@ impl<'r> Run<'r> {
             key.part("source").row(self.own(row), self.hide_keys);
             let related = self.related_at(vec![(source_at, "the source row")], 0);
             let at = self.spot(row, field_at);
-            self.report(at, message, key, related, Some(row));
+            self.report(at, message, key, related, Some(row), None);
         }
     }
 
@@ -1015,7 +1066,7 @@ impl<'r> Run<'r> {
             let other_place = Spot::Cell(other_cell, self.point(other_at));
             let related = self.related_at(vec![(other_place, label.as_str())], 0);
             let at = self.spot(row, field_at);
-            self.report(at, message, key, related, Some(row));
+            self.report(at, message, key, related, Some(row), None);
         }
     }
 }

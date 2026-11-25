@@ -113,6 +113,8 @@ jobs:
         run: ci/scripts/docs.sh
       - name: verify published Action documentation pin
         run: bash ci/scripts/check-version-pins.sh --verify-action-tag
+      - name: verify v2 draft schema $id matches release tag on schema changes
+        run: bash ci/scripts/check-v2-schema-id.sh --release "$GITHUB_REF_NAME"
       - name: dogfood (alint check on its own repo)
         run: ci/scripts/dogfood.sh
       - name: demo-drift (README demo GIF still tells the truth)

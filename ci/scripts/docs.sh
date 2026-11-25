@@ -64,6 +64,9 @@ cargo run -q -p xtask -- gen-roadmap --check
 echo "==> Running ci/scripts/check-version-pins.sh"
 bash ci/scripts/check-version-pins.sh
 
+echo "==> Running ci/scripts/check-v2-schema-id.sh"
+bash ci/scripts/check-v2-schema-id.sh
+
 # `xtask gen-arch --check` regenerates the crate dependency graph
 # (docs/design/architecture/crate-graph.md) from `cargo metadata` and fails if
 # it drifted, and verifies the hand-modeled C4 model (workspace.dsl) still

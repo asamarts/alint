@@ -1183,3 +1183,59 @@ fn a_rule_built_without_a_plan_names_version_two() {
          `require:` and a rule built outside a configuration have none"
     );
 }
+
+#[test]
+fn message_value_placeholder_is_allowed_only_on_set_and_leaves_other_tokens_literal() {
+    // Allowed on all three `set` modes, including inner whitespace `{{ value }}`.
+    for mode in ["equal_to", "subset_of", "disjoint_from"] {
+        builds(
+            &v2(
+                DEPS,
+                &format!(
+                    "    input: deps\n\
+                     \x20   assert: {{ set: {{ field: range, group_by: dependency, {mode}: {{ group: react }} }} }}\n\
+                     \x20   message: 'missing {{{{value}}}} and {{{{ value }}}} (keep {{{{name}}}} literal)'\n"
+                ),
+            ),
+            &[],
+        );
+    }
+
+    // Rejected on `unique` and all three forms of `equal`.
+    for (label, assert_yaml) in [
+        ("unique", "{ unique: { key: [dependency] } }"),
+        ("equal_groups", "{ equal: { field: range } }"),
+        (
+            "equal_source",
+            "{ equal: { field: range, to: { row: { dependency: react } } } }",
+        ),
+        (
+            "equal_field",
+            "{ equal: { field: range, to: { field: dependency } } }",
+        ),
+    ] {
+        let err = build_error(
+            &v2(
+                DEPS,
+                &format!(
+                    "    input: deps\n    assert: {assert_yaml}\n    message: 'bad {{{{value}}}}'\n"
+                ),
+            ),
+            "c",
+        );
+        assert!(
+            err.contains("`{{value}}` is only available on `set` assertions"),
+            "{label}: {err}"
+        );
+        // Non-alint `{{name}}` remains accepted on every assertion family.
+        builds(
+            &v2(
+                DEPS,
+                &format!(
+                    "    input: deps\n    assert: {assert_yaml}\n    message: 'keep {{{{name}}}} for {{{{row.dependency}}}}'\n"
+                ),
+            ),
+            &[],
+        );
+    }
+}

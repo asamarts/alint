@@ -472,3 +472,38 @@ fn the_draft_is_required_in_the_workspace_and_skipped_outside_it() {
     std::fs::write(schemas.join("config.json"), "{}").unwrap();
     assert_eq!(draft_at(&crate_dir), Ok(Some("{}".to_string())));
 }
+
+#[test]
+fn the_decode_and_the_schema_agree_on_bound_optional_and_on_missing() {
+    if !has_schema() {
+        return;
+    }
+    let shapes = [
+        "{ f: { source: 'bound: $.name', optional: true } }",
+        "{ f: { source: 'bound: $.name', optional: false } }",
+        "{ f: { source: 'bound: $.name', optional: true, on_missing: skip } }",
+        "{ f: { source: 'bound: $.name', optional: true, on_missing: missing } }",
+        "{ f: { source: 'bound: $.name', optional: true, sensitive: true, on_missing: missing } }",
+        "{ f: { source: 'bound: $.name', optional: false, on_missing: skip } }",
+        "{ f: { source: 'bound: $.name', on_missing: skip } }",
+        "{ f: { source: 'bound: $.name', optional: true, on_missing: fail } }",
+        "{ f: { source: 'bound: $.name', optional: 'true' } }",
+        "{ f: { source: 'entry.key', optional: true } }",
+        "{ f: { source: 'value', optional: true } }",
+        "{ f: { source: 'path', optional: true } }",
+        "{ f: { source: 'left.k', optional: true } }",
+        "{ f: { source: 'entry.key', on_missing: skip } }",
+    ];
+    let rows_all = [
+        ROWS[0],
+        ROWS[1],
+        "from: s\n    read: { regex: '(x)' }",
+        ROWS[2],
+        ROWS[3],
+    ];
+    agree(
+        rows_all
+            .into_iter()
+            .flat_map(|rows| shapes.iter().map(move |fields| relation(rows, fields))),
+    );
+}

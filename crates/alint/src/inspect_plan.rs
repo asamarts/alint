@@ -1042,8 +1042,24 @@ fn field_source(source: &FieldSource, hidden: bool) -> String {
         FieldSource::EntryRoot => "entry.root".into(),
         FieldSource::EntryPath => "entry.path".into(),
         FieldSource::Value => "value".into(),
-        FieldSource::Bound(query) => {
-            format!("bound: {}", if hidden { REDACTED } else { query })
+        FieldSource::Bound {
+            query,
+            optional,
+            on_missing,
+        } => {
+            let shown = if hidden { REDACTED } else { query };
+            if *optional {
+                match on_missing {
+                    alint_core::relation::plan::BoundMissing::Skip => {
+                        format!("bound: {shown} (optional)")
+                    }
+                    alint_core::relation::plan::BoundMissing::Missing => {
+                        format!("bound: {shown} (optional, on_missing: missing)")
+                    }
+                }
+            } else {
+                format!("bound: {shown}")
+            }
         }
         FieldSource::Side(JoinSide::Left, field) => format!("left.{field}"),
         FieldSource::Side(JoinSide::Right, field) => format!("right.{field}"),

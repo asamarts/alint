@@ -409,7 +409,10 @@ fn a_stub_locale_file_has_no_keys_under_strip_root() {
     };
     let mut expected = vec![format!("config/locales/de.yml: {}", missing("de", "bye"))];
     for group in ["fr", "it", "pl"] {
-        expected.extend([missing(group, "hello"), missing(group, "bye")]);
+        expected.extend([
+            format!("config/locales/{group}.yml: {}", missing(group, "hello")),
+            format!("config/locales/{group}.yml: {}", missing(group, "bye")),
+        ]);
     }
     assert_eq!(
         super::constraint_families::findings(&results, "by-locale"),
@@ -851,7 +854,7 @@ fn a_bound_path_must_match_once_in_each_resource() {
         [
             "b.yaml: relation `owned` (.alint.yml): `owner` (`bound: $.name`) matches nothing; a \
           bound path matches exactly once in each resource the relation reads, so fix the path, \
-          or narrow the selector to the files that have it"
+          narrow the selector to the files that have it, or mark the field `optional: true`"
         ]
     );
     let twice = setup(

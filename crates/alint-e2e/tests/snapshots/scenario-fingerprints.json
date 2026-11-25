@@ -1904,19 +1904,19 @@
   {
     "scenario": "check/version_two/conformance/locale_key_parity_merged_fail.yml",
     "rule_id": "locale-key-parity",
-    "path": null,
+    "path": "config/locales/de.yml",
     "fingerprint": "8c1dcb1ab8e14290d17dddb83c8fdadaed08a771f966d74d168e2bf43fecd69f"
   },
   {
     "scenario": "check/version_two/conformance/locale_key_parity_merged_fail.yml",
     "rule_id": "locale-key-parity",
-    "path": null,
+    "path": "config/locales/de.yml",
     "fingerprint": "950a7e59aecffd71065214e39f8720a2bf2cfee5734880bcb96257df3c1935d9"
   },
   {
     "scenario": "check/version_two/conformance/locale_key_parity_merged_fail.yml",
     "rule_id": "locale-key-parity",
-    "path": null,
+    "path": "config/locales/de.yml",
     "fingerprint": "9957a1e96c87532f8fd8ada58a2984df1e5a887347859d0282ed88e7c9821edc"
   },
   {

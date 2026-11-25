@@ -220,7 +220,11 @@ fn read_rows_decode_with_an_inline_selector() {
     assert!(*optional);
     assert_eq!(
         versions.fields[1].1.source,
-        FieldSource::Bound("$.package.name".into())
+        FieldSource::Bound {
+            query: "$.package.name".into(),
+            optional: false,
+            on_missing: crate::v2::model::BoundMissing::Skip,
+        }
     );
 }
 
@@ -704,8 +708,8 @@ fn a_field_source_is_one_of_the_documented_forms() {
     );
     assert_eq!(
         field("[value]"),
-        "`relations.r.fields.f`: expected a field source or a `{ source, sensitive }` map, \
-         found a list"
+        "`relations.r.fields.f`: expected a field source or a `{ source, sensitive, optional, \
+         on_missing }` map, found a list"
     );
     assert_eq!(
         field("entry.key"),
@@ -1158,4 +1162,101 @@ fn the_boolean_fields_are_the_ones_the_decode_reads_as_booleans() {
             "the decode reads a number ({number})"
         );
     }
+}
+
+#[test]
+fn bound_optional_and_on_missing_decode_and_validate() {
+    use crate::v2::model::BoundMissing;
+
+    let ok = decode(
+        "relations:\n  r:\n    from: s\n    entries: { format: json, at: $.deps }\n    fields:\n\
+         \x20     dep: entry.key\n\
+         \x20     pkg_default: { source: 'bound: $.name', optional: true }\n\
+         \x20     pkg_skip: { source: 'bound: $.name', optional: true, on_missing: skip }\n\
+         \x20     pkg_missing: { source: 'bound: $.name', optional: true, on_missing: missing }\n\
+         \x20     pkg_required: { source: 'bound: $.name', optional: false }\n",
+    )
+    .unwrap();
+    let rel = relation(&ok, "r");
+    assert_eq!(
+        rel.fields[1].1.source,
+        FieldSource::Bound {
+            query: "$.name".into(),
+            optional: true,
+            on_missing: BoundMissing::Skip,
+        }
+    );
+    assert_eq!(
+        rel.fields[2].1.source,
+        FieldSource::Bound {
+            query: "$.name".into(),
+            optional: true,
+            on_missing: BoundMissing::Skip,
+        }
+    );
+    assert_eq!(
+        rel.fields[3].1.source,
+        FieldSource::Bound {
+            query: "$.name".into(),
+            optional: true,
+            on_missing: BoundMissing::Missing,
+        }
+    );
+    assert_eq!(
+        rel.fields[4].1.source,
+        FieldSource::Bound {
+            query: "$.name".into(),
+            optional: false,
+            on_missing: BoundMissing::Skip,
+        }
+    );
+
+    // Rejected on non-bound sources.
+    for (rows, source) in [
+        ("from: s\n    entries: { format: json, at: $ }", "entry.key"),
+        ("from: s\n    read: { json: $.a }", "value"),
+        ("from: s\n    read: { json: $.a }", "path"),
+        (
+            "join: { left: a, right: b, on: { k: k }, unique: left }",
+            "left.k",
+        ),
+    ] {
+        let err = problem(&format!(
+            "relations:\n  r:\n    {rows}\n    fields: {{ f: {{ source: '{source}', optional: true }} }}\n"
+        ));
+        assert!(
+            err.contains("applies only to a `bound:` field"),
+            "{source}: {err}"
+        );
+    }
+
+    // `on_missing` requires `optional: true`.
+    let err = problem(
+        "relations:\n  r:\n    from: s\n    entries: { format: json, at: $ }\n    \
+         fields: { f: { source: 'bound: $.name', on_missing: skip } }\n",
+    );
+    assert!(
+        err.contains("`on_missing:` applies only when `optional: true` is set"),
+        "{err}"
+    );
+    let err = problem(
+        "relations:\n  r:\n    from: s\n    entries: { format: json, at: $ }\n    \
+         fields: { f: { source: 'bound: $.name', optional: false, on_missing: missing } }\n",
+    );
+    assert!(
+        err.contains("`on_missing:` applies only when `optional: true` is set"),
+        "{err}"
+    );
+
+    // Unknown `on_missing` value and non-boolean `optional`.
+    let err = problem(
+        "relations:\n  r:\n    from: s\n    entries: { format: json, at: $ }\n    \
+         fields: { f: { source: 'bound: $.name', optional: true, on_missing: ignore } }\n",
+    );
+    assert!(err.contains("unknown `on_missing` value"), "{err}");
+    let err = problem(
+        "relations:\n  r:\n    from: s\n    entries: { format: json, at: $ }\n    \
+         fields: { f: { source: 'bound: $.name', optional: 'true' } }\n",
+    );
+    assert!(err.contains("expected `true` or `false`"), "{err}");
 }

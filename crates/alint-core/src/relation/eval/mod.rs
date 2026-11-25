@@ -89,6 +89,12 @@ pub struct RelationRows {
     /// join's are those of its side that is not unique, whose order its rows
     /// follow, shared with that side.
     pub resources: Arc<[Resource]>,
+    /// Single-root stub rows (`fr:`, `fr: {}`, `fr: []`) removed by `strip-root`
+    /// that survived `entry.root` / path-token transforms and `where:` filters
+    /// (#598). Consulted by `set` (and `count`) when `group_by` derives from
+    /// `entry.root` so stub locale files still form zero-row groups anchored at
+    /// the stub file.
+    pub stub_rows: Vec<FieldRow>,
     /// What a `read:` skipped, in the order read: a computed value
     /// (`${VAR}`), one per value, and the values it matched that are not
     /// strings, one per resource and part, whose strings are still rows. A

@@ -265,10 +265,15 @@ impl<'p> Checker<'p> {
             Some(group_by) => self.resource_groups(group_by)?,
             None => None,
         };
+        let stub_root_groups = set
+            .group_by
+            .as_deref()
+            .is_some_and(|group_by| self.is_entry_root(self.input, group_by));
         Ok(Assertion::Set(Box::new(SetAssertion {
             field: set.field.clone(),
             group_by: set.group_by.clone(),
             resource_groups,
+            stub_root_groups,
             target,
             mode: *mode,
             groups,
@@ -546,16 +551,26 @@ impl<'p> Checker<'p> {
         Ok(value)
     }
 
-    /// Each `{{row.FIELD}}` of `message` names a field.
-    pub(super) fn message(&self, message: &str) -> Result<()> {
+    /// Each `{{row.FIELD}}` of `message` names a field, and `{{value}}` is
+    /// accepted only on `set` assertions (#594); arbitrary non-alint `{{...}}`
+    /// tokens stay literal.
+    pub(super) fn message(&self, message: &str, assertion: &Assertion) -> Result<()> {
         let mut rest = message;
         while let Some(start) = rest.find("{{") {
             let after = &rest[start + 2..];
             let Some(end) = after.find("}}") else {
                 break;
             };
-            if let Some(("row", name)) = after[..end]
-                .trim()
+            let inner = after[..end].trim();
+            if inner == "value" {
+                if !matches!(assertion, Assertion::Set(_)) {
+                    return Err(self.fail(
+                        "message",
+                        "`{{value}}` is only available on `set` assertions; use `{{row.FIELD}}` \
+                         to reference a field of the reported row",
+                    ));
+                }
+            } else if let Some(("row", name)) = inner
                 .split_once('.')
                 .map(|(namespace, name)| (namespace.trim(), name.trim()))
             {
@@ -598,6 +613,16 @@ impl<'p> Checker<'p> {
             }
         }
         Holds::Any
+    }
+
+    /// Whether field `name` of relation `id` reads `entry.root` directly
+    /// (never across a join, whose inner match drops zero-row stubs).
+    fn is_entry_root(&self, id: RelationId, name: &str) -> bool {
+        let relation = &self.plan.relation(id).relation;
+        matches!(
+            relation.field(name).map(|field| &field.source),
+            Some(FieldSource::EntryRoot)
+        )
     }
 
     /// Whether field `name` of relation `id` is `path` or a path token, or a

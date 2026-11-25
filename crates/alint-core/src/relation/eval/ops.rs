@@ -198,14 +198,26 @@ impl Evaluator<'_> {
         let relation = &named.relation;
         // Under `strip-root`, a top-level key whose value is null, `{}` or
         // `[]` (a stub locale file, `fr:`) holds no keys: its row goes before
-        // any transform reads it, so its file is one with no rows.
-        let stubs = take_stub_roots(&mut rows, relation);
+        // `strip-root` runs, while surviving single-root stubs keep their
+        // `entry.root` / path-token values for `set` `group_by: entry.root` (#598).
+        let mut stubs = take_stub_roots(&mut rows, relation);
         for (field, transforms) in &relation.transforms {
             let position = rows.field(field)?;
+            let applies_to_stubs = relation.field(field).is_some_and(|def| {
+                matches!(
+                    def.source,
+                    FieldSource::EntryRoot | FieldSource::Path(_) | FieldSource::Bound { .. }
+                )
+            });
             for transform in transforms {
                 match string_transform(*transform) {
                     Some(transform) => {
                         self.transform_field(site, &mut rows, position, field, transform, failures);
+                        if applies_to_stubs && !stubs.is_empty() && failures.is_empty() {
+                            self.transform_rows(
+                                site, &mut stubs, position, field, transform, failures,
+                            );
+                        }
                     }
                     None => self.strip_root(site, &mut rows, &stubs, position, field, failures),
                 }
@@ -234,38 +246,41 @@ impl Evaluator<'_> {
             }
         }
         if tests.is_empty() {
+            rows.stub_rows = stubs;
             return Some(rows);
         }
-        let mut kept = Vec::with_capacity(rows.rows.len());
-        // The resources a type error was reported for: one failure each.
+        // Filter surviving stub rows through `where:` clauses touching only
+        // `entry.root`, path-token, or `bound:` fields so excluded stub locales
+        // never form spurious groups (#598), while still failing loud on type
+        // mismatches.
         let mut reported = HashSet::new();
-        for row in std::mem::take(&mut rows.rows) {
-            let mut error = None;
-            let mut dropped = false;
-            for test in &tests {
-                match test.verdict(&row.cells[test.position]) {
-                    Verdict::Pass => {}
-                    Verdict::Fail => {
-                        dropped = true;
-                        break;
-                    }
-                    Verdict::TypeError => {
-                        error.get_or_insert(test);
-                    }
-                }
-            }
-            match error {
-                _ if dropped => {}
-                None => kept.push(row),
-                Some(test) => {
-                    let cell = &row.cells[test.position];
-                    if !reported.contains(cell.at.resource.path()) {
-                        reported.insert(cell.at.resource.path().clone());
-                        failures.push(test.type_error(site, cell));
-                    }
-                }
+        if !stubs.is_empty() {
+            let stub_tests: Vec<&Test<'_>> = tests
+                .iter()
+                .filter(|test| {
+                    relation.field(test.field).is_some_and(|def| {
+                        matches!(
+                            def.source,
+                            FieldSource::EntryRoot
+                                | FieldSource::Path(_)
+                                | FieldSource::Bound { .. }
+                        )
+                    })
+                })
+                .collect();
+            if !stub_tests.is_empty() {
+                stubs = filter_rows(site, stubs, &stub_tests, &mut reported, failures);
             }
         }
+        rows.stub_rows = stubs;
+        let all_tests: Vec<&Test<'_>> = tests.iter().collect();
+        let kept = filter_rows(
+            site,
+            std::mem::take(&mut rows.rows),
+            &all_tests,
+            &mut reported,
+            failures,
+        );
         if !failures.is_empty() {
             return None;
         }
@@ -557,9 +572,30 @@ impl Evaluator<'_> {
         string_transform: StringTransform,
         failures: &mut Failures,
     ) {
+        self.transform_rows(
+            site,
+            &mut rows.rows,
+            position,
+            field,
+            string_transform,
+            failures,
+        );
+    }
+
+    /// Apply one string transform to the field at `position` of every row in
+    /// `target`.
+    fn transform_rows(
+        &self,
+        site: &Site,
+        target: &mut [FieldRow],
+        position: usize,
+        field: &str,
+        string_transform: StringTransform,
+        failures: &mut Failures,
+    ) {
         // Each text transformed, by the text it was, while the field is.
         let mut done: HashMap<Arc<str>, Arc<str>> = HashMap::new();
-        for row in &mut rows.rows {
+        for row in target {
             let cell = &mut row.cells[position];
             match &cell.value {
                 None => {}
@@ -1000,6 +1036,46 @@ impl Test<'_> {
             detail,
         )
     }
+}
+
+/// Filter `input` through `tests`, reporting at most one type error per
+/// resource for rows not dropped by another predicate.
+fn filter_rows(
+    site: &Site,
+    input: Vec<FieldRow>,
+    tests: &[&Test<'_>],
+    reported: &mut HashSet<crate::relation::RelPath>,
+    failures: &mut Failures,
+) -> Vec<FieldRow> {
+    let mut kept = Vec::with_capacity(input.len());
+    for row in input {
+        let mut error = None;
+        let mut dropped = false;
+        for &test in tests {
+            match test.verdict(&row.cells[test.position]) {
+                Verdict::Pass => {}
+                Verdict::Fail => {
+                    dropped = true;
+                    break;
+                }
+                Verdict::TypeError => {
+                    error.get_or_insert(test);
+                }
+            }
+        }
+        match error {
+            _ if dropped => {}
+            None => kept.push(row),
+            Some(test) => {
+                let cell = &row.cells[test.position];
+                if !reported.contains(cell.at.resource.path()) {
+                    reported.insert(cell.at.resource.path().clone());
+                    failures.push(test.type_error(site, cell));
+                }
+            }
+        }
+    }
+    kept
 }
 
 fn resource_of(cell: &Cell) -> Arc<std::path::Path> {

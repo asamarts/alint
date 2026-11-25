@@ -1650,3 +1650,190 @@ fn selector_with_directory_prefix_narrows_index_scan() {
         "expected narrowed positive scan on pkg/d000/*, tested {tested} entries"
     );
 }
+
+#[test]
+fn optional_bound_skips_resource_or_emits_missing_cell() {
+    use crate::relation::plan::BoundMissing;
+
+    let files = tree(&[
+        ("root.json", r#"{"deps": {"lodash": "1.0.0"}}"#),
+        (
+            "pkg-a.json",
+            r#"{"name": "pkg-a", "version": "1.0.0", "deps": {"react": "18.0.0"}}"#,
+        ),
+    ]);
+
+    // `on_missing: skip` skips `root.json` completely (rows AND `resources`),
+    // even when a required `bound:` field (`$.version`) is declared BEFORE the
+    // optional skip field (`$.name`).
+    let skip_rel = named(
+        "deps_skip",
+        Rows::Part(Part {
+            from: from("*.json"),
+            reader: Reader::Entries(Entries {
+                format: EntriesFormat::Json,
+                at: vec!["$.deps".into()],
+                leaves: false,
+            }),
+        }),
+        &[
+            (
+                "version",
+                FieldSource::Bound {
+                    query: "$.version".into(),
+                    optional: false,
+                    on_missing: BoundMissing::Skip,
+                },
+            ),
+            (
+                "pkg",
+                FieldSource::Bound {
+                    query: "$.name".into(),
+                    optional: true,
+                    on_missing: BoundMissing::Skip,
+                },
+            ),
+            ("dep", FieldSource::EntryKey),
+        ],
+    );
+    let rows = run(&plan(vec![skip_rel]), 0, &files, Limits::default()).unwrap();
+    assert_eq!(rows.rows.len(), 1);
+    assert_eq!(rows.resources.len(), 1);
+    assert_eq!(rows.resources[0].path().as_str(), "pkg-a.json");
+    assert_eq!(
+        rows.rows[0].cells[1].value,
+        Some(Value::String("pkg-a".into()))
+    );
+}
+
+#[test]
+fn optional_bound_on_missing_missing_keeps_rows_for_entries_and_read() {
+    use crate::relation::plan::BoundMissing;
+
+    let files = tree(&[
+        ("root.json", r#"{"deps": {"lodash": "1.0.0"}}"#),
+        (
+            "pkg-a.json",
+            r#"{"name": "pkg-a", "version": "1.0.0", "deps": {"react": "18.0.0"}}"#,
+        ),
+    ]);
+
+    // `on_missing: missing` keeps `root.json`'s row with `None` in the bound cell
+    // (both for `entries:` and for `read:`).
+    let missing_entries = named(
+        "deps_missing",
+        Rows::Part(Part {
+            from: from("*.json"),
+            reader: Reader::Entries(Entries {
+                format: EntriesFormat::Json,
+                at: vec!["$.deps".into()],
+                leaves: false,
+            }),
+        }),
+        &[
+            (
+                "pkg",
+                FieldSource::Bound {
+                    query: "$.name".into(),
+                    optional: true,
+                    on_missing: BoundMissing::Missing,
+                },
+            ),
+            ("dep", FieldSource::EntryKey),
+        ],
+    );
+    let rows = run(&plan(vec![missing_entries]), 0, &files, Limits::default()).unwrap();
+    assert_eq!(rows.rows.len(), 2);
+    assert_eq!(rows.resources.len(), 2);
+    assert_eq!(
+        rows.rows[0].cells[0].value,
+        Some(Value::String("pkg-a".into()))
+    );
+    assert_eq!(rows.rows[1].cells[0].value, None);
+    assert_eq!(
+        rows.rows[1].cells[1].value,
+        Some(Value::String("lodash".into()))
+    );
+
+    let missing_read = named(
+        "read_missing",
+        Rows::Part(Part {
+            from: from("*.json"),
+            reader: Reader::Read {
+                read: Read::Json("$.deps.*".into()),
+                optional: false,
+            },
+        }),
+        &[
+            (
+                "pkg",
+                FieldSource::Bound {
+                    query: "$.name".into(),
+                    optional: true,
+                    on_missing: BoundMissing::Missing,
+                },
+            ),
+            ("ver", FieldSource::Value),
+        ],
+    );
+    let rows = run(&plan(vec![missing_read]), 0, &files, Limits::default()).unwrap();
+    assert_eq!(rows.rows.len(), 2);
+    assert_eq!(rows.rows[1].cells[0].value, None);
+    assert_eq!(
+        rows.rows[1].cells[1].value,
+        Some(Value::String("1.0.0".into()))
+    );
+}
+
+#[test]
+fn optional_bound_still_fails_on_multi_match_or_non_scalar() {
+    use crate::relation::plan::BoundMissing;
+
+    let bad = tree(&[
+        ("multi.json", r#"{"names": ["a", "b"], "deps": {"x": "1"}}"#),
+        ("obj.json", r#"{"meta": {"a": 1}, "deps": {"x": "1"}}"#),
+    ]);
+    let multi_rel = named(
+        "multi",
+        Rows::Part(Part {
+            from: from("multi.json"),
+            reader: Reader::Entries(Entries {
+                format: EntriesFormat::Json,
+                at: vec!["$.deps".into()],
+                leaves: false,
+            }),
+        }),
+        &[(
+            "pkg",
+            FieldSource::Bound {
+                query: "$.names[*]".into(),
+                optional: true,
+                on_missing: BoundMissing::Skip,
+            },
+        )],
+    );
+    let errs = messages(&run(&plan(vec![multi_rel]), 0, &bad, Limits::default()));
+    assert!(errs[0].contains("matches more than once"), "{errs:?}");
+
+    let obj_rel = named(
+        "obj",
+        Rows::Part(Part {
+            from: from("obj.json"),
+            reader: Reader::Entries(Entries {
+                format: EntriesFormat::Json,
+                at: vec!["$.deps".into()],
+                leaves: false,
+            }),
+        }),
+        &[(
+            "pkg",
+            FieldSource::Bound {
+                query: "$.meta".into(),
+                optional: true,
+                on_missing: BoundMissing::Missing,
+            },
+        )],
+    );
+    let errs = messages(&run(&plan(vec![obj_rel]), 0, &bad, Limits::default()));
+    assert!(errs[0].contains("a field holds a scalar"), "{errs:?}");
+}

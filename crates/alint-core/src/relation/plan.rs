@@ -450,6 +450,18 @@ pub struct FieldDef {
     pub sensitive: bool,
 }
 
+/// What an optional `bound:` field does when its `JSONPath` matches nothing in a
+/// resource (#593).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BoundMissing {
+    /// Drop the resource from the relation (emit no rows and exclude it from
+    /// `resources`, matching `read: { optional: true }`). Default.
+    #[default]
+    Skip,
+    /// Keep the resource's rows with a `Missing` cell (`Cell { value: None }`).
+    Missing,
+}
+
 /// The sources a field may take (section 5).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FieldSource {
@@ -464,7 +476,11 @@ pub enum FieldSource {
     /// `value`: a `read:` row's value.
     Value,
     /// `bound: <JSONPath>`: a value read once per resource.
-    Bound(String),
+    Bound {
+        query: String,
+        optional: bool,
+        on_missing: BoundMissing,
+    },
     /// `left.F` or `right.F` in a join's output.
     Side(JoinSide, String),
 }

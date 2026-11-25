@@ -44,12 +44,13 @@ mod options;
 mod places;
 mod values;
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 
 use alint_core::relation::eval::{self, RelationNote, Skipped};
 use alint_core::relation::plan::{PathToken, Plan, RelationId};
-use alint_core::relation::{Resource, StringTransform, TriggerScope, Value};
+use alint_core::relation::{RelPath, Resource, StringTransform, TriggerScope, Value};
+use alint_core::template::PathTokens;
 use alint_core::{AnalysisFailureKind, Context, Error, Level, Result, Rule, RuleSpec, Violation};
 
 pub use options::options_schema;
@@ -91,6 +92,10 @@ struct SetAssertion {
     /// When `group_by:` is `path` or a path token: every resource the
     /// relation reads forms its group, rows or not.
     resource_groups: Option<ResourceGroups>,
+    /// When `group_by:` reads `entry.root`: single-root stub files removed by
+    /// `strip-root` (`fr:`, `fr: {}`, `fr: []`) still form zero-row groups
+    /// anchored at the stub file (#598).
+    stub_root_groups: bool,
     target: SetTarget,
     mode: SetMode,
     /// `groups:`: the groups that must exist, rows or not (`equal_to:` only).
@@ -129,6 +134,49 @@ impl ResourceGroups {
             text = transform.apply(&text);
         }
         text
+    }
+
+    /// Structural path-component counterpart of `ref_path` inside a target
+    /// group's `candidates` (#595): matches candidates whose non-token path
+    /// components equal `ref_path`'s, returning `Some(path)` only when
+    /// **exactly one** candidate matches so callers fall back to `group.first`
+    /// on any ambiguity or non-matching layout.
+    fn structural_counterpart<'r>(
+        &self,
+        ref_path: &RelPath,
+        candidates: &BTreeSet<&'r RelPath>,
+    ) -> Option<&'r RelPath> {
+        let expected = structural_signature(self.token, ref_path)?;
+        let mut matched: Option<&'r RelPath> = None;
+        for &candidate in candidates {
+            if structural_signature(self.token, candidate).as_ref() == Some(&expected) {
+                if matched.is_some() {
+                    return None;
+                }
+                matched = Some(candidate);
+            }
+        }
+        matched
+    }
+}
+
+/// The path components outside `token` that identify a counterpart file across
+/// groups built by `token` (#595).
+fn structural_signature(token: PathToken, path: &RelPath) -> Option<(String, String)> {
+    let tokens = PathTokens::from_path(path.as_path());
+    match token {
+        PathToken::ParentName => {
+            if tokens.parent_name.is_empty() || tokens.dir.is_empty() || tokens.dir == "." {
+                return None;
+            }
+            let grandparent = tokens.dir.rsplit_once('/').map_or("", |(g, _)| g);
+            Some((grandparent.to_string(), tokens.basename))
+        }
+        PathToken::Dir => Some((String::new(), tokens.basename)),
+        PathToken::Basename => Some((tokens.dir, String::new())),
+        PathToken::Stem => Some((tokens.dir, tokens.ext)),
+        PathToken::Ext => Some((tokens.dir, tokens.stem)),
+        PathToken::Path => None,
     }
 }
 
@@ -194,7 +242,7 @@ fn build_rule(spec: &RuleSpec) -> Result<ConstraintRule> {
     let checker = check::Checker::new(&plan, input, &spec.id, references);
     let assertion = checker.assertion(&options.assert)?;
     if let Some(message) = &spec.message {
-        checker.message(message)?;
+        checker.message(message, &assertion)?;
     }
     let mut inputs = vec![input];
     if let Assertion::Set(set) = &assertion
