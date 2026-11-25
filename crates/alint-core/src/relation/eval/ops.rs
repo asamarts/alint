@@ -204,10 +204,7 @@ impl Evaluator<'_> {
         let mut stubs = take_stub_roots(&mut rows, relation);
         let retain_stubs = !stubs.is_empty()
             && relation.fields.iter().any(|(field, _)| {
-                matches!(
-                    field_origin_source(self.plan, id, field),
-                    Some(FieldSource::EntryRoot)
-                )
+                field_all_origins_match(self.plan, id, field, |src| *src == FieldSource::EntryRoot)
             });
         self.apply_transforms(
             site,
@@ -256,7 +253,7 @@ impl Evaluator<'_> {
             let stub_tests: Vec<&Test<'_>> = tests
                 .iter()
                 .filter(|test| {
-                    field_origin_source(self.plan, id, test.field).is_some_and(|src| {
+                    field_all_origins_match(self.plan, id, test.field, |src| {
                         matches!(
                             src,
                             FieldSource::EntryRoot
@@ -301,7 +298,7 @@ impl Evaluator<'_> {
             let position = rows.field(field)?;
             let field_sensitive = rows.fields[position].sensitive;
             let applies_to_stubs = retain_stubs
-                && field_origin_source(self.plan, id, field).is_some_and(|src| {
+                && field_all_origins_match(self.plan, id, field, |src| {
                     matches!(
                         src,
                         FieldSource::EntryRoot | FieldSource::Path(_) | FieldSource::Bound { .. }
@@ -708,6 +705,7 @@ impl Evaluator<'_> {
                             } else {
                                 cell.value = None;
                                 cell.span = None;
+                                cell.path = None;
                             }
                         }
                     }
@@ -1144,24 +1142,26 @@ impl Test<'_> {
     }
 }
 
-/// Trace a field's underlying non-join [`FieldSource`] through any chain of
-/// `join:` relations. For a per-part `union:`, returns `Some` only when every
-/// part agrees on the same underlying source.
-fn field_origin_source<'p>(
-    plan: &'p crate::relation::plan::Plan,
+/// Whether every underlying non-join [`FieldSource`] of field `name` in
+/// relation `id` (following `join:` copies and inspecting every part of a
+/// per-part `union:`) satisfies `predicate`.
+fn field_all_origins_match(
+    plan: &crate::relation::plan::Plan,
     mut id: RelationId,
     name: &str,
-) -> Option<&'p FieldSource> {
+    predicate: impl Fn(&FieldSource) -> bool,
+) -> bool {
     let mut current = name;
     for _ in 0..=plan.relations.len() {
         let relation = &plan.relation(id).relation;
         if relation.uses_part_fields() {
             let sources = relation.field_sources(current);
-            let first = &sources.first()?.source;
-            return sources.iter().all(|f| &f.source == first).then_some(first);
+            return !sources.is_empty() && sources.iter().all(|f| predicate(&f.source));
         }
-        let source = &relation.field(current)?.source;
-        match (source, &relation.rows) {
+        let Some(field) = relation.field(current) else {
+            return false;
+        };
+        match (&field.source, &relation.rows) {
             (FieldSource::Side(side, copied), Rows::Join(join)) => {
                 id = match side {
                     JoinSide::Left => join.left.id,
@@ -1169,10 +1169,10 @@ fn field_origin_source<'p>(
                 };
                 current = copied.as_str();
             }
-            _ => return Some(source),
+            (source, _) => return predicate(source),
         }
     }
-    None
+    false
 }
 
 /// Filter `input` through `tests`, reporting at most one type error per

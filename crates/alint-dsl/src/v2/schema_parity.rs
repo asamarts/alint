@@ -406,12 +406,20 @@ fn the_decode_and_the_schema_agree_on_formats_forms_and_sides() {
     if !has_schema() {
         return;
     }
-    let formats = ["json", "yaml", "toml", "xml", "JSON", "ini"].map(|format| {
-        relation(
-            &format!("from: s\n    entries: {{ format: {format}, at: $ }}"),
-            "{ f: entry.key }",
-        )
-    });
+    let formats = ["json", "yaml", "toml", "xml", "JSON", "ini"]
+        .into_iter()
+        .flat_map(|format| {
+            [
+                relation(
+                    &format!("from: s\n    entries: {{ format: {format}, at: $ }}"),
+                    "{ f: entry.key }",
+                ),
+                relation(
+                    &format!("from: s\n    records: {{ format: {format}, at: $ }}"),
+                    "{ f: 'record: $.name' }",
+                ),
+            ]
+        });
     let mut forms: Vec<String> = READ_KEYS
         .iter()
         .chain(&[

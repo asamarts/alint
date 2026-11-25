@@ -221,6 +221,7 @@ impl<'r> Run<'r> {
     /// roots (#598); and each literal tuple of `groups:`.
     /// Without `group_by:`, the relation is one group, whose resources are
     /// every one it reads and may keep a row of.
+    #[allow(clippy::too_many_lines)]
     fn set_groups(
         &mut self,
         set: &SetAssertion,
@@ -250,18 +251,25 @@ impl<'r> Run<'r> {
         }
         let (groups, group_cols) = self.groups_by_fields(group_at, "assert.set.group_by")?;
         // Each literal tuple names a group: comparing each component with its
-        // column's values (of one type) must not cross types.
+        // column's values (of one type) and with other literal tuples must not
+        // cross types (even when input has 0 rows).
+        let mut all_group_literals: Vec<Vec<Value>> = Vec::with_capacity(set.groups.len() + 1);
         if let SetTarget::Group(reference) = &set.target {
             let option = format!("assert.set.{}.group", set.mode.key());
             if !self.check_group_tuple_types(reference, group_at, &group_cols, &option) {
                 return None;
             }
+            all_group_literals.push(reference.clone());
         }
         for (index, tuple) in set.groups.iter().enumerate() {
             let option = format!("assert.set.groups[{index}]");
             if !self.check_group_tuple_types(tuple, group_at, &group_cols, &option) {
                 return None;
             }
+            all_group_literals.push(tuple.clone());
+        }
+        if !self.check_uniform_literal_tuples(&all_group_literals, "assert.set.groups") {
+            return None;
         }
         let mut out: Vec<SetGroup<'r>> = Vec::with_capacity(groups.order.len());
         let mut index: HashMap<Vec<Scalar>, usize> = HashMap::with_capacity(groups.order.len());
@@ -284,15 +292,24 @@ impl<'r> Run<'r> {
         // rows' is.
         if !set.resource_groups.is_empty() {
             for resource in resources {
-                let Some(tuple) = set
-                    .resource_groups
-                    .iter()
-                    .map(|rg| rg.group_of(resource).map(|s| Scalar::String(s.into())))
-                    .collect::<Option<Vec<_>>>()
-                else {
-                    continue;
-                };
-                add_group_resource(&mut out, &mut index, tuple, resource.path());
+                let mut tuple = Vec::with_capacity(set.resource_groups.len());
+                let mut skipped = false;
+                for (j, rg) in set.resource_groups.iter().enumerate() {
+                    match rg.group_of(resource) {
+                        Ok(Some(s)) => tuple.push(Scalar::String(s.into())),
+                        Ok(None) => {
+                            skipped = true;
+                            break;
+                        }
+                        Err(err) => {
+                            self.fail_required_split(resource.path().as_path(), group_at[j], &err);
+                            return None;
+                        }
+                    }
+                }
+                if !skipped {
+                    add_group_resource(&mut out, &mut index, tuple, resource.path());
+                }
             }
         }
         // Grouped by `entry.root` (alone or alongside path tokens), single-root
@@ -441,26 +458,40 @@ impl<'r> Run<'r> {
         let option = format!("assert.set.{}.values", set.mode.key());
         let mut theirs = Groups::new();
         let mut kinds: BTreeMap<Kind, usize> = BTreeMap::new();
+        let entry_overhead = std::mem::size_of::<Vec<Scalar>>()
+            .saturating_add(std::mem::size_of::<Scalar>())
+            .saturating_add(std::mem::size_of::<Vec<usize>>())
+            .saturating_add(32);
+        let mut held_bytes = 0usize;
         for (idx, literal) in literals.iter().enumerate() {
             let scalar = Scalar::of_value(literal).expect("the builder takes scalar literals");
+            let text_bytes = match &scalar {
+                Scalar::String(s) | Scalar::Number(s) => s.len(),
+                _ => 0,
+            };
             if let Some(kind) = scalar.kind() {
                 kinds.entry(kind).or_insert(idx);
             }
             let before = theirs.order.len();
             theirs.add(vec![scalar], idx);
-            if theirs.order.len() > before
-                && let Err(limit) = self
+            if theirs.order.len() > before {
+                held_bytes = held_bytes
+                    .saturating_add(entry_overhead)
+                    .saturating_add(text_bytes);
+                if let Err(limit) = self
                     .limits
                     .check(LimitKind::DistinctValues, theirs.order.len())
-            {
-                self.fail(
-                    None,
-                    format!(
-                        "`{option}`: {limit}, so the assertion has no verdict rather than one over \
-                         part of the set"
-                    ),
-                );
-                return None;
+                    .and_then(|()| self.may_hold(held_bytes))
+                {
+                    self.fail(
+                        None,
+                        format!(
+                            "`{option}`: {limit}, so the assertion has no verdict rather than one \
+                             over part of the set"
+                        ),
+                    );
+                    return None;
+                }
             }
         }
         if kinds.len() > 1 {
@@ -538,6 +569,11 @@ impl<'r> Run<'r> {
         let limits = self.limits;
         let mut theirs = Groups::new();
         let mut kinds: BTreeMap<Kind, usize> = BTreeMap::new();
+        let entry_overhead = std::mem::size_of::<Vec<Scalar>>()
+            .saturating_add(std::mem::size_of::<Scalar>())
+            .saturating_add(std::mem::size_of::<Vec<usize>>())
+            .saturating_add(32);
+        let mut held_bytes = 0usize;
         for (row, other_row) in other_rows.rows.iter().enumerate() {
             let cell = &other_row.cells[at];
             let value = match Scalar::of(cell) {
@@ -558,17 +594,21 @@ impl<'r> Run<'r> {
             kinds.entry(kind).or_insert(row);
             let before = theirs.order.len();
             theirs.add(vec![value], row);
-            if theirs.order.len() > before
-                && let Err(limit) = limits.check(LimitKind::DistinctValues, theirs.order.len())
-            {
-                self.fail(
-                    None,
-                    format!(
-                        "`{option}`: reads `{written}.{field}`: {limit}, so the assertion has no \
-                         verdict rather than one over part of the set; narrow `{written}`"
-                    ),
-                );
-                return None;
+            if theirs.order.len() > before {
+                held_bytes = held_bytes.saturating_add(entry_overhead);
+                if let Err(limit) = limits
+                    .check(LimitKind::DistinctValues, theirs.order.len())
+                    .and_then(|()| self.may_hold(held_bytes))
+                {
+                    self.fail(
+                        None,
+                        format!(
+                            "`{option}`: reads `{written}.{field}`: {limit}, so the assertion has \
+                             no verdict rather than one over part of the set; narrow `{written}`"
+                        ),
+                    );
+                    return None;
+                }
             }
         }
         if !self.check_relation_column_types(
@@ -635,6 +675,19 @@ impl<'r> Run<'r> {
         let mut field_kinds: BTreeMap<Kind, usize> = BTreeMap::new();
         let mut group_kinds: Vec<BTreeMap<Kind, usize>> = vec![BTreeMap::new(); dst_group_at.len()];
         let mut total_distinct = 0usize;
+        let group_overhead = std::mem::size_of::<Vec<Scalar>>()
+            .saturating_add(
+                dst_group_at
+                    .len()
+                    .saturating_mul(std::mem::size_of::<Scalar>()),
+            )
+            .saturating_add(std::mem::size_of::<Groups>())
+            .saturating_add(32);
+        let value_overhead = std::mem::size_of::<Vec<Scalar>>()
+            .saturating_add(std::mem::size_of::<Scalar>())
+            .saturating_add(std::mem::size_of::<Vec<usize>>())
+            .saturating_add(32);
+        let mut held_bytes = 0usize;
         for (row, other_row) in other_rows.rows.iter().enumerate() {
             let mut gkey = Vec::with_capacity(dst_group_at.len());
             for (j, &gpos) in dst_group_at.iter().enumerate() {
@@ -680,18 +733,27 @@ impl<'r> Run<'r> {
                     return None;
                 }
             };
-            if !by_group.contains_key(&gkey) {
-                group_order.push(gkey.clone());
-                by_group.insert(gkey.clone(), Groups::new());
-            }
+            // Only allocate a target group entry when the row carries a
+            // non-null, present value so `DistinctValues` and `BytesPerRun`
+            // cannot be bypassed by target rows with `field = null`.
             if let Some(kind) = fval.kind() {
                 field_kinds.entry(kind).or_insert(row);
+                let new_group = !by_group.contains_key(&gkey);
+                if new_group {
+                    group_order.push(gkey.clone());
+                    by_group.insert(gkey.clone(), Groups::new());
+                    held_bytes = held_bytes.saturating_add(group_overhead);
+                }
                 let target_group = by_group.get_mut(&gkey).expect("inserted above");
                 let before = target_group.order.len();
                 target_group.add(vec![fval], row);
                 if target_group.order.len() > before {
                     total_distinct += 1;
-                    if let Err(limit) = limits.check(LimitKind::DistinctValues, total_distinct) {
+                    held_bytes = held_bytes.saturating_add(value_overhead);
+                    if let Err(limit) = limits
+                        .check(LimitKind::DistinctValues, total_distinct)
+                        .and_then(|()| self.may_hold(held_bytes))
+                    {
                         self.fail(
                             None,
                             format!(
@@ -717,6 +779,28 @@ impl<'r> Run<'r> {
                 kinds,
             ) {
                 return None;
+            }
+            // Also verify `groups:` literals against target `to.group_by`
+            // column types when input has 0 rows.
+            if let Some((&dst_kind, &dst_row)) = kinds.iter().next() {
+                for (lit_idx, tuple) in set.groups.iter().enumerate() {
+                    let lit_scalar =
+                        Scalar::of_value(&tuple[j]).expect("builder validated scalar literal");
+                    if lit_scalar.kind().is_some_and(|k| k != dst_kind) {
+                        let dst_cell = &other_rows.rows[dst_row].cells[dst_group_at[j]];
+                        let message = format!(
+                            "`assert.set.groups[{lit_idx}]`: the literal is {} and `{}` of \
+                             relation `{written}` holds {} at {}; the comparison would cross \
+                             types, so the assertion has no verdict",
+                            literal_type(&lit_scalar),
+                            target_group_by[j],
+                            type_of(dst_cell),
+                            self.located(dst_cell),
+                        );
+                        self.fail(Some(dst_cell.at.resource.path().as_path()), message);
+                        return None;
+                    }
+                }
             }
         }
         if !self.check_relation_column_types(
@@ -952,7 +1036,7 @@ impl<'r> Run<'r> {
             let target_path = counterparts
                 .and_then(|index| index.lookup(ref_path))
                 .or(group.first);
-            let hide_other = self.hide_keys || hide_value;
+            let hide_other = self.hide_spans || hide_value;
             let holder = spot_in(other_rows, theirs, other.at, hide_other);
             let related = self.related_at(vec![(holder, other.label.as_str())], 0);
             let reported = other.group.is_some().then_some(theirs);
@@ -1030,7 +1114,7 @@ impl<'r> Run<'r> {
             value.show(hide_value)
         );
         let related = if let Some(other_rows) = other.rows {
-            let hide_other = self.hide_keys || hide_value;
+            let hide_other = self.hide_spans || hide_value;
             let holder = spot_in(other_rows, theirs, other.at, hide_other);
             self.related_at(vec![(holder, other.label.as_str())], 0)
         } else {

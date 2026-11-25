@@ -499,3 +499,326 @@ fn mixed_reader_union_per_part_fields_align_columns_and_track_keys_sensitive() {
     let sens_plan = plan(vec![sens_rel]);
     assert!(super::super::keys_sensitive(&sens_plan, RelationId(0)));
 }
+
+#[test]
+fn records_empty_objects_stay_linear_empty_root_zero_rows_and_non_object_stops_early() {
+    // 2,000 empty `{}` objects stay O(N) via single-pass `locate_cached`.
+    let many_empty = format!(
+        r#"{{"items":[{}]}}"#,
+        std::iter::repeat_n("{}", 2_000)
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let files_many = tree(&[("many.json", many_empty.as_str())]);
+    let plan_empty_elems = plan(vec![named(
+        "many",
+        Rows::Part(records_part(
+            "many.json",
+            EntriesFormat::Json,
+            &["$.items[*]"],
+        )),
+        &[(
+            "name",
+            FieldSource::Record {
+                query: "$.name".into(),
+                optional: true,
+            },
+        )],
+    )]);
+    let rows = run(&plan_empty_elems, 0, &files_many, Limits::default()).unwrap();
+    assert_eq!(rows.rows.len(), 2_000);
+    assert!(rows.rows.iter().all(|r| r.cells[0].value.is_none()));
+
+    // Empty / whitespace / BOM-only files on `at: "$"` emit 0 rows (matching
+    // comment-only YAML) instead of failing or emitting a phantom row.
+    for (name, fmt, body) in [
+        ("empty.json", EntriesFormat::Json, "   \n"),
+        ("bom.json", EntriesFormat::Json, "\u{feff}  "),
+        ("empty.yaml", EntriesFormat::Yaml, "  \n"),
+        ("comment.yaml", EntriesFormat::Yaml, "# comment only\n"),
+        ("empty.toml", EntriesFormat::Toml, "  \n"),
+    ] {
+        let files = tree(&[(name, body)]);
+        let p = plan(vec![named(
+            "root",
+            Rows::Part(records_part(name, fmt, &["$"])),
+            &[(
+                "name",
+                FieldSource::Record {
+                    query: "$.name".into(),
+                    optional: false,
+                },
+            )],
+        )]);
+        let rows = run(&p, 0, &files, Limits::default()).unwrap();
+        assert!(rows.rows.is_empty(), "{name} should emit 0 rows");
+    }
+
+    // Non-object first element stops `extract_at` immediately: 3 trailing
+    // objects fit under `RowsPerExtractor = 5` during `entry_table_with_arrays`
+    // (4 JSON keys total), but would exceed 5 adapter rows (1 error + 3*2 = 7)
+    // if `extract_at` kept extracting after `"bad"`.
+    let trailing_objs = format!(
+        r#"{{"items":["bad",{}]}}"#,
+        std::iter::repeat_n(r#"{"name":"x"}"#, 3)
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let files_bad = tree(&[("bad.json", trailing_objs.as_str())]);
+    let p_non_obj = plan(vec![named(
+        "bad",
+        Rows::Part(records_part(
+            "bad.json",
+            EntriesFormat::Json,
+            &["$.items[*]"],
+        )),
+        &[(
+            "name",
+            FieldSource::Record {
+                query: "$.name".into(),
+                optional: false,
+            },
+        )],
+    )]);
+    let errs = messages(&run(
+        &p_non_obj,
+        0,
+        &files_bad,
+        limit(LimitKind::RowsPerExtractor, 5),
+    ));
+    assert!(
+        errs.iter().any(|m| m.contains("selects a string")),
+        "must report non-object error rather than RowsPerExtractor: {errs:?}"
+    );
+    assert!(
+        errs.iter()
+            .any(|m| m.contains("each of which becomes a row")),
+        "records: advice must describe record objects: {errs:?}"
+    );
+}
+
+#[test]
+fn records_exact_spans_verify_through_find_spans_and_toml_entries_stay_isolated() {
+    use std::fmt::Write as _;
+
+    use super::super::spans::find_spans;
+
+    let json_text = r#"{"items":[{"name":"api","port":8080}]}"#;
+    let yaml_text = "items:\n  - name: api\n    port: 8080\n";
+    let toml_text = "[[items]]\nname = \"api\"\nport = 8080\n";
+    for (file, fmt, body) in [
+        ("a.json", EntriesFormat::Json, json_text),
+        ("a.yaml", EntriesFormat::Yaml, yaml_text),
+        ("a.toml", EntriesFormat::Toml, toml_text),
+    ] {
+        let files = tree(&[(file, body)]);
+        let p = plan(vec![named(
+            "r",
+            Rows::Part(records_part(file, fmt, &["$.items[*]"])),
+            &[
+                (
+                    "name",
+                    FieldSource::Record {
+                        query: "$.name".into(),
+                        optional: false,
+                    },
+                ),
+                (
+                    "port",
+                    FieldSource::Record {
+                        query: "$.port".into(),
+                        optional: false,
+                    },
+                ),
+            ],
+        )]);
+        let rows = run(&p, 0, &files, Limits::default()).unwrap();
+        let name_span = rows.rows[0].cells[0].span.as_ref().expect("name span");
+        let port_span = rows.rows[0].cells[1].span.as_ref().expect("port span");
+        let (found, _) = find_spans(body.as_bytes(), [name_span, port_span]);
+        let name_bs = found[0].expect("verified name span");
+        let port_bs = found[1].expect("verified port span");
+        assert!(body[name_bs.start..name_bs.end].contains("api"), "{file}");
+        assert_eq!(&body[port_bs.start..port_bs.end], "8080", "{file}");
+        // Editing the value invalidates its verified span.
+        let edited = body.replace("8080", "9090");
+        let (after_edit, _) = find_spans(edited.as_bytes(), [port_span]);
+        assert_eq!(after_edit[0], None, "edited value span must invalidate");
+    }
+
+    // `entries:` on TOML places its spans without descending unrelated `[[big]]`
+    // arrays (using `Holds::Value` rather than `Holds::RecordValue`).
+    let mut toml_with_big = String::from("[deps]\nserde = \"1.0\"\n");
+    for i in 0..20 {
+        let _ = writeln!(toml_with_big, "[[big]]\nk{i} = {i}");
+    }
+    let files_toml = tree(&[("Cargo.toml", toml_with_big.as_str())]);
+    let entries_rel = named(
+        "deps",
+        Rows::Part(Part {
+            from: from("Cargo.toml"),
+            reader: Reader::Entries(Entries {
+                format: EntriesFormat::Toml,
+                at: vec!["$.deps".into()],
+                leaves: false,
+            }),
+            fields: None,
+        }),
+        &[("k", FieldSource::EntryKey), ("v", FieldSource::EntryValue)],
+    );
+    let ep = plan(vec![entries_rel]);
+    let rows = run(&ep, 0, &files_toml, Limits::default()).unwrap();
+    let v_span = rows.rows[0].cells[1].span.as_ref().expect("entry span");
+    let (found, _) = find_spans(toml_with_big.as_bytes(), [v_span]);
+    let bs = found[0].expect("verified entry span");
+    assert_eq!(&toml_with_big[bs.start..bs.end], "\"1.0\"");
+}
+
+#[test]
+fn per_part_union_stub_rows_respect_transforms_and_where_with_differing_path_tokens() {
+    use crate::relation::plan::{Member, Predicate};
+
+    let field_def = |source: FieldSource, sensitive: bool| FieldDef { source, sensitive };
+    let union_rel = NamedRelation {
+        name: "locales".into(),
+        source: SourceIndex(0),
+        relation: RelationDef {
+            rows: Rows::Union(vec![
+                Part {
+                    from: from("a/*.yml"),
+                    reader: Reader::Entries(Entries {
+                        format: EntriesFormat::Yaml,
+                        at: vec!["$".into()],
+                        leaves: true,
+                    }),
+                    fields: Some(vec![
+                        ("locale".into(), field_def(FieldSource::EntryRoot, false)),
+                        ("key".into(), field_def(FieldSource::EntryPath, false)),
+                        (
+                            "tag".into(),
+                            field_def(FieldSource::Path(PathToken::Stem), false),
+                        ),
+                    ]),
+                },
+                Part {
+                    from: from("b/*/*.yml"),
+                    reader: Reader::Entries(Entries {
+                        format: EntriesFormat::Yaml,
+                        at: vec!["$".into()],
+                        leaves: true,
+                    }),
+                    fields: Some(vec![
+                        ("locale".into(), field_def(FieldSource::EntryRoot, false)),
+                        ("key".into(), field_def(FieldSource::EntryPath, false)),
+                        (
+                            "tag".into(),
+                            field_def(FieldSource::Path(PathToken::ParentName), false),
+                        ),
+                    ]),
+                },
+            ]),
+            fields: vec![
+                ("locale".into(), field_def(FieldSource::EntryRoot, false)),
+                ("key".into(), field_def(FieldSource::EntryPath, false)),
+                (
+                    "tag".into(),
+                    field_def(FieldSource::Path(PathToken::Stem), false),
+                ),
+            ],
+            transforms: vec![
+                ("key".into(), vec![Transform::StripRoot]),
+                ("tag".into(), vec![Transform::Lower]),
+            ],
+            filters: vec![(
+                "tag".into(),
+                vec![Predicate::NotIn(vec![Member::Literal(Value::String(
+                    "ignored".into(),
+                ))])],
+            )],
+        },
+        capabilities: Capabilities::default(),
+        reads_environment: false,
+        definition_reads_environment: false,
+    };
+    let files = tree(&[
+        ("a/en.yml", "en:\n  hello: Hi\n"),
+        ("a/IGNORED.yml", "fr: {}\n"),
+        ("b/IGNORED/messages.yml", "de: {}\n"),
+        ("b/kept/messages.yml", "es: {}\n"),
+    ]);
+    let p = plan(vec![union_rel]);
+    let rows = run(&p, 0, &files, Limits::default()).unwrap();
+    let stub_locales: Vec<&str> = rows
+        .stub_rows
+        .iter()
+        .map(|s| text(&s.cells[0]).as_ref())
+        .collect();
+    assert_eq!(
+        stub_locales,
+        vec!["es"],
+        "both IGNORED stubs (from stem and parent_name parts) must be transformed and filtered out"
+    );
+}
+
+#[test]
+fn split_clears_cell_path_and_handles_extreme_parts_and_bytes_budget() {
+    // Out-of-range `split { required: false }` on `entry.path` clears `cell.path`.
+    let mut rel = named(
+        "keys",
+        Rows::Part(Part {
+            from: from("a.json"),
+            reader: Reader::Entries(Entries {
+                format: EntriesFormat::Json,
+                at: vec!["$".into()],
+                leaves: true,
+            }),
+            fields: None,
+        }),
+        &[("k", FieldSource::EntryPath)],
+    );
+    rel.relation.transforms = vec![(
+        "k".into(),
+        vec![Transform::Split {
+            on: ":".into(),
+            part: i64::MIN,
+            required: false,
+        }],
+    )];
+    let files = tree(&[("a.json", r#"{"only": 1}"#)]);
+    let p = plan(vec![rel]);
+    let rows = run(&p, 0, &files, Limits::default()).unwrap();
+    assert_eq!(rows.rows.len(), 1);
+    assert!(rows.rows[0].cells[0].value.is_none());
+    assert!(rows.rows[0].cells[0].span.is_none());
+    assert!(
+        rows.rows[0].cells[0].path.is_none(),
+        "out-of-range split must clear stale cell.path"
+    );
+
+    // `suffix` charges output bytes against `BytesPerRun`.
+    let mut budget_rel = named(
+        "lines",
+        Rows::Part(Part {
+            from: from("a.txt"),
+            reader: Reader::Read {
+                read: Read::Lines { comment: None },
+                optional: false,
+            },
+            fields: None,
+        }),
+        &[("v", FieldSource::Value)],
+    );
+    budget_rel.relation.transforms = vec![("v".into(), vec![Transform::Suffix("x".repeat(4096))])];
+    let files_txt = tree(&[("a.txt", "a\nb\nc\n")]);
+    let bp = plan(vec![budget_rel]);
+    let errs = messages(&run(
+        &bp,
+        0,
+        &files_txt,
+        limit(LimitKind::BytesPerRun, 1024),
+    ));
+    assert!(
+        errs.iter().any(|m| m.contains("bytes_per_run")),
+        "suffix growth must charge BytesPerRun: {errs:?}"
+    );
+}

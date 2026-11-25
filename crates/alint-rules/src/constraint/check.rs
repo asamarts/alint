@@ -387,9 +387,21 @@ impl<'p> Checker<'p> {
                     ));
                 }
                 let mut parsed = Vec::with_capacity(values.len());
+                let mut first_is_bool: Option<bool> = None;
                 for (index, literal) in values.iter().enumerate() {
                     let at = format!("{path}.values[{index}]");
-                    parsed.push(self.literal(literal, &set.field, &at)?);
+                    let value = self.literal(literal, &set.field, &at)?;
+                    let is_bool = matches!(value, Value::Bool(_));
+                    if let Some(expected) = first_is_bool
+                        && is_bool != expected
+                    {
+                        return Err(self.fail(
+                            &at,
+                            "`values:` items must share one type (all strings or all booleans)",
+                        ));
+                    }
+                    first_is_bool = Some(is_bool);
+                    parsed.push(value);
                 }
                 Ok(SetTarget::Values(parsed))
             }
@@ -813,7 +825,9 @@ impl<'p> Checker<'p> {
 
     /// When every field in `group_by` derives from a path token (on the
     /// non-unique side of any join), returns one `ResourceGroups` per field;
-    /// otherwise returns an empty vec.
+    /// otherwise returns an empty vec. Inspects all fields before failing on a
+    /// `unique:`-side path token so mixed `[non_path, unique_path]` and
+    /// `[unique_path, non_path]` orders behave identically.
     fn multi_resource_groups(
         &self,
         group_by: &[String],
@@ -823,11 +837,20 @@ impl<'p> Checker<'p> {
             return Ok(Vec::new());
         }
         let mut out = Vec::with_capacity(group_by.len());
+        let mut first_err: Option<alint_core::Error> = None;
         for name in group_by {
-            match self.resource_groups(name, path)? {
-                Some(rg) => out.push(rg),
-                None => return Ok(Vec::new()),
+            match self.resource_groups(name, path) {
+                Ok(Some(rg)) => out.push(rg),
+                Ok(None) => return Ok(Vec::new()),
+                Err(err) => {
+                    if first_err.is_none() {
+                        first_err = Some(err);
+                    }
+                }
             }
+        }
+        if let Some(err) = first_err {
+            return Err(err);
         }
         Ok(out)
     }

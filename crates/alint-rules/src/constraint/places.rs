@@ -76,6 +76,19 @@ impl<'c> Places<'c> {
         }
     }
 
+    /// Check whether `bytes` of transient assertion state fit in the remaining
+    /// [`alint_core::relation::LimitKind::BytesPerRun`] budget.
+    pub(super) fn may_hold(&self, bytes: usize) -> Result<(), LimitExceeded> {
+        if let Some(cache) = self.ctx.index.decode_cache() {
+            cache.may_hold(bytes)
+        } else {
+            self.ctx
+                .index
+                .relation_limits()
+                .check(alint_core::relation::LimitKind::BytesPerRun, bytes)
+        }
+    }
+
     /// Ask for the place of `cell`'s span, when it has one; `point` shows
     /// only its start.
     pub(super) fn ask(&mut self, cell: &Cell, point: bool) -> Option<Asked> {

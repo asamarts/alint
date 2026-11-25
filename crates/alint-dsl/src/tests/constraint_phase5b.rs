@@ -632,3 +632,612 @@ rules: []
         "env-interpolated split.part/required failed: {parsed:?}"
     );
 }
+
+// --- Audit remediation regressions (PR #663 audit) ---------------------------
+
+#[test]
+fn compare_field_sensitivity_propagates_and_redacts_both_operands_and_spans() {
+    let config = r#"version: 2
+relations:
+  creds:
+    from: { paths: "creds.json" }
+    records: { format: json, at: "$.users[*]" }
+    fields:
+      username: "record: $.username"
+      password: { source: "record: $.password", sensitive: true }
+rules:
+  - id: no-password-eq-username
+    kind: constraint
+    input: creds
+    assert:
+      compare: { field: password, op: ne, to: { field: username } }
+    level: error
+"#;
+    let files = [(
+        "creds.json",
+        r#"{"users":[{"username":"hunter2","password":"hunter2"}]}"#,
+    )];
+    let results = run(config, &files);
+    let rule_res = result(&results, "no-password-eq-username");
+    assert_eq!(rule_res.violations.len(), 1);
+    let v = &rule_res.violations[0];
+    assert!(
+        !v.message.contains("hunter2"),
+        "sensitive compare must never leak operand value: {}",
+        v.message
+    );
+    assert!(
+        !v.baseline_key.as_deref().unwrap_or("").contains("hunter2"),
+        "baseline_key must never contain secret: {:?}",
+        v.baseline_key
+    );
+    // Point-only spans (start == end or no end range) on both primary and related.
+    assert!(
+        v.range.is_none(),
+        "sensitive compare primary span must be point-only (no end range): {:?}",
+        v.range
+    );
+    for rel in &v.related_locations {
+        if let Some(range) = &rel.range {
+            assert_eq!(
+                (range.start_line(), range.start_column()),
+                (range.end_line(), range.end_column()),
+                "related location must be point-only: {range:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn compared_sensitivity_propagates_bidirectionally_and_across_union_families() {
+    let config = r#"version: 2
+relations:
+  used:
+    from: { paths: "used.json" }
+    entries: { format: json, at: "$" }
+    fields:
+      token: { source: entry.value, sensitive: true }
+      grp: { source: entry.key, sensitive: true }
+  allowed:
+    from: { paths: "allowed.json" }
+    entries: { format: json, at: "$" }
+    fields:
+      token: entry.key
+      grp: entry.value
+  mixed:
+    union:
+      - from: { paths: "m1.json" }
+        entries: { format: json, at: "$" }
+        fields: { k: entry.key, v: entry.value, s: stem, p: path }
+      - from: { paths: "m2.json" }
+        read: { json: "$.v" }
+        fields: { k: path, v: value, s: stem, p: path }
+  sensitive_targets:
+    from: { paths: "targets.json" }
+    read: { json: "$.tokens[*]" }
+    fields:
+      tok: { source: value, sensitive: true }
+rules:
+  - id: ref-bidir
+    kind: constraint
+    input: used
+    assert:
+      reference: { field: token, to: { relation: allowed, field: token } }
+    level: error
+  - id: set-bidir
+    kind: constraint
+    input: used
+    assert:
+      set:
+        field: token
+        group_by: grp
+        subset_of: { relation: allowed, field: token, group_by: grp }
+    level: error
+  - id: union-family-prop
+    kind: constraint
+    input: mixed
+    assert:
+      reference: { field: v, to: { relation: sensitive_targets, field: tok } }
+    level: error
+"#;
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg_path = tmp.path().join(".alint.yml");
+    std::fs::write(&cfg_path, config).unwrap();
+    let loaded = load(&cfg_path).unwrap();
+    let plan = loaded.relation_plan.as_ref().expect("v2 plan");
+    let allowed = plan
+        .relations
+        .iter()
+        .find(|r| r.name == "allowed")
+        .expect("allowed relation");
+    assert!(
+        allowed.relation.field("token").unwrap().sensitive,
+        "reference input -> target sensitivity must propagate"
+    );
+    assert!(
+        allowed.relation.field("grp").unwrap().sensitive,
+        "per-group set input -> target group_by sensitivity must propagate"
+    );
+    let mixed = plan
+        .relations
+        .iter()
+        .find(|r| r.name == "mixed")
+        .expect("mixed relation");
+    assert!(
+        mixed.relation.field("v").unwrap().sensitive,
+        "mixed.v must become sensitive from target"
+    );
+    assert!(
+        mixed.relation.field("k").unwrap().sensitive,
+        "mixed.k (entry.key in union[0]) must become sensitive via Family::Entry propagation"
+    );
+}
+
+#[test]
+fn rule_sensitive_and_env_literals_force_point_only_spans_and_redact_count_bounds() {
+    #[derive(Debug)]
+    struct Env;
+    impl crate::EnvironmentProvider for Env {
+        fn get(&self, name: &str) -> Option<String> {
+            match name {
+                "SECRET_TOKEN" => Some("super-secret-value-1234".into()),
+                "MIN_N" => Some("7".into()),
+                _ => None,
+            }
+        }
+    }
+    let yaml = r#"version: 2
+relations:
+  items:
+    from: { paths: "items.json" }
+    entries: { format: json, at: "$" }
+    fields:
+      k: entry.key
+      v: entry.value
+rules:
+  - id: sensitive-rule-span
+    kind: constraint
+    input: items
+    sensitive: true
+    assert:
+      compare: { field: v, op: ne, to: { value: "super-secret-value-1234" } }
+    level: error
+  - id: env-count-bound
+    kind: constraint
+    input: items
+    assert:
+      count: { exact: "{{env.MIN_N}}" }
+    level: error
+  - id: env-disjoint-span
+    kind: constraint
+    input: items
+    assert:
+      set:
+        field: v
+        disjoint_from: { values: ["{{env.SECRET_TOKEN}}"] }
+    level: error
+"#;
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg_path = tmp.path().join(".alint.yml");
+    std::fs::write(&cfg_path, yaml).unwrap();
+    std::fs::write(
+        tmp.path().join("items.json"),
+        r#"{"a": "super-secret-value-1234"}"#,
+    )
+    .unwrap();
+    let opts = LoadOptions::default().with_environment(std::sync::Arc::new(Env));
+    let loaded = load_with(&cfg_path, &opts).unwrap();
+    let index = alint_core::walk(
+        tmp.path(),
+        &alint_core::WalkOptions::default().with_global_git_excludes(false),
+    )
+    .unwrap();
+    let mut registry = alint_core::RuleRegistry::new();
+    alint_rules::register_builtin(&mut registry);
+    let entries = loaded
+        .rules
+        .iter()
+        .map(|spec| {
+            alint_core::RuleEntry::new(registry.build(spec).unwrap())
+                .with_spec(std::sync::Arc::new(spec.clone()))
+        })
+        .collect();
+    let engine = alint_core::Engine::from_entries(entries, registry);
+    let report = engine.run(tmp.path(), &index).unwrap();
+    for rule_id in ["sensitive-rule-span", "env-disjoint-span"] {
+        let rr = result(&report.results, rule_id);
+        assert_eq!(rr.violations.len(), 1, "{rule_id}");
+        assert!(
+            rr.violations[0].range.is_none(),
+            "{rule_id} must emit point-only location (no range end leaking secret length): {:?}",
+            rr.violations[0].range
+        );
+    }
+    // Also check direct Rule::evaluate redacts `count`'s short env bound `7`!
+    let count_spec = loaded
+        .rules
+        .iter()
+        .find(|r| r.id == "env-count-bound")
+        .unwrap();
+    let count_rule = test_registry().build(count_spec).unwrap();
+    let ctx = alint_core::Context::new(tmp.path(), &index);
+    let direct = count_rule.evaluate(&ctx).unwrap();
+    assert_eq!(direct.len(), 1);
+    assert!(
+        direct[0].message.contains("<redacted>") && !direct[0].message.contains("exactly 7"),
+        "count must redact env-sourced bound even under direct evaluate: {}",
+        direct[0].message
+    );
+}
+
+#[test]
+fn reference_skip_missing_still_flags_explicit_null_and_anchors_composite_span() {
+    let config = r#"version: 2
+relations:
+  allowed:
+    from: { paths: "allowed.json" }
+    records: { format: json, at: "$.items[*]" }
+    fields:
+      manifest: "record: $.manifest"
+      dep: "record: $.dep"
+  uses:
+    from: { paths: "uses.json" }
+    records: { format: json, at: "$.items[*]" }
+    fields:
+      manifest: path
+      dep: { source: "record: $.dep", optional: true }
+rules:
+  - id: ref-skip-missing
+    kind: constraint
+    input: uses
+    assert:
+      reference:
+        fields: [manifest, dep]
+        to: { relation: allowed, fields: [manifest, dep] }
+        skip_missing: true
+    level: error
+"#;
+    let files = [
+        (
+            "allowed.json",
+            r#"{"items":[{"manifest":"uses.json","dep":"ok"}]}"#,
+        ),
+        (
+            "uses.json",
+            "{\n  \"items\": [\n    {\"dep\": \"ok\"},\n    {},\n    {\"dep\": null},\n    {\"dep\": \"missing-ref\"}\n  ]\n}\n",
+        ),
+    ];
+    let results = run(config, &files);
+    let found = findings(&results, "ref-skip-missing");
+    // Row 0 passes, row 1 (`Missing`) is skipped by `skip_missing: true`,
+    // row 2 (`null`) MUST still fire, row 3 (`missing-ref`) fires with line 6 span!
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert!(
+        found
+            .iter()
+            .any(|m| m.starts_with("uses.json:5:") && m.contains("null")),
+        "explicit null must still fire under skip_missing: true with exact span: {found:?}"
+    );
+    assert!(
+        found
+            .iter()
+            .any(|m| m.starts_with("uses.json:6:") && m.contains("missing-ref")),
+        "composite reference with PathToken in fields[0] must anchor at spanned dep on line 6: {found:?}"
+    );
+}
+
+#[test]
+fn count_anchors_row_span_and_enforces_cumulative_distinct_limit() {
+    let config = r#"version: 2
+relations:
+  entries:
+    from: { paths: "data/*.json" }
+    entries: { format: json, at: "$" }
+    fields:
+      file: stem
+      k: entry.key
+      v: entry.value
+rules:
+  - id: no-entries
+    kind: constraint
+    input: entries
+    assert:
+      count: { max: 0 }
+    level: error
+  - id: distinct-per-group
+    kind: constraint
+    input: entries
+    assert:
+      count: { group_by: file, distinct: true, field: v, min: 1 }
+    level: error
+"#;
+    let files = [
+        ("data/a.json", "{\n  \"x\": \"v1\"\n}\n"),
+        ("data/b.json", "{\n  \"y\": \"v2\"\n}\n"),
+    ];
+    let results = run(config, &files);
+    let empty_found = findings(&results, "no-entries");
+    assert_eq!(empty_found.len(), 2, "{empty_found:?}");
+    assert!(
+        empty_found.iter().any(|m| m.starts_with("data/a.json:2:")),
+        "count max: 0 must anchor on spanned cell even when cell 0 is PathToken: {empty_found:?}"
+    );
+
+    // Cumulative `DistinctValues = 1` across 2 groups (1 distinct value each = 2 total).
+    let tight = alint_core::relation::Limits::default()
+        .with(alint_core::relation::LimitKind::DistinctValues, 1)
+        .unwrap();
+    let (lim_results, _) =
+        super::constraint_families::run_under(config, &files, Some(&tight), false);
+    let lim_failures = failures(&lim_results, "distinct-per-group");
+    assert!(
+        lim_failures.iter().any(|m| m.contains("distinct_values")),
+        "count distinct must enforce cumulative DistinctValues across groups: {lim_failures:?}"
+    );
+}
+
+#[test]
+fn compare_numeric_parses_toml_yaml_lexemes_and_validates_one_row_source() {
+    let config = r#"version: 2
+relations:
+  toml_cfg:
+    from: { paths: "cfg.toml" }
+    entries: { format: toml, at: "$" }
+    fields:
+      k: entry.key
+      v: entry.value
+  one_row:
+    from: { paths: "one.json" }
+    entries: { format: json, at: "$" }
+    fields:
+      k: entry.key
+      v: entry.value
+rules:
+  - id: toml-lexemes
+    kind: constraint
+    input: toml_cfg
+    assert:
+      compare: { field: v, op: le, order: numeric, to: { value: 2000 } }
+    level: error
+  - id: one-row-source-type
+    kind: constraint
+    input: one_row
+    assert:
+      compare: { field: v, op: ge, order: numeric, to: { row: { k: floor } } }
+    level: error
+"#;
+    let files = [
+        (
+            "cfg.toml",
+            "timeout = 1_000\nhex = 0x10\noct = 0o755\nbin = 0b1010\nbig = 2_500.5\n",
+        ),
+        ("one.json", r#"{"floor": "not-a-number"}"#),
+    ];
+    let results = run(config, &files);
+    // `findings()` already asserts zero analysis failures on `toml-lexemes`.
+    let toml_found = findings(&results, "toml-lexemes");
+    assert_eq!(
+        toml_found.len(),
+        1,
+        "only big=2_500.5 exceeds 2000: {toml_found:?}"
+    );
+    assert!(toml_found[0].contains("2_500.5"), "{toml_found:?}");
+
+    let one_failures = failures(&results, "one-row-source-type");
+    assert!(
+        one_failures.iter().any(|m| m.contains("order: numeric")),
+        "1-row compare_to_row must still validate source row operand type: {one_failures:?}"
+    );
+}
+
+#[test]
+fn set_grouped_null_targets_bounded_empty_input_checks_groups_and_mixed_values_refused() {
+    // Mixed inline `values: ["a", true]` is refused at load time.
+    let mixed = r#"version: 2
+relations:
+  r:
+    from: { paths: "a.json" }
+    entries: { format: json, at: "$" }
+    fields: { k: entry.key, v: entry.value }
+rules:
+  - id: mixed-vals
+    kind: constraint
+    input: r
+    assert:
+      set: { field: v, subset_of: { values: ["a", true] } }
+    level: error
+"#;
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg = tmp.path().join(".alint.yml");
+    std::fs::write(&cfg, mixed).unwrap();
+    let loaded = load(&cfg).unwrap();
+    assert!(
+        test_registry().build(&loaded.rules[0]).is_err(),
+        "mixed string+bool inline values must fail at build time"
+    );
+
+    // Target relation with groups whose `field` is `null` does NOT inflate
+    // `by_group`/`all_target_groups` without counting toward `DistinctValues`,
+    // AND empty input with mismatched `groups:` literal type vs target
+    // `to.group_by` fails loud.
+    let cfg_null_targets = r#"version: 2
+relations:
+  declared:
+    from: { paths: "declared.json" }
+    records: { format: json, at: "$.items[*]" }
+    fields:
+      grp: "record: $.grp"
+      name: "record: $.name"
+  targets:
+    from: { paths: "targets.json" }
+    records: { format: json, at: "$.items[*]" }
+    fields:
+      grp: "record: $.grp"
+      name: "record: $.name"
+rules:
+  - id: null-targets
+    kind: constraint
+    input: declared
+    assert:
+      set:
+        field: name
+        group_by: grp
+        equal_to:
+          relation: targets
+          field: name
+          group_by: grp
+          all_target_groups: true
+    level: error
+"#;
+    let null_files = [
+        ("declared.json", r#"{"items":[]}"#),
+        (
+            "targets.json",
+            r#"{"items":[{"grp":"g1","name":null},{"grp":"g2","name":null},{"grp":"g3","name":null}]}"#,
+        ),
+    ];
+    let tight = alint_core::relation::Limits::default()
+        .with(alint_core::relation::LimitKind::DistinctValues, 1)
+        .unwrap();
+    let (null_res, _) =
+        super::constraint_families::run_under(cfg_null_targets, &null_files, Some(&tight), false);
+    assert!(
+        result(&null_res, "null-targets").violations.is_empty(),
+        "null-field target rows must not materialize empty target groups: {null_res:?}"
+    );
+
+    let cfg_empty = r#"version: 2
+relations:
+  declared:
+    from: { paths: "declared/*.json" }
+    entries: { format: json, at: "$" }
+    fields:
+      flag: { source: "bound: $.flag", optional: true }
+      name: entry.key
+  siblings:
+    from: { paths: "siblings.json" }
+    records: { format: json, at: "$.items[*]" }
+    fields:
+      flag: "record: $.flag"
+      name: "record: $.name"
+rules:
+  - id: empty-type-mismatch
+    kind: constraint
+    input: declared
+    assert:
+      set:
+        field: name
+        group_by: flag
+        equal_to: { relation: siblings, field: name, group_by: flag }
+        groups: [true]
+    level: error
+"#;
+    let files = [(
+        "siblings.json",
+        r#"{"items":[{"flag":"true","name":"pkg-a"}]}"#,
+    )];
+    let results = run(cfg_empty, &files);
+    let empty_failures = failures(&results, "empty-type-mismatch");
+    assert!(
+        empty_failures.iter().any(|m| m.contains("cross types")),
+        "empty input must still catch groups: vs target to.group_by type clash: {empty_failures:?}"
+    );
+}
+
+#[test]
+fn multi_resource_groups_order_independent_and_join_over_mixed_union_checks_transforms() {
+    // `[k, u_stem]` and `[u_stem, k]` behave identically (both accepted since `k` is not a path token).
+    for group_by in ["[k, u_stem]", "[u_stem, k]"] {
+        let yaml = format!(
+            r#"version: 2
+relations:
+  left_r:
+    from: {{ paths: "a/*.json" }}
+    entries: {{ format: json, at: "$" }}
+    fields: {{ k: entry.key, v: entry.value }}
+  right_r:
+    from: {{ paths: "b/*.json" }}
+    entries: {{ format: json, at: "$" }}
+    fields: {{ k: entry.key, u_stem: stem }}
+  joined:
+    join: {{ left: left_r, right: right_r, on: {{ k: k }}, unique: right }}
+    fields: {{ k: left.k, v: left.v, u_stem: right.u_stem }}
+rules:
+  - id: order-indep
+    kind: constraint
+    input: joined
+    assert:
+      count: {{ group_by: {group_by}, min: 1 }}
+    level: error
+"#
+        );
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = tmp.path().join(".alint.yml");
+        std::fs::write(&cfg, &yaml).unwrap();
+        let loaded = load(&cfg).unwrap();
+        assert!(
+            test_registry().build(&loaded.rules[0]).is_ok(),
+            "multi_resource_groups must accept {group_by}"
+        );
+    }
+
+    // `join:` copying a mixed-reader union field containing a `Path` part must
+    // still reject `semver-major`, and `strip-root` must name mixed union sources
+    // rather than falsely saying "a copy of a transformed field".
+    let bad_join_semver = r#"version: 2
+relations:
+  u:
+    union:
+      - { from: { paths: "a.json" }, read: { json: "$.k" }, fields: { k: value, v: path } }
+      - { from: { paths: "b.json" }, read: { json: "$.v" }, fields: { k: stem, v: value } }
+  j:
+    join: { left: u, right: u, on: { k: k }, unique: left }
+    fields: { k: left.k, v: left.v }
+    transform: { v: [semver-major] }
+rules: []
+"#;
+    let tmp = tempfile::tempdir().unwrap();
+    let p1 = tmp.path().join("semver.yml");
+    std::fs::write(&p1, bad_join_semver).unwrap();
+    assert!(
+        load(&p1).is_err(),
+        "join over mixed-reader union containing path must reject semver-major"
+    );
+
+    let bad_join_strip = bad_join_semver.replace("semver-major", "strip-root");
+    let p2 = tmp.path().join("strip.yml");
+    std::fs::write(&p2, bad_join_strip).unwrap();
+    let err = load(&p2).unwrap_err().to_string();
+    assert!(
+        err.contains("different sources across `union:` parts")
+            && !err.contains("copy of a transformed field"),
+        "strip-root diagnostic on join over mixed union must not blame a transform: {err}"
+    );
+
+    // `ResourceGroups::group_of` with `split { required: true }` fails loudly on
+    // a kept empty file instead of silently dropping it.
+    let req_split_cfg = r#"version: 2
+relations:
+  items:
+    from: { paths: "files/*.json" }
+    entries: { format: json, at: "$" }
+    fields:
+      env: stem
+      k: entry.key
+    transform:
+      env: [{ split: { on: "-", part: 1, required: true } }]
+rules:
+  - id: non-empty
+    kind: constraint
+    input: items
+    assert:
+      count: { group_by: env, min: 1 }
+    level: error
+"#;
+    let res = run(req_split_cfg, &[("files/bad.json", "{}")]);
+    let split_failures = failures(&res, "non-empty");
+    assert!(
+        split_failures.iter().any(|m| m.contains("out of range")),
+        "required split on path-token resource_group must fail loud on empty kept file: {split_failures:?}"
+    );
+}

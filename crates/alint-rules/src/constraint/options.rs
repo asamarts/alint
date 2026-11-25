@@ -464,9 +464,19 @@ pub(super) struct SetTarget {
     #[schemars(transform = no_default, with = "GroupLiteral")]
     pub group: Option<GroupLiteral>,
     /// An inline non-empty list of allowed/expected/forbidden scalar literals
-    /// (strings and booleans only, ADR-0050 D3).
+    /// of one uniform type (all strings or all booleans, ADR-0050 D3).
     #[serde(default, deserialize_with = "present")]
-    #[schemars(transform = no_default, with = "Vec<Literal>", extend("minItems" = 1))]
+    #[schemars(
+        transform = no_default,
+        with = "Vec<Literal>",
+        extend(
+            "minItems" = 1,
+            "oneOf" = [
+                { "items": { "type": "string" } },
+                { "items": { "type": "boolean" } },
+            ],
+        )
+    )]
     pub values: Option<Vec<Literal>>,
     /// Another relation: its name, bare or qualified by an `extends:` alias
     /// (`ws.names`); not an inline relation.
@@ -509,8 +519,10 @@ pub(super) struct ReferenceAssert {
     pub fields: Option<Vec<String>>,
     /// Target relation and key field(s) of matching arity.
     pub to: ReferenceTo,
-    /// When true, skip rows where any source key field is `Missing` or `Null`
-    /// instead of emitting a finding (default false).
+    /// When true, skip rows where any source key field is `Missing` (for
+    /// example from an optional `bound:` or `record:` field) instead of
+    /// emitting a finding (default false; explicit `Null` values still emit a
+    /// finding).
     #[serde(default, deserialize_with = "present")]
     #[schemars(transform = no_default, with = "bool")]
     pub skip_missing: Option<bool>,
