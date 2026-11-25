@@ -39,9 +39,9 @@ rejecting `\b`, `\f`, and `\/` (#573):
 
 ## 3. Empirical measurements
 
-### 3.1 Stack headroom (42 at-limit, flat/postfix, large-file, and bomb shapes)
+### 3.1 Stack headroom (43 at-limit, flat/postfix, large-file, and bomb shapes)
 
-All 42 stress shapes (64-deep blocks, objects, arrays, parens, function calls, unary `-`/`!`,
+All 43 stress shapes (64-deep blocks, objects, arrays, parens, function calls, unary `-`/`!`,
 ternary conditionals, `for` expressions, template interpolations, `%{if}` directives; 128-op
 binary, mixed-precedence, and comparison chains; combined 64-deep + 128-op binary; 10k-step
 attribute/index/splat traversals; 5k-segment function namespaces; 256 KiB multi-resource `.tf`;

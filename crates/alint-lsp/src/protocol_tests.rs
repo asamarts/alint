@@ -32,9 +32,56 @@ use lsp_types::{
 };
 use parking_lot::{Condvar, Mutex};
 
-use super::{LspOptions, ServerCore, run_connection};
+use super::{LspOptions, ServerCore, run_connection, run_connection_outcome};
 
 const RECV_TIMEOUT: Duration = Duration::from_secs(10);
+
+fn next_hook_id(prefix: &str) -> String {
+    static NEXT: AtomicUsize = AtomicUsize::new(1);
+    format!("{prefix}-{}", NEXT.fetch_add(1, Ordering::Relaxed))
+}
+
+struct CheckHookGuard {
+    key: String,
+    gate: Arc<Gate>,
+}
+
+impl CheckHookGuard {
+    fn register(prefix: &str, hook: CheckHook) -> Self {
+        let key = next_hook_id(prefix);
+        let gate = Arc::clone(&hook.gate);
+        check_hooks().lock().insert(key.clone(), hook);
+        Self { key, gate }
+    }
+}
+
+impl Drop for CheckHookGuard {
+    fn drop(&mut self) {
+        self.gate.release();
+        check_hooks().lock().remove(&self.key);
+    }
+}
+
+struct FixableHookGuard {
+    key: String,
+    gate: Arc<Gate>,
+}
+
+impl FixableHookGuard {
+    fn register(prefix: &str, hook: FixableHook) -> Self {
+        let key = next_hook_id(prefix);
+        let gate = Arc::clone(&hook.gate);
+        fixable_hooks().lock().insert(key.clone(), hook);
+        Self { key, gate }
+    }
+}
+
+impl Drop for FixableHookGuard {
+    fn drop(&mut self) {
+        self.gate.release();
+        fixable_hooks().lock().remove(&self.key);
+    }
+}
 
 fn send_request<R: lsp_types::request::Request>(conn: &Connection, id: i32, params: &R::Params) {
     conn.sender
@@ -739,11 +786,13 @@ fn rendezvous_bounded_zero_connection_does_not_deadlock_on_shutdown_or_exit() {
     // No notifications may have been sent after shutdown Ok.
     assert!(client_conn.receiver.try_recv().is_err());
 
-    // Case 2: bounded(0) connection where client fires saves and immediately
-    // sends exit without shutdown (stopping reads).
+    // Case 2: bounded(0) connection where client drains the ready log, fires
+    // an open, and immediately sends exit without shutdown.
     let (server_conn, client_conn) = rendezvous_connections();
-    let server = std::thread::spawn(move || run_connection(&server_conn, LspOptions::default()));
+    let server =
+        std::thread::spawn(move || run_connection_outcome(&server_conn, LspOptions::default()));
     let _ = initialize_folder(&client_conn, root);
+    let _ = client_conn.receiver.recv_timeout(RECV_TIMEOUT);
     send_notification::<DidOpenTextDocument>(
         &client_conn,
         &DidOpenTextDocumentParams {
@@ -756,35 +805,42 @@ fn rendezvous_bounded_zero_connection_does_not_deadlock_on_shutdown_or_exit() {
         },
     );
     send_notification::<Exit>(&client_conn, &());
-    assert_eq!(server.join().unwrap().unwrap(), 1);
-    drop(client_conn);
+    drop(client_conn.receiver);
+    let outcome = server.join().unwrap().unwrap();
+    assert_eq!(outcome.code, 1);
+    assert!(outcome.relay_drained);
+    drop(client_conn.sender);
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn slow_full_check_never_starves_did_change_or_code_action_and_never_publishes_backwards() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
-    std::fs::write(
-        root.join(".alint.yml"),
-        "version: 1\nrules:\n  - id: gated\n    kind: gated_check\n    level: error\n  \
-         - id: no-todo\n    kind: file_content_forbidden\n    paths: \"*.txt\"\n    \
-         pattern: \"TODO\"\n    level: error\n    fix: { replace: { replacement: \"DONE\" } }\n",
-    )
-    .unwrap();
-    let doc_path = root.join("notes.txt");
-    std::fs::write(&doc_path, "TODO\n").unwrap();
-    let doc_uri = Url::from_file_path(&doc_path).unwrap();
-
     let gate = Arc::new(Gate::default());
     let calls = Arc::new(AtomicUsize::new(0));
-    check_hooks().lock().insert(
-        "gated".to_string(),
+    let hook_guard = CheckHookGuard::register(
+        "gated",
         CheckHook {
             calls,
             block_on_call: 2,
             gate: Arc::clone(&gate),
         },
     );
+    std::fs::write(
+        root.join(".alint.yml"),
+        format!(
+            "version: 1\nrules:\n  - id: {}\n    kind: gated_check\n    level: error\n  \
+             - id: no-todo\n    kind: file_content_forbidden\n    paths: \"*.txt\"\n    \
+             pattern: \"TODO\"\n    level: error\n    fix: {{ replace: {{ replacement: \"DONE\" }} }}\n",
+            hook_guard.key
+        ),
+    )
+    .unwrap();
+    let doc_path = root.join("notes.txt");
+    std::fs::write(&doc_path, "TODO\n").unwrap();
+    let doc_uri = Url::from_file_path(&doc_path).unwrap();
+
     let mut registry = alint_rules::builtin_registry();
     registry.register("gated_check", &TEST_RULE_META, build_gated_check);
 
@@ -980,25 +1036,28 @@ fn removing_last_workspace_folder_clears_state_and_diagnostics() {
 fn shutdown_waits_for_in_flight_code_action_and_cancel_returns_request_canceled() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
-    std::fs::write(
-        root.join(".alint.yml"),
-        "version: 1\nrules:\n  - id: gated-fix\n    kind: gated_fixable\n    level: error\n",
-    )
-    .unwrap();
-    let doc_path = root.join("notes.txt");
-    std::fs::write(&doc_path, "bad\n").unwrap();
-    let doc_uri = Url::from_file_path(&doc_path).unwrap();
-
     // Part 1: `$/cancelRequest` cancels an in-flight codeAction -> RequestCanceled (-32800).
     let cancel_gate = Arc::new(Gate::default());
-    fixable_hooks().lock().insert(
-        "gated-fix".to_string(),
+    let cancel_guard = FixableHookGuard::register(
+        "gated-fix",
         FixableHook {
             gate: Arc::clone(&cancel_gate),
             should_panic: false,
             panic_on_eval: Arc::new(AtomicBool::new(false)),
         },
     );
+    std::fs::write(
+        root.join(".alint.yml"),
+        format!(
+            "version: 1\nrules:\n  - id: {}\n    kind: gated_fixable\n    level: error\n",
+            cancel_guard.key
+        ),
+    )
+    .unwrap();
+    let doc_path = root.join("notes.txt");
+    std::fs::write(&doc_path, "bad\n").unwrap();
+    let doc_uri = Url::from_file_path(&doc_path).unwrap();
+
     let mut registry = alint_rules::builtin_registry();
     registry.register("gated_fixable", &TEST_FIXABLE_META, build_gated_fixable);
 
@@ -1078,14 +1137,22 @@ fn shutdown_waits_for_in_flight_code_action_and_cancel_returns_request_canceled(
 
     // Part 2: `shutdown` waits for an in-flight `codeAction` to reply first (H3).
     let shutdown_gate = Arc::new(Gate::default());
-    fixable_hooks().lock().insert(
-        "gated-fix".to_string(),
+    let shutdown_guard = FixableHookGuard::register(
+        "gated-fix",
         FixableHook {
             gate: Arc::clone(&shutdown_gate),
             should_panic: false,
             panic_on_eval: Arc::new(AtomicBool::new(false)),
         },
     );
+    std::fs::write(
+        root.join(".alint.yml"),
+        format!(
+            "version: 1\nrules:\n  - id: {}\n    kind: gated_fixable\n    level: error\n",
+            shutdown_guard.key
+        ),
+    )
+    .unwrap();
     let mut registry2 = alint_rules::builtin_registry();
     registry2.register("gated_fixable", &TEST_FIXABLE_META, build_gated_fixable);
 
@@ -1152,26 +1219,29 @@ fn shutdown_waits_for_in_flight_code_action_and_cancel_returns_request_canceled(
 fn panicking_rule_and_fixer_recover_and_return_internal_error() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
-    std::fs::write(
-        root.join(".alint.yml"),
-        "version: 1\nrules:\n  - id: boom\n    kind: boom_fixable\n    level: error\n",
-    )
-    .unwrap();
-    let doc_path = root.join("notes.txt");
-    std::fs::write(&doc_path, "bad\n").unwrap();
-    let doc_uri = Url::from_file_path(&doc_path).unwrap();
-
     let gate = Arc::new(Gate::default());
     gate.release(); // non-blocking
     let panic_on_eval = Arc::new(AtomicBool::new(false));
-    fixable_hooks().lock().insert(
-        "boom".to_string(),
+    let boom_guard = FixableHookGuard::register(
+        "boom",
         FixableHook {
             gate,
             should_panic: true,
             panic_on_eval: Arc::clone(&panic_on_eval),
         },
     );
+    std::fs::write(
+        root.join(".alint.yml"),
+        format!(
+            "version: 1\nrules:\n  - id: {}\n    kind: boom_fixable\n    level: error\n",
+            boom_guard.key
+        ),
+    )
+    .unwrap();
+    let doc_path = root.join("notes.txt");
+    std::fs::write(&doc_path, "bad\n").unwrap();
+    let doc_uri = Url::from_file_path(&doc_path).unwrap();
+
     let mut registry = alint_rules::builtin_registry();
     registry.register("boom_fixable", &TEST_FIXABLE_META, build_gated_fixable);
 
@@ -1463,3 +1533,6 @@ fn connection_logs_parent_ignore_walk_warnings_dedups_and_relogs_after_config_re
     send_notification::<Exit>(&client_conn, &());
     assert_eq!(server.join().unwrap().unwrap(), 0);
 }
+
+#[path = "protocol_tests_audit.rs"]
+mod audit;

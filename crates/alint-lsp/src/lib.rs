@@ -72,7 +72,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
-use crossbeam_channel::Sender;
+use crossbeam_channel::{Receiver, Sender, bounded};
 use lsp_server::{Connection, ErrorCode, Message, Notification, RequestId, Response};
 use lsp_types::notification::{
     LogMessage, Notification as LspNotification, PublishDiagnostics, ShowMessage,
@@ -86,7 +86,7 @@ use lsp_types::{
     ServerInfo, ShowMessageParams, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
     WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities,
 };
-use parking_lot::{Condvar, Mutex};
+use parking_lot::Mutex;
 
 use alint_core::baseline::Baseline;
 use alint_core::located_fix::{self, LocatedEdit, LocatedOutcome};
@@ -111,7 +111,9 @@ use config::{ConfigError, SessionKey, Settings, check_workspace, eval_buffer, wo
 use diagnostics::{GroupCtx, finding_to_diagnostic, range_contains, ranges_overlap};
 use edits::{fix_edit_to_workspace_edit, located_edits_to_workspace_edit};
 use render::{render_finding, render_notes};
+#[cfg(test)]
 use transport::run_connection;
+use transport::{ConnectionOutcome, run_connection_outcome};
 
 /// Worker pool size for background per-file re-evaluations and code-action
 /// computation. Full workspace checks run on their own dedicated thread
@@ -252,6 +254,7 @@ pub struct SealedTypes;
 /// One cached finding for a file: enough to publish a diagnostic and to
 /// render a hover. Kept per URI in [`State::diagnostics`] so `hover`
 /// can answer from the last-published set without re-running rules.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone)]
 struct Finding {
     range: Range,
@@ -275,6 +278,9 @@ struct Finding {
     /// the cached cross-file findings and replace only the per-file ones,
     /// so cross-file markers don't flicker away while typing.
     per_file: bool,
+    /// Load-time config pattern hint (deduplicated across roots sharing a
+    /// `--config` file).
+    is_pattern_hint: bool,
     /// The rule kind's one-sentence description, for the hover.
     description: Option<&'static str>,
     /// The rule kind's alint.org reference page, for the hover.
@@ -382,9 +388,34 @@ struct WorkspaceCheck {
 /// keeps stdin open.
 pub fn run_stdio(options: LspOptions) -> std::io::Result<i32> {
     let (connection, io_threads) = Connection::stdio();
-    let code = run_connection(&connection, options)?;
+    let outcome = run_connection_outcome(&connection, options)?;
     drop(connection);
-    if let Err(err) = io_threads.join() {
+    join_io_threads_bounded(io_threads, outcome)
+}
+
+/// Join `lsp-server`'s stdio threads within [`EXIT_JOIN_TIMEOUT`], detaching
+/// on timeout or when the outbound relay already detached on a stalled stdout
+/// pipe (so `LspServerWriter`/`LspMessageDropper` can never hang process exit).
+fn join_io_threads_bounded(
+    io_threads: lsp_server::IoThreads,
+    outcome: ConnectionOutcome,
+) -> std::io::Result<i32> {
+    if !outcome.relay_drained {
+        // The outbound relay timed out on a stalled stdout pipe and still holds
+        // a clone of `Connection::sender`; calling `io_threads.join()` would
+        // block forever on `LspServerWriter`/`LspMessageDropper`.
+        return Ok(outcome.code);
+    }
+    let (tx, rx) = bounded::<std::io::Result<()>>(1);
+    let spawned = std::thread::Builder::new()
+        .name("alint-lsp-io-join".to_string())
+        .spawn(move || {
+            let _ = tx.send(io_threads.join());
+        });
+    let Ok(_joiner) = spawned else {
+        return Ok(outcome.code);
+    };
+    if let Ok(Err(err)) = rx.recv_timeout(EXIT_JOIN_TIMEOUT) {
         match err.kind() {
             // If the client closed stdout immediately after `exit` (including
             // `exit` without `shutdown`), preserve the LSP-mandated exit code
@@ -402,7 +433,7 @@ pub fn run_stdio(options: LspOptions) -> std::io::Result<i32> {
             _ => return Err(err),
         }
     }
-    Ok(code)
+    Ok(outcome.code)
 }
 
 /// The LSP-mandated process exit code: `1` for an `exit` notification
@@ -469,13 +500,23 @@ struct State {
     last_walk_warnings: HashMap<SessionKey, Vec<String>>,
 }
 
+/// Per-instance tracking of active `textDocument/codeAction` requests so
+/// duplicate client `RequestId`s cannot clobber each other's cancellation flag
+/// and `shutdown` can wait asynchronously without blocking the LSP dispatch loop.
+#[derive(Debug, Default)]
+struct CodeActionsState {
+    next_token: u64,
+    active: HashMap<u64, (RequestId, bool)>,
+    pending_shutdown: Option<Sender<()>>,
+}
+
 /// Shared server core driven by the main LSP message loop and worker threads.
 ///
 /// Lock ordering invariant (prevents deadlocks):
 /// `check_lock` -> `reeval_publish` -> `state`.
-/// Leaf locks (`outbound`, `pending_code_actions`, `in_flight_code_actions`)
-/// are never held while acquiring any other lock. `state` is never held across
-/// engine/fixer execution or channel sends.
+/// Leaf locks (`outbound`, `code_actions`, `pending_reevals`) are never held
+/// while acquiring any other lock. `state` is never held across engine/fixer
+/// execution or channel sends.
 #[derive(Debug)]
 struct ServerCore {
     /// Unbounded outbound message sink (closed on `exit`/EOF so the outbound
@@ -503,15 +544,16 @@ struct ServerCore {
     /// Set on `shutdown` (and `exit` / EOF) so background workers stop emitting
     /// new server notifications once `shutdown` begins.
     shutting_down: AtomicBool,
-    /// Set on `exit` / disconnect so queued worker jobs skip promptly.
-    exiting: AtomicBool,
-    /// Count of accepted `textDocument/codeAction` requests not yet answered,
-    /// paired with a condvar so `shutdown` waits for in-flight requests to reply
-    /// before returning `Ok(null)`.
-    in_flight_code_actions: (Mutex<usize>, Condvar),
-    /// Active `codeAction` request ids mapped to whether `$/cancelRequest`
-    /// canceled them. Unknown cancel ids are ignored so the map stays bounded.
-    pending_code_actions: Mutex<HashMap<RequestId, bool>>,
+    /// Set on `exit` / disconnect so queued worker jobs skip promptly. Held
+    /// behind an `Arc` so the outbound relay can read it without retaining an
+    /// `Arc<ServerCore>` reference cycle.
+    exiting: Arc<AtomicBool>,
+    /// Active `codeAction` requests, cancellation flags, and optional `shutdown`
+    /// drain notifier.
+    code_actions: Mutex<CodeActionsState>,
+    /// URIs currently queued for coalesced single-file re-evaluation so bursts
+    /// of `didChange` on one file never flood the worker pool or clone buffers.
+    pending_reevals: Mutex<HashSet<Url>>,
     /// Buffer evaluations started, for tests of `reeval_file` coalescing.
     #[cfg(test)]
     evaluations: Arc<std::sync::atomic::AtomicUsize>,
@@ -541,6 +583,9 @@ struct Applied {
     reeval: Vec<PendingReeval>,
     /// Show the untrusted-workspace note ([`config::UNTRUSTED_NOTE`]).
     untrusted_note: bool,
+    /// A config file was open (potentially with unsaved edits) when this check
+    /// started and closed before it finished: re-run from disk immediately.
+    recheck: bool,
 }
 
 impl ServerCore {
@@ -555,9 +600,9 @@ impl ServerCore {
             completed_check_gen: AtomicU64::new(0),
             next_doc_seq: AtomicU64::new(1),
             shutting_down: AtomicBool::new(false),
-            exiting: AtomicBool::new(false),
-            in_flight_code_actions: (Mutex::new(0), Condvar::new()),
-            pending_code_actions: Mutex::new(HashMap::new()),
+            exiting: Arc::new(AtomicBool::new(false)),
+            code_actions: Mutex::new(CodeActionsState::default()),
+            pending_reevals: Mutex::new(HashSet::new()),
             #[cfg(test)]
             evaluations: Arc::default(),
         }
@@ -582,10 +627,19 @@ impl ServerCore {
             return;
         }
         if let Ok(params) = serde_json::to_value(params) {
-            self.send(Message::Notification(Notification::new(
-                N::METHOD.to_string(),
-                params,
-            )));
+            // Re-check `is_stopping()` under `outbound.lock()` so a background
+            // notification (e.g. `LogMessage` on panic/error) cannot be queued
+            // after `shutdown` sets `shutting_down = true` and enqueues `Ok(null)`.
+            let outbound = self.outbound.lock();
+            if self.is_stopping() {
+                return;
+            }
+            if let Some(tx) = outbound.as_ref() {
+                let _ = tx.send(Message::Notification(Notification::new(
+                    N::METHOD.to_string(),
+                    params,
+                )));
+            }
         }
     }
 
@@ -607,39 +661,86 @@ impl ServerCore {
         )));
     }
 
-    fn register_code_action(&self, id: &RequestId) {
-        *self.in_flight_code_actions.0.lock() += 1;
-        self.pending_code_actions.lock().insert(id.clone(), false);
+    fn register_code_action(&self, id: &RequestId) -> u64 {
+        let mut st = self.code_actions.lock();
+        let token = st.next_token;
+        st.next_token = st.next_token.wrapping_add(1);
+        st.active.insert(token, (id.clone(), false));
+        token
     }
 
-    fn finish_code_action(&self, id: &RequestId) {
-        self.pending_code_actions.lock().remove(id);
-        let mut count = self.in_flight_code_actions.0.lock();
-        *count = count.saturating_sub(1);
-        if *count == 0 {
-            self.in_flight_code_actions.1.notify_all();
+    fn finish_code_action(&self, token: u64) {
+        let notify = {
+            let mut st = self.code_actions.lock();
+            st.active.remove(&token);
+            if st.active.is_empty() {
+                st.pending_shutdown.take()
+            } else {
+                None
+            }
+        };
+        if let Some(tx) = notify {
+            let _ = tx.send(());
         }
     }
 
     fn cancel_request(&self, id: &RequestId) {
-        if let Some(canceled) = self.pending_code_actions.lock().get_mut(id) {
-            *canceled = true;
+        let mut st = self.code_actions.lock();
+        for (req_id, canceled) in st.active.values_mut() {
+            if req_id == id {
+                *canceled = true;
+            }
         }
     }
 
-    fn is_canceled(&self, id: &RequestId) -> bool {
-        self.pending_code_actions
+    fn is_canceled(&self, token: u64) -> bool {
+        self.code_actions
             .lock()
-            .get(id)
-            .copied()
-            .unwrap_or(false)
+            .active
+            .get(&token)
+            .is_some_and(|(_, canceled)| *canceled)
     }
 
-    fn wait_for_code_actions(&self) {
-        let mut count = self.in_flight_code_actions.0.lock();
-        while *count > 0 {
-            self.in_flight_code_actions.1.wait(&mut count);
+    /// If any `codeAction` requests are currently in flight, return a oneshot
+    /// receiver that fires once the last one finishes; return `None` when none
+    /// are active so `shutdown` can reply immediately.
+    fn arm_shutdown_wait(&self) -> Option<Receiver<()>> {
+        let mut st = self.code_actions.lock();
+        if st.active.is_empty() {
+            return None;
         }
+        let (tx, rx) = bounded(1);
+        st.pending_shutdown = Some(tx);
+        Some(rx)
+    }
+
+    fn enqueue_reeval(&self, reeval_tx: &Sender<Url>, uri: &Url) {
+        let should_send = self.pending_reevals.lock().insert(uri.clone());
+        if should_send && reeval_tx.send(uri.clone()).is_err() {
+            self.pending_reevals.lock().remove(uri);
+        }
+    }
+
+    fn reeval_latest(&self, uri: Url) {
+        self.pending_reevals.lock().remove(&uri);
+        if self.is_stopping() {
+            return;
+        }
+        let latest = {
+            let state = self.state.lock();
+            if !state.open.contains(&uri) {
+                return;
+            }
+            let Some(text) = state.documents.get(&uri).cloned() else {
+                return;
+            };
+            let Some(version) = state.versions.get(&uri).copied() else {
+                return;
+            };
+            let seq = state.doc_seq.get(&uri).copied();
+            (text, version, seq)
+        };
+        self.reeval_file_seq(uri, latest.0, latest.1, latest.2);
     }
 
     fn log_message(&self, typ: MessageType, message: impl Into<String>) {
@@ -810,7 +911,7 @@ impl ServerCore {
         let check = if folders.is_empty() {
             if !has_prior_state {
                 self.completed_check_gen
-                    .store(started_gen, Ordering::SeqCst);
+                    .fetch_max(started_gen, Ordering::SeqCst);
                 return;
             }
             // The last workspace folder was removed: apply an empty check so
@@ -832,7 +933,7 @@ impl ServerCore {
                     tracing::error!(panic = %panic_summary(&*payload), "alint LSP full check panicked");
                     self.log_message(MessageType::ERROR, "alint: check panicked");
                     self.completed_check_gen
-                        .store(started_gen, Ordering::SeqCst);
+                        .fetch_max(started_gen, Ordering::SeqCst);
                     return;
                 }
             }
@@ -842,7 +943,7 @@ impl ServerCore {
             return;
         }
 
-        let (notes, reeval) = {
+        let (notes, reeval, recheck) = {
             let _publish_guard = self.reeval_publish.lock();
             if self.is_stopping() {
                 return;
@@ -853,7 +954,7 @@ impl ServerCore {
             };
             // Enqueue logs and untrusted note ahead of `publish_all` onto the
             // non-blocking outbound channel so client logs arrive before the
-            // matching diagnostics, while keeping blocking stderr `eprintln!`
+            // matching diagnostics, while keeping blocking stderr writes
             // outside `reeval_publish`.
             for message in applied.logs {
                 self.log_message(MessageType::WARNING, format!("alint: {message}"));
@@ -862,13 +963,23 @@ impl ServerCore {
                 self.show_message(MessageType::INFO, config::UNTRUSTED_NOTE);
             }
             self.publish_all(applied.publish);
-            (applied.notes, applied.reeval)
+            (applied.notes, applied.reeval, applied.recheck)
         };
-        for block in notes {
-            eprintln!("{block}");
-        }
+        // Advance `completed_check_gen` BEFORE stderr writes or follow-up
+        // re-evaluations so a broken stderr pipe or worker panic can never
+        // leave the check thread stuck repeating the same generation.
         self.completed_check_gen
-            .store(started_gen, Ordering::SeqCst);
+            .fetch_max(started_gen, Ordering::SeqCst);
+        if recheck {
+            self.check_gen.fetch_add(1, Ordering::SeqCst);
+        }
+        {
+            use std::io::Write as _;
+            let mut stderr = std::io::stderr();
+            for block in notes {
+                let _ = writeln!(stderr, "{block}");
+            }
+        }
         for (uri, text, version, seq) in reeval {
             self.reeval_file_seq(uri, text, version, seq);
         }
@@ -893,6 +1004,47 @@ impl ServerCore {
         state.open.contains(uri)
             && state.versions.get(uri) == Some(&version)
             && seq.is_none_or(|expected| state.doc_seq.get(uri) == Some(&expected))
+    }
+
+    fn is_session_current(state: &State, uri: &Url, session: &Arc<Session>) -> bool {
+        state
+            .doc_config
+            .get(uri)
+            .filter(|c| !state.broken.contains_key(*c))
+            .and_then(|c| state.sessions.get(c))
+            .is_some_and(|cur| Arc::ptr_eq(cur, session))
+    }
+
+    /// Keep editor diagnostics synchronized with `state.diagnostics` when a
+    /// queued `reeval_file_seq` aborts early (e.g. `strip_prefix` failure or
+    /// `eval_buffer` error/panic) after `apply_check` merged cross-file findings.
+    fn publish_cached_if_current(
+        &self,
+        uri: &Url,
+        version: i32,
+        seq: Option<u64>,
+        session: &Arc<Session>,
+    ) {
+        let _publish_guard = self.reeval_publish.lock();
+        if self.is_stopping() {
+            return;
+        }
+        let diagnostics = {
+            let state = self.state.lock();
+            if !Self::is_doc_current(&state, uri, version, seq)
+                || !Self::is_session_current(&state, uri, session)
+            {
+                return;
+            }
+            state
+                .diagnostics
+                .get(uri)
+                .map(|findings| {
+                    findings_to_diagnostics(findings, state.related_information_supported)
+                })
+                .unwrap_or_default()
+        };
+        self.publish_diagnostics(uri.clone(), diagnostics, Some(version));
     }
 
     fn reeval_file_seq(&self, uri: Url, text: String, version: i32, seq: Option<u64>) {
@@ -920,6 +1072,7 @@ impl ServerCore {
             return;
         };
         let Ok(rel) = abs.strip_prefix(&session.root).map(Path::to_path_buf) else {
+            self.publish_cached_if_current(&uri, version, seq, &session);
             return;
         };
 
@@ -939,32 +1092,45 @@ impl ServerCore {
             // file hides (#503).
             Ok(Err(Error::FileNotInIndex { .. })) => Vec::new(),
             Ok(Err(err)) => {
-                if Self::is_doc_current(&self.state.lock(), &uri, version, seq) {
+                let current = {
+                    let state = self.state.lock();
+                    Self::is_doc_current(&state, &uri, version, seq)
+                        && Self::is_session_current(&state, &uri, &session)
+                };
+                if current {
                     self.log_message(MessageType::WARNING, format!("alint: {err}"));
+                    self.publish_cached_if_current(&uri, version, seq, &session);
                 }
                 return;
             }
             Err(payload) => {
                 tracing::error!(panic = %panic_summary(&*payload), "alint LSP re-eval panicked");
-                if Self::is_doc_current(&self.state.lock(), &uri, version, seq) {
+                let current = {
+                    let state = self.state.lock();
+                    Self::is_doc_current(&state, &uri, version, seq)
+                        && Self::is_session_current(&state, &uri, &session)
+                };
+                if current {
                     self.log_message(MessageType::ERROR, "alint: re-eval panicked");
+                    self.publish_cached_if_current(&uri, version, seq, &session);
                 }
                 return;
             }
         };
 
         // Workers run `didChange` jobs concurrently, so a slow evaluation of an
-        // older buffer can finish after a newer one. Drop any result whose
-        // version/sequence is no longer the document's current one (or whose
-        // document closed): publishing or caching it would leave stale
-        // diagnostics on screen and in the state hover / code actions read.
+        // older buffer or superseded session can finish after a newer one (or
+        // after a config break / folder removal). Drop any result whose
+        // version/sequence or governing session is no longer current.
         let _publish_guard = self.reeval_publish.lock();
         if self.is_stopping() {
             return;
         }
         let diagnostics = {
             let mut state = self.state.lock();
-            if !Self::is_doc_current(&state, &uri, version, seq) {
+            if !Self::is_doc_current(&state, &uri, version, seq)
+                || !Self::is_session_current(&state, &uri, &session)
+            {
                 return;
             }
             // Keep cross-file findings from the last full run; replace the
@@ -1031,13 +1197,14 @@ impl ServerCore {
                     return Err("alint: code action panicked".to_string());
                 }
             };
-        // The buffer changed (or closed and reopened at the same version) while
-        // the edits were computed: they would apply to text the editor no
-        // longer has.
+        // The buffer changed, closed, or its governing session reloaded/broke
+        // while edits were computed: they would apply to stale text or rules.
         {
             let state = self.state.lock();
-            if state.versions.get(&uri).copied() != version
+            if !state.open.contains(&uri)
+                || state.versions.get(&uri).copied() != version
                 || state.doc_seq.get(&uri).copied() != seq
+                || !Self::is_session_current(&state, &uri, &inputs.session)
             {
                 return Ok(None);
             }
@@ -1062,9 +1229,13 @@ impl ServerCore {
     /// missing.
     fn code_action_inputs(&self, uri: &Url) -> Option<CodeActionInputs> {
         let state = self.state.lock();
+        if !state.open.contains(uri) {
+            return None;
+        }
         let session = state
             .doc_config
             .get(uri)
+            .filter(|c| !state.broken.contains_key(*c))
             .and_then(|c| state.sessions.get(c).cloned())?;
         Some(CodeActionInputs {
             session,
@@ -1275,6 +1446,7 @@ fn record_runs(
 ) -> (HashMap<SessionKey, FindingsByPath>, bool) {
     let mut by_config: HashMap<SessionKey, FindingsByPath> = HashMap::new();
     let mut withheld = false;
+    let mut seen_broken_logs: HashSet<String> = HashSet::new();
     state.sessions.clear();
     state.broken.clear();
     for (key, run) in runs {
@@ -1306,7 +1478,9 @@ fn record_runs(
             }
             Err(error) => {
                 withheld |= error.untrusted;
-                applied.logs.push(error.message.clone());
+                if seen_broken_logs.insert(error.message.clone()) {
+                    applied.logs.push(error.message.clone());
+                }
                 state.broken.insert(key, error);
             }
         }
@@ -1323,8 +1497,11 @@ fn record_runs(
     (by_config, withheld)
 }
 
+#[allow(clippy::too_many_lines)]
 fn publish_config_diagnostics(
     state: &mut State,
+    docs: &[DocSnapshot],
+    edited_uris: &HashSet<Url>,
     by_config: &HashMap<SessionKey, FindingsByPath>,
     published: &mut HashSet<Url>,
     applied: &mut Applied,
@@ -1340,8 +1517,11 @@ fn publish_config_diagnostics(
         .collect();
     keys.sort_by(|a, b| a.config.cmp(&b.config).then_with(|| a.root.cmp(&b.root)));
 
+    let snapshotted_docs: HashSet<&Url> = docs.iter().map(|(u, ..)| u).collect();
+    let reeval_uris: HashSet<Url> = applied.reeval.iter().map(|(u, ..)| u.clone()).collect();
+
     let mut config_findings_by_uri: HashMap<Url, Vec<Finding>> = HashMap::new();
-    let mut config_diags_by_uri: HashMap<Url, Vec<Diagnostic>> = HashMap::new();
+    let mut config_broken_by_uri: HashMap<Url, Vec<Diagnostic>> = HashMap::new();
     let mut config_uris: HashSet<Url> = HashSet::new();
 
     for key in keys {
@@ -1359,7 +1539,7 @@ fn publish_config_diagnostics(
                 message: error.message.clone(),
                 ..Diagnostic::default()
             };
-            let entry = config_diags_by_uri.entry(uri).or_default();
+            let entry = config_broken_by_uri.entry(uri).or_default();
             if !entry
                 .iter()
                 .any(|d| d.range == diagnostic.range && d.message == diagnostic.message)
@@ -1371,48 +1551,115 @@ fn publish_config_diagnostics(
                 .get(&key)
                 .and_then(|m| m.get(&key.config).cloned())
                 .unwrap_or_default();
-            let diagnostics =
-                findings_to_diagnostics(&findings, state.related_information_supported);
-            config_findings_by_uri
-                .entry(uri.clone())
-                .or_default()
-                .extend(findings);
-            config_diags_by_uri
-                .entry(uri)
-                .or_default()
-                .extend(diagnostics);
+            let entry = config_findings_by_uri.entry(uri).or_default();
+            for finding in findings {
+                // Deduplicate identical load-time pattern hints when multiple
+                // roots share the same `--config` file while preserving distinct
+                // per-root anchored findings (e.g. `file_exists`).
+                if finding.is_pattern_hint
+                    && entry.iter().any(|existing| {
+                        existing.is_pattern_hint
+                            && existing.range == finding.range
+                            && existing.severity == finding.severity
+                            && existing.rule_id == finding.rule_id
+                            && existing.message == finding.message
+                    })
+                {
+                    continue;
+                }
+                entry.push(finding);
+            }
         }
     }
 
     let mut ordered_config_uris: Vec<Url> = config_uris.iter().cloned().collect();
     ordered_config_uris.sort();
     for uri in ordered_config_uris {
-        let findings = config_findings_by_uri.remove(&uri).unwrap_or_default();
-        let diagnostics = config_diags_by_uri.remove(&uri).unwrap_or_default();
+        let mut findings = config_findings_by_uri.remove(&uri).unwrap_or_default();
+        let broken_diags = config_broken_by_uri.remove(&uri).unwrap_or_default();
+
+        // If this config file was open (potentially with unsaved edits) when
+        // the check started and closed before `apply_check` ran, strip overlaid
+        // per-file findings and re-run from disk so discarded edits never stick.
+        if snapshotted_docs.contains(&uri) && !state.open.contains(&uri) {
+            findings.retain(|f| !f.per_file);
+            applied.recheck = true;
+        }
+
+        if reeval_uris.contains(&uri) {
+            // An open config file edited while this full check ran: preserve
+            // the newer buffer's cached per-file findings and merge ONLY fresh
+            // non-per-file findings (anchored rules, pattern hints, cross-file).
+            // Never overwrite with stale `v1` per-file findings or stamp them
+            // with `version: Some(2)`.
+            let mut merged: Vec<Finding> = state
+                .diagnostics
+                .get(&uri)
+                .map(|prev| prev.iter().filter(|f| f.per_file).cloned().collect())
+                .unwrap_or_default();
+            let non_per_file: Vec<Finding> = findings.into_iter().filter(|f| !f.per_file).collect();
+            merged.extend(non_per_file.iter().cloned());
+            if merged.is_empty() {
+                state.diagnostics.remove(&uri);
+            } else {
+                state.diagnostics.insert(uri.clone(), merged);
+            }
+            if !broken_diags.is_empty() {
+                let mut diagnostics = broken_diags;
+                diagnostics.extend(findings_to_diagnostics(
+                    &non_per_file,
+                    state.related_information_supported,
+                ));
+                if published.insert(uri.clone()) {
+                    applied.publish.push((uri, diagnostics, None));
+                } else if let Some(entry) = applied.publish.iter_mut().find(|(u, _, _)| *u == uri) {
+                    entry.1 = diagnostics;
+                    entry.2 = None;
+                }
+            }
+            continue;
+        }
+
+        let mut diagnostics = broken_diags;
+        let has_broken = !diagnostics.is_empty();
+        diagnostics.extend(findings_to_diagnostics(
+            &findings,
+            state.related_information_supported,
+        ));
         if findings.is_empty() {
             state.diagnostics.remove(&uri);
         } else {
             state.diagnostics.insert(uri.clone(), findings);
         }
-        let version = state.versions.get(&uri).copied();
+        // Never stamp an on-disk config parse error with a newer unsaved
+        // buffer's version.
+        let version = if has_broken && edited_uris.contains(&uri) {
+            None
+        } else {
+            state.versions.get(&uri).copied()
+        };
         if published.insert(uri.clone()) {
             applied.publish.push((uri, diagnostics, version));
         } else if let Some(entry) = applied.publish.iter_mut().find(|(u, _, _)| *u == uri) {
             // An open config file: merged findings / load errors replace the
             // per-doc entry.
             entry.1 = diagnostics;
+            entry.2 = version;
         }
     }
-    // Config files we published to before that are no longer relevant.
-    let no_longer_configs: Vec<Url> = state
+    // Config files we published to before that are no longer relevant and were
+    // not already refreshed or queued for re-evaluation in this check.
+    let mut no_longer_configs: Vec<Url> = state
         .config_uris
         .difference(&config_uris)
-        .filter(|u| !state.open.contains(*u))
+        .filter(|u| !published.contains(*u) && !reeval_uris.contains(*u))
         .cloned()
         .collect();
+    no_longer_configs.sort();
     for uri in no_longer_configs {
         state.diagnostics.remove(&uri);
-        applied.publish.push((uri, Vec::new(), None));
+        let version = state.versions.get(&uri).copied();
+        applied.publish.push((uri, Vec::new(), version));
     }
     state.config_uris = config_uris;
 }
@@ -1430,9 +1677,12 @@ fn apply_check(
         state.untrusted_note_shown = true;
         applied.untrusted_note = true;
     }
-    state.doc_config = check.doc_config;
+    let mut doc_config = check.doc_config;
+    doc_config.retain(|uri, _| state.open.contains(uri));
+    state.doc_config = doc_config;
 
     let mut published: HashSet<Url> = HashSet::new();
+    let mut edited_uris: HashSet<Url> = HashSet::new();
     for (uri, _, snapshot_version, snapshot_seq) in docs {
         if !state.open.contains(uri) {
             continue; // closed while the check ran
@@ -1450,6 +1700,7 @@ fn apply_check(
         let edited_during_check =
             current_version != *snapshot_version || current_seq != *snapshot_seq;
         if edited_during_check {
+            edited_uris.insert(uri.clone());
             // The buffer moved on while the full check ran: never overwrite
             // cached per-file findings with stale snapshot findings or publish
             // a backwards version. Keep the existing cached per-file findings
@@ -1498,6 +1749,13 @@ fn apply_check(
         }
     }
 
-    publish_config_diagnostics(state, &by_config, &mut published, &mut applied);
+    publish_config_diagnostics(
+        state,
+        docs,
+        &edited_uris,
+        &by_config,
+        &mut published,
+        &mut applied,
+    );
     applied
 }

@@ -180,6 +180,7 @@ fn init_panic_hook() {
         return;
     }
     std::panic::set_hook(Box::new(|info| {
+        use std::io::Write as _;
         let location = info.location().map_or_else(
             || "(unknown)".to_string(),
             |l| format!("{}:{}", l.file(), l.line()),
@@ -210,11 +211,19 @@ fn init_panic_hook() {
             url_encode(&title),
             url_encode(&body),
         );
-        eprintln!("\nalint crashed unexpectedly. This is a bug - please file a report:");
-        eprintln!("  {url}\n");
-        eprintln!("Panic: {payload}");
-        eprintln!("Location: {location}");
-        eprintln!("Re-run with `RUST_BACKTRACE=1` for the full backtrace.");
+        let mut err = io::stderr().lock();
+        let safe_payload = terminal_error(payload);
+        let _ = writeln!(
+            err,
+            "\nalint crashed unexpectedly. This is a bug - please file a report:"
+        );
+        let _ = writeln!(err, "  {url}\n");
+        let _ = writeln!(err, "Panic: {safe_payload}");
+        let _ = writeln!(err, "Location: {location}");
+        let _ = writeln!(
+            err,
+            "Re-run with `RUST_BACKTRACE=1` for the full backtrace."
+        );
     }));
 }
 
@@ -257,7 +266,20 @@ fn init_tracing(color: &str) {
     use tracing_subscriber::{EnvFilter, fmt};
     let no_color = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
     let ansi = tracing_ansi(color, no_color, io::stderr().is_terminal());
-    let filter = EnvFilter::try_from_env("ALINT_LOG").unwrap_or_else(|_| EnvFilter::new("warn"));
+    let raw_log = std::env::var("ALINT_LOG").ok();
+    let mut filter = raw_log
+        .as_deref()
+        .and_then(|s| EnvFilter::try_new(s).ok())
+        .unwrap_or_else(|| EnvFilter::new("warn"));
+    // `lsp-server` logs raw JSON-RPC frames (including unsaved editor buffers
+    // and secrets) at `debug` via `log`, which `tracing-log` bridges into
+    // `tracing`. Cap `lsp_server` at `warn` unless the caller explicitly asked
+    // for `lsp_server` directives in `ALINT_LOG`.
+    if !raw_log.as_deref().is_some_and(|s| s.contains("lsp_server"))
+        && let Ok(directive) = "lsp_server=warn".parse()
+    {
+        filter = filter.add_directive(directive);
+    }
     let _ = fmt()
         // Every field a diagnostic prints is a log field, often a path from the
         // repository: its control characters print as escapes, so a file name

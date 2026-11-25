@@ -1,9 +1,9 @@
 # v0.24: saphyr exit, Phase 3 completion, owned walker, LSP rewrite, and backlog drain
 
-Status: accepted (2026-11-22, ADR-0048); in progress (Phase 0, Phase 1 [19/19], Phase 2 [8/8], Phase 3 [5/5], and Phase 4 [2/2 + audit] complete; Phase 5 design doc and ADR-0050 drafted, awaiting owner sign-off).
+Status: accepted (2026-11-22, ADR-0048); in progress (Phase 0, Phase 1 [19/19], Phase 2 [8/8], Phase 3 [5/5], and Phase 4 [2/2 + audit] complete; Phase 5 design doc and ADR-0050 accepted, Batch 5a next).
 Decisions: [ADR-0048](../../adr/0048-v024-owner-decisions.md) (owner decisions and scope for v0.24);
 [ADR-0049](../../adr/0049-baseline-preferred-paths-for-repeated-fingerprints.md) (baseline preferred visible paths for repeated fingerprints);
-[ADR-0050](../../adr/0050-v024-phase-3-completion-design.md) (proposed: Phase 3 completion design decisions D1 to D11);
+[ADR-0050](../../adr/0050-v024-phase-3-completion-design.md) (accepted: Phase 3 completion design decisions D1 to D11);
 [ADR-0036](../../adr/0036-ayaml-issues-and-the-saphyr-exit.md) and
 [ADR-0041](../../adr/0041-a-yaml-parser-facade-with-test-only-reference-parsers.md) (saphyr exit
 and test-only reference parsers);
@@ -158,12 +158,11 @@ Executed in three ordered steps (ADR-0048 decision 8):
 ### Phase 5: General-linter Phase 3 completion (6 issues + roadmap)
 
 Gated by the Phase 3 completion design document ([phase-3-completion.md](./phase-3-completion.md))
-and owner ADR approval ([ADR-0050](../../adr/0050-v024-phase-3-completion-design.md), currently
-`proposed`) before implementation starts (matching v0.23's Phase 3 owner gate):
+and owner ADR approval ([ADR-0050](../../adr/0050-v024-phase-3-completion-design.md), `accepted`):
 
-- **Design and owner gate:** lock exact `version: 2` syntax, error semantics, and cost bounds for
-  the v0.24 Phase 3 surface, verifying the two stratum `cardinality` / `group` units against
-  ADR-0048 decision 3b.
+- **Phase 5 design and owner gate (accepted, ADR-0050):** locked exact `version: 2` syntax, error
+  semantics, and cost bounds for the v0.24 Phase 3 surface, verifying the two stratum
+  `cardinality` / `group` units (`forem-01`, `backstage-25`) against ADR-0048 decision 3b.
 - **Open Phase 3 issues (#592, #593, #594, #595, #598, #570):**
   - **#592:** multi-field array-of-objects extraction into one row + string split/prefix transform
     (unlocks 12 stratum units).
@@ -184,8 +183,8 @@ and owner ADR approval ([ADR-0050](../../adr/0050-v024-phase-3-completion-design
   - Gap C4: semver range satisfaction and version comparison (21 stratum units; moves
     `toolchain-pin` from 63% to 83%).
   - Strict-JSON parse option (promotes 10 locale C units to A across 8 repos).
-  - Per-manifest two-set comparison / anti-joins and mixed-reader unions where justified by the
-    design pass.
+  - Per-group cross-relation `set` comparison and mixed-reader `union:` per-part `fields:` (with
+    `join: { kind: anti | left }` deliberately deferred out of v0.24 per ADR-0050 D3).
 - **DEC-8 bundled `version: 2` rulesets (ADR-0048 decision 3c):**
   - Allow bundled (`alint://bundled/...`) `version: 2` sources (keeping remote and nested
     `version: 2` refused until v2 stabilizes in v0.25).
@@ -357,15 +356,14 @@ and owner ADR approval ([ADR-0050](../../adr/0050-v024-phase-3-completion-design
   1,024-entry object cap + 64M cumulative quadratic work budget, scanner fixes for odd `$`/`%` runs,
   Unicode heredocs, line-1 heredoc fallback, `%{if}`/`%{for}` directives, `BlockBrace` vs
   `ObjectBrace`, 256-level scan-depth cap, and single-parse batch HCL span resolution; #658).
-- 2026-11-24: Phase 5 design and owner gate drafted: authored
-  [phase-3-completion.md](./phase-3-completion.md) and proposed
-  [ADR-0050](../../adr/0050-v024-phase-3-completion-design.md) locking proposed decisions D1 to D11
+- 2026-11-24: Phase 5 design and owner gate accepted: authored, audited, refined, and accepted
+  [phase-3-completion.md](./phase-3-completion.md) and
+  [ADR-0050](../../adr/0050-v024-phase-3-completion-design.md) locking decisions D1 to D11
   (composite `reference`, unified `count`, orthogonal multi-field `group_by` + per-group `set` +
   inline literal `set` targets, unified `compare`, offline `satisfies:` / `semver_eval.rs` [Gap C4],
   v1 `no_duplicate_keys` [Gap B1], strict-JSON mode, #592 `records:` + parameterized transforms +
   mixed-reader `union:`, #593/#594/#595/#598/#570, DEC-8 bundled `version: 2`, and `RELEASE = "v0.24.0"`
   schema/tooling updates), verifying the two stratum `cardinality`/`group` units (`forem-01`,
   `backstage-25`) against ADR-0048 decision 3b.
-  Next: owner review and sign-off on ADR-0050 (D1 to D11), then Phase 5 implementation batches 5a
-  to 5d (#592 to #598, #570, operators, B1, C4, strict JSON, bundled `version: 2`, stratum re-score)
-  and Phase 6 release qualification.
+  Next: Phase 5 implementation batches 5a to 5d (#592 to #598, #570, operators, B1, C4, strict JSON,
+  bundled `version: 2`, stratum re-score) and Phase 6 release qualification.
