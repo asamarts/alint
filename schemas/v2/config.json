@@ -7838,14 +7838,69 @@
       ]
     },
     "v2_field_entries": {
-      "description": "A field: its source, or a `{ source, sensitive }` map.",
+      "description": "A field: its source, or a `{ source, sensitive, optional, on_missing }` map.",
       "oneOf": [
         {
           "$ref": "#/$defs/v2_field_source_entries"
         },
         {
           "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "optional"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "on_missing"
+                    ]
+                  }
+                ]
+              },
+              "then": {
+                "properties": {
+                  "source": {
+                    "$ref": "#/$defs/v2_source_bound"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "required": [
+                  "on_missing"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "optional": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "optional"
+                ]
+              }
+            }
+          ],
           "properties": {
+            "on_missing": {
+              "default": "skip",
+              "description": "With an `optional: true` `bound:` source: `skip` (default) skips the resource cleanly (emitting no rows and excluding it from resource groups); `missing` keeps the resource's rows with a missing cell for this field.",
+              "enum": [
+                "skip",
+                "missing"
+              ]
+            },
+            "optional": {
+              "default": false,
+              "description": "With a `bound:` source: allow the bound path to match nothing instead of failing the relation. Defaults to false; see `on_missing`.",
+              "type": "boolean"
+            },
             "sensitive": {
               "default": false,
               "description": "Keep this field's values out of messages, the JSON report and baselines.",
@@ -7863,14 +7918,69 @@
       ]
     },
     "v2_field_join": {
-      "description": "A field: its source, or a `{ source, sensitive }` map.",
+      "description": "A field: its source, or a `{ source, sensitive, optional, on_missing }` map.",
       "oneOf": [
         {
           "$ref": "#/$defs/v2_field_source_join"
         },
         {
           "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "optional"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "on_missing"
+                    ]
+                  }
+                ]
+              },
+              "then": {
+                "properties": {
+                  "source": {
+                    "$ref": "#/$defs/v2_source_bound"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "required": [
+                  "on_missing"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "optional": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "optional"
+                ]
+              }
+            }
+          ],
           "properties": {
+            "on_missing": {
+              "default": "skip",
+              "description": "With an `optional: true` `bound:` source: `skip` (default) skips the resource cleanly (emitting no rows and excluding it from resource groups); `missing` keeps the resource's rows with a missing cell for this field.",
+              "enum": [
+                "skip",
+                "missing"
+              ]
+            },
+            "optional": {
+              "default": false,
+              "description": "With a `bound:` source: allow the bound path to match nothing instead of failing the relation. Defaults to false; see `on_missing`.",
+              "type": "boolean"
+            },
             "sensitive": {
               "default": false,
               "description": "Keep this field's values out of messages, the JSON report and baselines.",
@@ -7888,14 +7998,69 @@
       ]
     },
     "v2_field_read": {
-      "description": "A field: its source, or a `{ source, sensitive }` map.",
+      "description": "A field: its source, or a `{ source, sensitive, optional, on_missing }` map.",
       "oneOf": [
         {
           "$ref": "#/$defs/v2_field_source_read"
         },
         {
           "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "optional"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "on_missing"
+                    ]
+                  }
+                ]
+              },
+              "then": {
+                "properties": {
+                  "source": {
+                    "$ref": "#/$defs/v2_source_bound"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "required": [
+                  "on_missing"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "optional": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "optional"
+                ]
+              }
+            }
+          ],
           "properties": {
+            "on_missing": {
+              "default": "skip",
+              "description": "With an `optional: true` `bound:` source: `skip` (default) skips the resource cleanly (emitting no rows and excluding it from resource groups); `missing` keeps the resource's rows with a missing cell for this field.",
+              "enum": [
+                "skip",
+                "missing"
+              ]
+            },
+            "optional": {
+              "default": false,
+              "description": "With a `bound:` source: allow the bound path to match nothing instead of failing the relation. Defaults to false; see `on_missing`.",
+              "type": "boolean"
+            },
             "sensitive": {
               "default": false,
               "description": "Keep this field's values out of messages, the JSON report and baselines.",
@@ -7913,14 +8078,69 @@
       ]
     },
     "v2_field_read_text": {
-      "description": "A field: its source, or a `{ source, sensitive }` map.",
+      "description": "A field: its source, or a `{ source, sensitive, optional, on_missing }` map.",
       "oneOf": [
         {
           "$ref": "#/$defs/v2_field_source_read_text"
         },
         {
           "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "optional"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "on_missing"
+                    ]
+                  }
+                ]
+              },
+              "then": {
+                "properties": {
+                  "source": {
+                    "$ref": "#/$defs/v2_source_bound"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "required": [
+                  "on_missing"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "optional": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "optional"
+                ]
+              }
+            }
+          ],
           "properties": {
+            "on_missing": {
+              "default": "skip",
+              "description": "With an `optional: true` `bound:` source: `skip` (default) skips the resource cleanly (emitting no rows and excluding it from resource groups); `missing` keeps the resource's rows with a missing cell for this field.",
+              "enum": [
+                "skip",
+                "missing"
+              ]
+            },
+            "optional": {
+              "default": false,
+              "description": "With a `bound:` source: allow the bound path to match nothing instead of failing the relation. Defaults to false; see `on_missing`.",
+              "type": "boolean"
+            },
             "sensitive": {
               "default": false,
               "description": "Keep this field's values out of messages, the JSON report and baselines.",
@@ -7999,14 +8219,69 @@
       "description": "A field source of a `union:` relation: a path token, an `entry.*` source, `value` or `bound: <JSONPath>`. Every part must be able to bind it."
     },
     "v2_field_union": {
-      "description": "A field: its source, or a `{ source, sensitive }` map.",
+      "description": "A field: its source, or a `{ source, sensitive, optional, on_missing }` map.",
       "oneOf": [
         {
           "$ref": "#/$defs/v2_field_source_union"
         },
         {
           "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "optional"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "on_missing"
+                    ]
+                  }
+                ]
+              },
+              "then": {
+                "properties": {
+                  "source": {
+                    "$ref": "#/$defs/v2_source_bound"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "required": [
+                  "on_missing"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "optional": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "optional"
+                ]
+              }
+            }
+          ],
           "properties": {
+            "on_missing": {
+              "default": "skip",
+              "description": "With an `optional: true` `bound:` source: `skip` (default) skips the resource cleanly (emitting no rows and excluding it from resource groups); `missing` keeps the resource's rows with a missing cell for this field.",
+              "enum": [
+                "skip",
+                "missing"
+              ]
+            },
+            "optional": {
+              "default": false,
+              "description": "With a `bound:` source: allow the bound path to match nothing instead of failing the relation. Defaults to false; see `on_missing`.",
+              "type": "boolean"
+            },
             "sensitive": {
               "default": false,
               "description": "Keep this field's values out of messages, the JSON report and baselines.",

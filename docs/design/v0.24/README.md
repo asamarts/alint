@@ -1,6 +1,6 @@
 # v0.24: saphyr exit, Phase 3 completion, owned walker, LSP rewrite, and backlog drain
 
-Status: accepted (2026-11-22, ADR-0048); in progress (Phase 0, Phase 1 [19/19], Phase 2 [8/8], Phase 3 [5/5], and Phase 4 [2/2 + audit] complete; Phase 5 design doc and ADR-0050 accepted, Batch 5a next).
+Status: accepted (2026-11-22, ADR-0048); in progress (Phase 0, Phase 1 [19/19], Phase 2 [8/8], Phase 3 [5/5], Phase 4 [2/2 + audit], and Phase 5 design/ADR-0050 + Batch 5a [5/5] complete; Batch 5b next).
 Decisions: [ADR-0048](../../adr/0048-v024-owner-decisions.md) (owner decisions and scope for v0.24);
 [ADR-0049](../../adr/0049-baseline-preferred-paths-for-repeated-fingerprints.md) (baseline preferred visible paths for repeated fingerprints);
 [ADR-0050](../../adr/0050-v024-phase-3-completion-design.md) (accepted: Phase 3 completion design decisions D1 to D11);
@@ -365,5 +365,14 @@ and owner ADR approval ([ADR-0050](../../adr/0050-v024-phase-3-completion-design
   mixed-reader `union:`, #593/#594/#595/#598/#570, DEC-8 bundled `version: 2`, and `RELEASE = "v0.24.0"`
   schema/tooling updates), verifying the two stratum `cardinality`/`group` units (`forem-01`,
   `backstage-25`) against ADR-0048 decision 3b.
-  Next: Phase 5 implementation batches 5a to 5d (#592 to #598, #570, operators, B1, C4, strict JSON,
+  Next: Phase 5 implementation batches 5b to 5d (operators, B1, C4, strict JSON, #592,
   bundled `version: 2`, stratum re-score) and Phase 6 release qualification.
+- 2026-11-24: Phase 5 Batch 5a complete (5/5 v2 polish and preflight issues closed): added
+  optional `bound:` fields (`optional: true`, `on_missing: skip | missing`) across `alint-core`,
+  `alint-dsl`, `inspect_plan`, and `schemas/v2/config.json` (#593); added single-pass,
+  redaction-aware `{{value}}` interpolation in `constraint` `set` `message:` templates with
+  load-time validation (#594); added unique structural path-component target-file placement for
+  missing-value `set` findings (#595); preserved transformed/filtered single-root stub rows on
+  `RelationRows::stub_rows` so `group_by: entry.root` forms zero-row groups anchored at stub
+  locale files (#598); and added `ci/scripts/check-v2-schema-id.sh` (+ hermetic 11-case test
+  suite), wired into `preflight.sh`, `docs.sh`, `release.yml`, and `bump-version.sh` (#570).

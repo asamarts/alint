@@ -271,6 +271,8 @@ pub(crate) struct Field {
     pub(crate) sensitive: bool,
 }
 
+pub(crate) use alint_core::relation::plan::BoundMissing;
+
 /// The sources a field may take (section 5).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum FieldSource {
@@ -285,7 +287,11 @@ pub(crate) enum FieldSource {
     /// `value`: a `read:` row's value.
     Value,
     /// `bound: <JSONPath>`: a value read once per resource.
-    Bound(String),
+    Bound {
+        query: String,
+        optional: bool,
+        on_missing: BoundMissing,
+    },
     /// `left.F` or `right.F` in a join's output.
     Side(JoinSide, String),
 }

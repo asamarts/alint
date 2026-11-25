@@ -16,8 +16,8 @@ use crate::relation::adapters::{EntryValuesAdapter, ExtractAdapter, entry_values
 use crate::relation::limits::{LimitExceeded, LimitKind, Limits};
 use crate::relation::path::RelPath;
 use crate::relation::plan::{
-    Entries, EntriesFormat, FieldDef, FieldSource, NamedRelation, Part, PathToken, Read, Reader,
-    RelationDef, SelectorRef,
+    BoundMissing, Entries, EntriesFormat, FieldDef, FieldSource, NamedRelation, Part, PathToken,
+    Read, Reader, RelationDef, SelectorRef,
 };
 use crate::relation::pointer::{Pointer, Segment};
 use crate::relation::resource::{Origin, Resource, ResourceId, ResourceRead};
@@ -191,7 +191,13 @@ impl Evaluator<'_> {
                 ),
             };
             match result {
-                Ok(()) => {}
+                Ok(true) => {}
+                Ok(false) => {
+                    // An optional `bound:` field with `on_missing: skip`
+                    // skipped this resource: exclude it from `resources_read`
+                    // so it does not form a zero-row group (#593).
+                    resources_read.pop();
+                }
                 Err(Stop::Detail(detail)) => {
                     let kind = AnalysisFailureKind::Evaluation;
                     failures.push(site.failure(kind, failure_at(), detail));
@@ -427,7 +433,7 @@ impl Evaluator<'_> {
 fn bound_queries(relation: &RelationDef) -> Vec<String> {
     let mut queries: Vec<String> = Vec::new();
     for (_, field) in &relation.fields {
-        if let FieldSource::Bound(query) = &field.source
+        if let FieldSource::Bound { query, .. } = &field.source
             && !queries.contains(query)
         {
             queries.push(query.clone());
@@ -690,6 +696,15 @@ const ROOT: usize = 2;
 const PATH: usize = 3;
 const VALUE: usize = 4;
 
+/// Outcome of evaluating a resource's `bound:` fields.
+enum BoundCells {
+    /// An optional `bound:` field with `on_missing: skip` matched nothing:
+    /// skip this resource without emitting rows or notes.
+    SkipResource,
+    /// Bound cells by field position (`None` for non-bound fields).
+    Cells(Vec<Option<Cell>>),
+}
+
 impl<'r> Rows<'r> {
     /// `resource`'s rows for `relation`, its path tokens built and their
     /// bytes taken from the run.
@@ -766,10 +781,34 @@ impl<'r> Rows<'r> {
     /// Each `bound:` field's cell, by field position (`None` for other
     /// fields), from the decode's rows labelled with its path: built once
     /// for the resource and shared by its rows.
-    fn bound_cells(&self, output: &AdapterOutput) -> Result<Vec<Option<Cell>>, Stop> {
+    fn bound_cells(&self, output: &AdapterOutput) -> Result<BoundCells, Stop> {
+        // Check `optional: true, on_missing: skip` fields first so skipping a
+        // resource never depends on the declaration order of `fields:` (#593).
+        for (_, field) in &self.relation.fields {
+            if let FieldSource::Bound {
+                query,
+                optional: true,
+                on_missing: BoundMissing::Skip,
+            } = &field.source
+            {
+                let label = format!("{}{query}", entry_values::BOUND_LABEL);
+                if !output
+                    .rows
+                    .iter()
+                    .any(|row| row.label.as_deref() == Some(label.as_str()))
+                {
+                    return Ok(BoundCells::SkipResource);
+                }
+            }
+        }
         let mut cells = Vec::with_capacity(self.relation.fields.len());
         for (name, field) in &self.relation.fields {
-            let FieldSource::Bound(query) = &field.source else {
+            let FieldSource::Bound {
+                query,
+                optional,
+                on_missing,
+            } = &field.source
+            else {
                 cells.push(None);
                 continue;
             };
@@ -781,10 +820,24 @@ impl<'r> Rows<'r> {
                 .collect();
             let row = match matches.as_slice() {
                 [] => {
+                    if *optional {
+                        match on_missing {
+                            BoundMissing::Skip => return Ok(BoundCells::SkipResource),
+                            BoundMissing::Missing => {
+                                cells.push(Some(Cell {
+                                    span: None,
+                                    value: None,
+                                    at: self.provenance(None, 0, false)?,
+                                    path: None,
+                                }));
+                                continue;
+                            }
+                        }
+                    }
                     return Err(format!(
                         "`{name}` (`bound: {query}`) matches nothing; a bound path matches exactly \
-                         once in each resource the relation reads, so fix the path, or narrow \
-                         the selector to the files that have it"
+                         once in each resource the relation reads, so fix the path, narrow the \
+                         selector to the files that have it, or mark the field `optional: true`"
                     )
                     .into());
                 }
@@ -829,7 +882,7 @@ impl<'r> Rows<'r> {
                 path: None,
             }));
         }
-        Ok(cells)
+        Ok(BoundCells::Cells(cells))
     }
 
     /// Fails when an `at:` path selected something other than an object
@@ -867,10 +920,14 @@ impl<'r> Rows<'r> {
             .map_err(Stop::Limit)
     }
 
-    /// An `entries:` part's rows in one resource.
-    fn entries(&self, output: &AdapterOutput, out: &mut RelationRows) -> Result<(), Stop> {
+    /// An `entries:` part's rows in one resource. Returns `Ok(false)` when an
+    /// optional `bound:` field with `on_missing: skip` skipped the resource.
+    fn entries(&self, output: &AdapterOutput, out: &mut RelationRows) -> Result<bool, Stop> {
         self.at_selects_objects(output)?;
-        let bound = self.bound_cells(output)?;
+        let bound = match self.bound_cells(output)? {
+            BoundCells::SkipResource => return Ok(false),
+            BoundCells::Cells(cells) => cells,
+        };
         for row in output.rows.iter().filter(|row| row.label.is_none()) {
             self.take_row()?;
             let provenance = self.provenance(
@@ -900,7 +957,7 @@ impl<'r> Rows<'r> {
                         cells.push(cell(self.token(*token), None));
                         continue;
                     }
-                    FieldSource::Bound(_) => {
+                    FieldSource::Bound { .. } => {
                         cells.push(bound[position].clone().expect("a bound field's cell"));
                         continue;
                     }
@@ -924,7 +981,7 @@ impl<'r> Rows<'r> {
                 at: provenance,
             });
         }
-        Ok(())
+        Ok(true)
     }
 
     /// Where an entry row's key is written: its span, with the key it holds,
@@ -1020,7 +1077,7 @@ impl<'r> Rows<'r> {
                 }
             }
             FieldSource::Path(_)
-            | FieldSource::Bound(_)
+            | FieldSource::Bound { .. }
             | FieldSource::Value
             | FieldSource::Side(..) => unreachable!("an `entry.*` source"),
         })
@@ -1029,7 +1086,8 @@ impl<'r> Rows<'r> {
     /// A `read:` part's rows in one resource: one per string it extracted,
     /// or one missing row when it extracted nothing (unless `optional`, or
     /// it skipped a value or matched one that is not a string, which a note
-    /// says instead). Each row is its own, for its ordinal.
+    /// says instead). Returns `Ok(false)` when an optional `bound:` field with
+    /// `on_missing: skip` skipped the resource.
     fn read(
         &self,
         (read, reading): (&Read, Option<&Arc<Reading>>),
@@ -1037,7 +1095,14 @@ impl<'r> Rows<'r> {
         bound_output: Option<&AdapterOutput>,
         output: &AdapterOutput,
         out: &mut RelationRows,
-    ) -> Result<(), Stop> {
+    ) -> Result<bool, Stop> {
+        let bound = match bound_output {
+            Some(output) => match self.bound_cells(output)? {
+                BoundCells::SkipResource => return Ok(false),
+                BoundCells::Cells(cells) => cells,
+            },
+            None => vec![None; self.relation.fields.len()],
+        };
         if !output.non_strings.is_empty() {
             let kinds = non_string_kinds(output);
             let summary = kinds
@@ -1087,10 +1152,6 @@ impl<'r> Rows<'r> {
                 message,
             });
         }
-        let bound = match bound_output {
-            Some(output) => self.bound_cells(output)?,
-            None => vec![None; self.relation.fields.len()],
-        };
         // Shared with the decode, which took their bytes.
         let values: Vec<(Option<Value>, u32)> = if output.rows.is_empty() {
             if optional || !output.notes.is_empty() || !output.non_strings.is_empty() {
@@ -1118,7 +1179,7 @@ impl<'r> Rows<'r> {
                 let (value, span) = match &field.source {
                     FieldSource::Path(token) => (Some(self.token(*token)), None),
                     FieldSource::Value => (value.clone(), value_span.clone()),
-                    FieldSource::Bound(_) => {
+                    FieldSource::Bound { .. } => {
                         cells.push(bound[position].clone().expect("a bound field's cell"));
                         continue;
                     }
@@ -1136,7 +1197,7 @@ impl<'r> Rows<'r> {
                 at: provenance,
             });
         }
-        Ok(())
+        Ok(true)
     }
 }
 
@@ -1152,7 +1213,7 @@ fn wrong_source(name: &str, field: &FieldDef, row: &str) -> String {
     let source = match &field.source {
         FieldSource::Value => "value",
         FieldSource::Side(..) => "a join side's field",
-        FieldSource::Bound(_) => "bound:",
+        FieldSource::Bound { .. } => "bound:",
         FieldSource::Path(_) => "a path token",
         _ => "an `entry.*` source",
     };

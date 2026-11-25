@@ -233,7 +233,7 @@ impl<'p> Fields<'p> {
                     found = Holds::StringsOrNull;
                     break;
                 }
-                FieldSource::EntryValue | FieldSource::Bound(_) => break,
+                FieldSource::EntryValue | FieldSource::Bound { .. } => break,
                 FieldSource::Side(side, name) => (side, name),
             };
             let Rows::Join(join) = &self.plan.relations[at.0].relation.rows else {
@@ -461,7 +461,7 @@ fn source_text(source: &FieldSource) -> String {
         FieldSource::EntryRoot => "entry.root".to_string(),
         FieldSource::EntryPath => "entry.path".to_string(),
         FieldSource::Value => "value".to_string(),
-        FieldSource::Bound(query) => format!("bound: {query}"),
+        FieldSource::Bound { query, .. } => format!("bound: {query}"),
         FieldSource::Side(JoinSide::Left, field) => format!("left.{field}"),
         FieldSource::Side(JoinSide::Right, field) => format!("right.{field}"),
     }
@@ -521,7 +521,7 @@ fn unbound(reader: &Reader, source: &FieldSource) -> Option<String> {
         Reader::Read { .. } if entry => {
             Some("`entry.*` sources need `entries:`; a `read:` row has `value`".to_string())
         }
-        Reader::Read { read, .. } if matches!(source, FieldSource::Bound(_)) => {
+        Reader::Read { read, .. } if matches!(source, FieldSource::Bound { .. }) => {
             unstructured_form(read).map(super::decode::unbound_by)
         }
         _ => None,

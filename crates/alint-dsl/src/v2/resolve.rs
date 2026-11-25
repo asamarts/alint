@@ -898,7 +898,15 @@ fn field_def(field: &Field) -> plan::FieldDef {
             FieldSource::EntryRoot => plan::FieldSource::EntryRoot,
             FieldSource::EntryPath => plan::FieldSource::EntryPath,
             FieldSource::Value => plan::FieldSource::Value,
-            FieldSource::Bound(query) => plan::FieldSource::Bound(query.clone()),
+            FieldSource::Bound {
+                query,
+                optional,
+                on_missing,
+            } => plan::FieldSource::Bound {
+                query: query.clone(),
+                optional: *optional,
+                on_missing: *on_missing,
+            },
             FieldSource::Side(side, name) => {
                 plan::FieldSource::Side(join_side(*side), name.clone())
             }
@@ -1018,7 +1026,7 @@ fn close_sensitivity(plan: &mut Plan, order: &[RelationId]) {
                 match &field.source {
                     plan::FieldSource::EntryValue
                     | plan::FieldSource::Value
-                    | plan::FieldSource::Bound(_) => {
+                    | plan::FieldSource::Bound { .. } => {
                         exact_sources.push(&field.source);
                     }
                     plan::FieldSource::Path(token) => {
@@ -1140,7 +1148,7 @@ impl<'a> Family<'a> {
             | Source::EntryPath => Self::Entry,
             Source::Path(_) => Self::Path,
             Source::Value => Self::Value,
-            Source::Bound(query) => Self::Bound(query),
+            Source::Bound { query, .. } => Self::Bound(query),
             Source::Side(side, field) => {
                 let left = *side == plan::JoinSide::Left;
                 match join {

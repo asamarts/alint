@@ -47,7 +47,7 @@ pub(super) const READ_KEYS: &[&str] = &["json", "yaml", "toml", "regex", "lines"
 /// Extract forms `cross_file` has that a relation cannot read in v0.23.
 const UNREADABLE_FORMATS: &[&str] = &["xml", "dotenv", "properties", "ini", "hcl"];
 pub(super) const JOIN_KEYS: &[&str] = &["left", "right", "on", "unique"];
-pub(super) const FIELD_KEYS: &[&str] = &["source", "sensitive"];
+pub(super) const FIELD_KEYS: &[&str] = &["source", "sensitive", "optional", "on_missing"];
 pub(super) const PREDICATE_KEYS: &[&str] = &["in", "not_in", "matches", "not_matches"];
 
 /// Where a value sits in a version 2 `selectors:` or `relations:` value, as
@@ -102,6 +102,7 @@ pub(crate) const BOOLEAN_FIELDS: &[(Position, &str)] = &[
     (Position::Part, "optional"),
     (Position::Entries, "leaves"),
     (Position::Field, "sensitive"),
+    (Position::Field, "optional"),
 ];
 pub(super) const MEMBER_KEYS: &[&str] = &["relation", "field"];
 pub(super) const TRANSFORMS: &[&str] = &[
@@ -1185,16 +1186,68 @@ impl Decoder<'_> {
                     .map(|value| self.boolean(value, &format!("{path}.sensitive")))
                     .transpose()?
                     .unwrap_or(false);
-                Ok(Field {
-                    source: self.field_source(source, &source_path)?,
-                    sensitive,
-                })
+                let optional = map
+                    .get("optional")
+                    .map(|value| self.boolean(value, &format!("{path}.optional")))
+                    .transpose()?;
+                let on_missing = map
+                    .get("on_missing")
+                    .map(|value| self.bound_missing(value, &format!("{path}.on_missing")))
+                    .transpose()?;
+                let mut source = self.field_source(source, &source_path)?;
+                if optional.is_some() || on_missing.is_some() {
+                    let FieldSource::Bound {
+                        optional: opt,
+                        on_missing: mode,
+                        ..
+                    } = &mut source
+                    else {
+                        let key = if optional.is_some() {
+                            "optional"
+                        } else {
+                            "on_missing"
+                        };
+                        return Err(self.error(
+                            &format!("{path}.{key}"),
+                            format!(
+                                "`{key}:` applies only to a `bound:` field (e.g. `source: \
+                                 \"bound: $.name\"`)"
+                            ),
+                        ));
+                    };
+                    let is_optional = optional.unwrap_or(false);
+                    if !is_optional && on_missing.is_some() {
+                        return Err(self.error(
+                            &format!("{path}.on_missing"),
+                            "`on_missing:` applies only when `optional: true` is set",
+                        ));
+                    }
+                    *opt = is_optional;
+                    *mode = on_missing.unwrap_or_default();
+                }
+                Ok(Field { source, sensitive })
             }
             other => Err(self.error(
                 path,
                 format!(
-                    "expected a field source or a `{{ source, sensitive }}` map, found {}",
+                    "expected a field source or a `{{ source, sensitive, optional, on_missing }}` \
+                     map, found {}",
                     describe(other)
+                ),
+            )),
+        }
+    }
+
+    fn bound_missing(&self, value: &Value, path: &str) -> Result<super::model::BoundMissing> {
+        let text = self.string(value, path, "`skip` or `missing`")?;
+        match text {
+            "skip" => Ok(super::model::BoundMissing::Skip),
+            "missing" => Ok(super::model::BoundMissing::Missing),
+            other => Err(self.error(
+                path,
+                format!(
+                    "unknown `on_missing` value `{other}`; expected `skip` (drop the resource) or \
+                     `missing` (emit a missing cell)"
                 ),
             )),
         }
@@ -1210,7 +1263,11 @@ impl Decoder<'_> {
                 return Err(self.error(path, "`bound:` needs a JSONPath, as in `bound: $.name`"));
             }
             self.json_path(query, path)?;
-            FieldSource::Bound(query.to_string())
+            FieldSource::Bound {
+                query: query.to_string(),
+                optional: false,
+                on_missing: super::model::BoundMissing::Skip,
+            }
         } else if let Some((side, field)) = text
             .strip_prefix("left.")
             .map(|field| (JoinSide::Left, field))
@@ -1262,7 +1319,7 @@ impl Decoder<'_> {
                     reader: Reader::Read { read, .. },
                     ..
                 }),
-                FieldSource::Bound(_),
+                FieldSource::Bound { .. },
             ) => {
                 if let Some(form) = unstructured_form(read) {
                     return Err(self.error(

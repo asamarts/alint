@@ -89,6 +89,74 @@ cargo metadata --offline --format-version 1 > /dev/null
 echo "==> refreshing facts.json (xtask gen-facts)"
 cargo run -q -p xtask -- gen-facts
 
+# 1d. Draft v2 schema `$id` (#570): when `schemas/v2/config.json`'s body
+#     changed since the previous `v*.*.*` tag (ignoring `$id`), advance
+#     `xtask/src/gen_schema_v2.rs::RELEASE`, its unit test, the two docs
+#     modelines, and regenerate `schemas/v2/config.json`.
+if [[ -f schemas/v2/config.json && -f xtask/src/gen_schema_v2.rs ]]; then
+  NEW_TAG="v${NEW}"
+  if python3 - "$NEW_TAG" <<'PY'
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+new_tag = sys.argv[1]
+semver_re = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
+
+def parse(tag):
+    m = semver_re.match(tag)
+    return tuple(int(x) for x in m.groups()) if m else None
+
+new_ver = parse(new_tag)
+if new_ver is None:
+    sys.exit(1)
+
+cur = json.loads(Path("schemas/v2/config.json").read_text(encoding="utf-8"))
+cur.pop("$id", None)
+
+tags = subprocess.run(
+    ["git", "tag", "-l", "v*.*.*"],
+    capture_output=True,
+    text=True,
+    check=True,
+).stdout.splitlines()
+prior = sorted(
+    ((parse(t.strip()), t.strip()) for t in tags if parse(t.strip()) and parse(t.strip()) < new_ver),
+    reverse=True,
+)
+for _, tag in prior:
+    show = subprocess.run(
+        ["git", "show", f"{tag}:schemas/v2/config.json"],
+        capture_output=True,
+        text=True,
+    )
+    if show.returncode == 0:
+        prev = json.loads(show.stdout)
+        prev.pop("$id", None)
+        sys.exit(0 if cur != prev else 1)
+sys.exit(0)
+PY
+  then
+    OLD_V2_REL=$(sed -nE 's/^[[:space:]]*pub\(crate\) const RELEASE: &str = "(v[0-9]+\.[0-9]+\.[0-9]+)";/\1/p' xtask/src/gen_schema_v2.rs | head -n1)
+    if [[ -n "$OLD_V2_REL" && "$OLD_V2_REL" != "$NEW_TAG" ]]; then
+      echo "==> refreshing draft v2 schema \$id: $OLD_V2_REL -> $NEW_TAG"
+      OLD_V2_ESC="${OLD_V2_REL//./\\.}"
+      sed -i -E "s|(pub\\(crate\\) const RELEASE: &str = )\"${OLD_V2_ESC}\";|\\1\"${NEW_TAG}\";|" xtask/src/gen_schema_v2.rs
+      if [[ -f xtask/src/gen_schema_v2_tests.rs ]]; then
+        sed -i -E "s|(https://raw\\.githubusercontent\\.com/asamarts/alint/)${OLD_V2_ESC}(/schemas/v2/config\\.json)|\\1${NEW_TAG}\\2|g" xtask/src/gen_schema_v2_tests.rs
+      fi
+      for doc in docs/site/configuration/version-2.md docs/development/CONFIG-AUTHORING.md; do
+        if [[ -f "$doc" ]]; then
+          sed -i -E "s|(https://raw\\.githubusercontent\\.com/asamarts/alint/)${OLD_V2_ESC}(/schemas/v2/config\\.json)|\\1${NEW_TAG}\\2|g" "$doc"
+        fi
+      done
+      cargo run -q -p xtask -- gen-schema
+    fi
+  fi
+fi
+
 # 2. Install snippets across user-facing files, plus action.yml's private
 #    ALINT_BAKED_VERSION. Keeping the baked value on the release commit lets a
 #    commit-SHA Action pin select the matching binary without a network lookup;

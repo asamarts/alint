@@ -19,7 +19,7 @@
 //!   demand ([`Probe`]), so it keeps those bounds.
 
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use alint_core::MAX_RELATED_LOCATIONS;
 use alint_core::relation::eval::{Cell, RelationRows};
@@ -35,9 +35,13 @@ struct SetGroup<'r> {
     /// Its `group_by:` value; none when the relation is one group.
     value: Option<Scalar>,
     rows: Vec<usize>,
-    /// Its first resource in canonical order, where a value it lacks sits:
-    /// none for a group only `groups:` names.
+    /// Its first resource in canonical order, where a value it lacks sits
+    /// when no structural counterpart matches: none for a group only
+    /// `groups:` names.
     first: Option<&'r RelPath>,
+    /// Every resource belonging to this group in canonical order, used by
+    /// target-file placement (#595).
+    resources: BTreeSet<&'r RelPath>,
     /// Only a literal of `groups:` names it, so its value is shown as a
     /// literal is.
     literal: bool,
@@ -70,6 +74,28 @@ struct Compared<'c, 'r> {
     /// Each row's value of the compared field.
     values: &'c [Scalar],
     other: &'c Other<'r>,
+}
+
+/// Attach `path` to group `value`, seeding a zero-row group if none exists yet.
+fn add_group_resource<'r>(
+    out: &mut Vec<SetGroup<'r>>,
+    index: &mut HashMap<Scalar, usize>,
+    value: Scalar,
+    path: &'r RelPath,
+) {
+    if let Some(&at) = index.get(&value) {
+        out[at].resources.insert(path);
+        out[at].first = out[at].resources.iter().next().copied();
+    } else {
+        index.insert(value.clone(), out.len());
+        out.push(SetGroup {
+            value: Some(value),
+            rows: Vec::new(),
+            first: Some(path),
+            resources: BTreeSet::from([path]),
+            literal: false,
+        });
+    }
 }
 
 /// The values the rows `rows` hold (null is in no set), each with its rows.
@@ -175,10 +201,13 @@ impl<'r> Run<'r> {
             .filter(|(index, _)| kept.is_none_or(|kept| kept[*index]))
             .map(|(_, resource)| resource);
         let Some(group_at) = group_at else {
+            let group_resources: BTreeSet<&'r RelPath> = resources.map(Resource::path).collect();
+            let first = group_resources.iter().next().copied();
             return Some(vec![SetGroup {
                 value: None,
                 rows: (0..rows.rows.len()).collect(),
-                first: resources.map(Resource::path).min(),
+                first,
+                resources: group_resources,
                 literal: false,
             }]);
         };
@@ -214,13 +243,16 @@ impl<'r> Run<'r> {
         let mut out: Vec<SetGroup<'r>> = Vec::with_capacity(groups.order.len());
         let mut index: HashMap<Scalar, usize> = HashMap::with_capacity(groups.order.len());
         for (value, members) in groups.iter() {
+            let group_resources: BTreeSet<&'r RelPath> = members
+                .iter()
+                .map(|&row| rows.rows[row].at.resource.path())
+                .collect();
+            let first = group_resources.iter().next().copied();
             index.insert(value[0].clone(), out.len());
             out.push(SetGroup {
                 value: Some(value[0].clone()),
-                first: members
-                    .iter()
-                    .map(|&row| rows.rows[row].at.resource.path())
-                    .min(),
+                first,
+                resources: group_resources,
                 rows: members.clone(),
                 literal: false,
             });
@@ -230,20 +262,18 @@ impl<'r> Run<'r> {
         if let Some(by_resource) = &set.resource_groups {
             for resource in resources {
                 let value = Scalar::String(by_resource.group_of(resource).into());
-                let path = resource.path();
-                if let Some(&at) = index.get(&value) {
-                    let first = &mut out[at].first;
-                    if first.is_none_or(|held| path < held) {
-                        *first = Some(path);
-                    }
-                } else {
-                    index.insert(value.clone(), out.len());
-                    out.push(SetGroup {
-                        value: Some(value),
-                        rows: Vec::new(),
-                        first: Some(path),
-                        literal: false,
-                    });
+                add_group_resource(&mut out, &mut index, value, resource.path());
+            }
+        }
+        // Grouped by `entry.root`, single-root stub files removed by
+        // `strip-root` (`fr:`, `fr: {}`, `fr: []`) still form zero-row groups
+        // anchored at the stub file (#598).
+        if set.stub_root_groups {
+            for stub in &rows.stub_rows {
+                if let Ok(value) = Scalar::of(&stub.cells[group_at])
+                    && !value.is_null()
+                {
+                    add_group_resource(&mut out, &mut index, value, stub.at.resource.path());
                 }
             }
         }
@@ -255,6 +285,7 @@ impl<'r> Run<'r> {
                     value: Some(value),
                     rows: Vec::new(),
                     first: None,
+                    resources: BTreeSet::new(),
                     literal: true,
                 });
             }
@@ -486,7 +517,8 @@ impl<'r> Run<'r> {
     }
 
     /// Value `value` of the other set, held by its row `theirs`, which group
-    /// `group` lacks: at the group's first resource, related to that row.
+    /// `group` lacks: at the structural counterpart in `group.resources` when
+    /// unique (#595), else the group's first resource, related to `theirs`.
     fn missing(
         &mut self,
         compared: &Compared<'_, 'r>,
@@ -502,19 +534,32 @@ impl<'r> Run<'r> {
             value.show(self.sensitive(compared.field_at)),
             other.shown
         );
-        let at = group
-            .first
-            .map_or(Place::Nowhere, |path| Place::Resource(path.as_path()));
-        let hide_other = self.hide_keys
-            || self.sensitive(compared.field_at)
-            || other.rows.fields[other.at].sensitive;
+        let ref_path = other.rows.rows[theirs].at.resource.path();
+        let target_path = compared
+            .set
+            .resource_groups
+            .as_ref()
+            .and_then(|by_resource| by_resource.structural_counterpart(ref_path, &group.resources))
+            .or(group.first);
+        let at = target_path.map_or(Place::Nowhere, |path| Place::Resource(path.as_path()));
+        let hide_value = self.sensitive(compared.field_at)
+            || other.rows.fields[other.at].sensitive
+            || self.rule.hide_literals;
+        let hide_other = self.hide_keys || hide_value;
         let holder = spot_in(other.rows, theirs, other.at, hide_other);
         let related = self.related_at(vec![(holder, other.label.as_str())], 0);
         let key = self.set_key(compared, group, value, "missing");
         // A reference group's row is a row of the input, which `message:`
         // renders; another relation's is not.
         let reported = other.group.is_some().then_some(theirs);
-        self.report(at, message, key, related, reported);
+        self.report(
+            at,
+            message,
+            key,
+            related,
+            reported,
+            Some((value, hide_value)),
+        );
     }
 
     /// Value `value`, held by group `group`'s rows `holders`, which the
@@ -544,7 +589,17 @@ impl<'r> Run<'r> {
         let related = self.related_at(places, omitted);
         let key = self.set_key(compared, group, value, "extra");
         let at = self.spot(row, field_at);
-        self.report(at, message, key, related, Some(row));
+        let hide_value = self.sensitive(field_at)
+            || compared.other.rows.fields[compared.other.at].sensitive
+            || self.rule.hide_literals;
+        self.report(
+            at,
+            message,
+            key,
+            related,
+            Some(row),
+            Some((value, hide_value)),
+        );
     }
 
     /// Value `value`, held by group `group`'s row `row` and the other set's
@@ -565,14 +620,22 @@ impl<'r> Run<'r> {
             compared.set.field,
             value.show(self.sensitive(compared.field_at))
         );
-        let hide_other = self.hide_keys
-            || self.sensitive(compared.field_at)
-            || other.rows.fields[other.at].sensitive;
+        let hide_value = self.sensitive(compared.field_at)
+            || other.rows.fields[other.at].sensitive
+            || self.rule.hide_literals;
+        let hide_other = self.hide_keys || hide_value;
         let holder = spot_in(other.rows, theirs, other.at, hide_other);
         let related = self.related_at(vec![(holder, other.label.as_str())], 0);
         let key = self.set_key(compared, group, value, "shared");
         let at = self.spot(row, compared.field_at);
-        self.report(at, message, key, related, Some(row));
+        self.report(
+            at,
+            message,
+            key,
+            related,
+            Some(row),
+            Some((value, hide_value)),
+        );
     }
 
     /// Group `group` against the other set, values compared as they are.

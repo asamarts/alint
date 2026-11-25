@@ -67,6 +67,30 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `.alint.yml` (such as `rules[3].paths`, `relations.r.fields.name.at`, `selectors.s.paths`,
   `extends[0].as`, unknown keys, duplicate keys, and rule/fact/template ids with UTF-16 ranges),
   falling back to file start for errors originating in extended or drop-in files (#571).
+- `version: 2` `bound:` fields now support `optional: true` and `on_missing: skip | missing`
+  (default `skip`, skipping resources that lack the bound path and excluding them from path-token
+  `resource_groups`; `missing` keeps the resource's rows with a `Missing` cell while multi-match
+  and non-scalar bound results remain analysis failures; #593).
+- `constraint` `set` rules now support `{{value}}` (and `{{ value }}`) in custom `message:`
+  templates for missing, extra, and shared values with single-pass expansion (never re-expanding
+  substituted values), 64-character truncation, invisible-character escaping, and `<redacted>`
+  redaction for sensitive fields and environment-derived literals, rejecting `{{value}}` at load
+  time on `equal` and `unique` assertions while leaving non-alint `{{...}}` tokens literal (#594).
+- `constraint` `set` missing-value findings grouped by a path token (`parent_name`, `dir`,
+  `basename`, `stem`, `ext`) now anchor at the unique structural counterpart file in the target
+  group whose non-token path components match the reference file (for example
+  `locales/fr/errors.json` for a key from `locales/en/errors.json`), falling back to the group's
+  first file on ambiguity or missing counterparts while keeping baseline keys path-free (#595).
+- `constraint` `set` rules grouped by `entry.root` under `strip-root` now form zero-row groups
+  anchored at single-root stub files (`fr:`, `fr: {}`, `fr: []`) that survive `entry.root`,
+  path-token, and `bound:` transforms and `where:` filters, both with and without `groups:`, while
+  multi-root stub files remain analysis failures (#598).
+- Added `ci/scripts/check-v2-schema-id.sh` (with hermetic regression suite
+  `ci/scripts/test-check-v2-schema-id.sh`), wired into `ci/scripts/preflight.sh`,
+  `ci/scripts/docs.sh`, `.github/workflows/release.yml` (`--release "$GITHUB_REF_NAME"`), and
+  `ci/scripts/bump-version.sh`, verifying consistency between `xtask/src/gen_schema_v2.rs::RELEASE`,
+  `schemas/v2/config.json`'s `$id`, and documented v2 YAML modelines and requiring `$id` to match
+  the release tag whenever `schemas/v2/config.json` changes since the prior `v*.*.*` tag (#570).
 
 ### Changed
 

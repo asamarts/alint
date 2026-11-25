@@ -781,10 +781,50 @@ fn field_defs() -> Vec<(String, Value)> {
                                 "description": "Keep this field's values out of messages, the \
                                     JSON report and baselines.",
                             },
+                            "optional": {
+                                "type": "boolean",
+                                "default": false,
+                                "description": "With a `bound:` source: allow the bound path to \
+                                    match nothing instead of failing the relation. Defaults to \
+                                    false; see `on_missing`.",
+                            },
+                            "on_missing": {
+                                "enum": ["skip", "missing"],
+                                "default": "skip",
+                                "description": "With an `optional: true` `bound:` source: `skip` \
+                                    (default) skips the resource cleanly (emitting no rows and \
+                                    excluding it from resource groups); `missing` keeps the \
+                                    resource's rows with a missing cell for this field.",
+                            },
                         },
+                        "allOf": [
+                            {
+                                "if": {
+                                    "anyOf": [
+                                        { "required": ["optional"] },
+                                        { "required": ["on_missing"] },
+                                    ],
+                                },
+                                "then": {
+                                    "properties": {
+                                        "source": { "$ref": "#/$defs/v2_source_bound" },
+                                    },
+                                },
+                            },
+                            {
+                                "if": { "required": ["on_missing"] },
+                                "then": {
+                                    "required": ["optional"],
+                                    "properties": {
+                                        "optional": { "const": true },
+                                    },
+                                },
+                            },
+                        ],
                     },
                 ],
-                "description": "A field: its source, or a `{ source, sensitive }` map.",
+                "description": "A field: its source, or a `{ source, sensitive, optional, \
+                    on_missing }` map.",
             }),
         ));
         defs.push((kind.source_def(), kind.sources()));

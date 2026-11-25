@@ -147,7 +147,7 @@ fn family(source: &FieldSource) -> Family<'_> {
         | FieldSource::EntryPath => Family::Entry,
         FieldSource::Path(_) => Family::Path,
         FieldSource::Value => Family::Value,
-        FieldSource::Bound(query) => Family::Bound(query),
+        FieldSource::Bound { query, .. } => Family::Bound(query),
         FieldSource::Side(side, field) => Family::Side(*side == JoinSide::Left, field),
     }
 }
