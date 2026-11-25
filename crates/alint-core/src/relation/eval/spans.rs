@@ -22,7 +22,9 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::extract::{ByteSpan, EntryValue, Extract, JsonSyntax};
-use crate::relation::adapters::{entry_table_with_arrays, locate, same_reading, walks};
+use crate::relation::adapters::{
+    entry_table, entry_table_with_arrays, locate, same_reading, walks,
+};
 use crate::relation::key_paths::EntryTable;
 use crate::relation::limits::Limits;
 use crate::relation::pointer::Segment;
@@ -100,6 +102,9 @@ enum Holds {
     /// value, or at its key for a YAML block scalar, whose value has no
     /// span of its own.
     Value,
+    /// A `records:` subfield value (`record: <JSONPath>`): for TOML, requires
+    /// descending arrays of tables and inline tables inside arrays.
+    RecordValue,
 }
 
 /// Where an entry's cell is written: its key's or its value's bytes, read
@@ -132,6 +137,17 @@ impl BytesSpan {
             held: fingerprint(value),
             format,
             holds: Holds::Value,
+        }
+    }
+
+    /// The span of a `records:` subfield `value`, which `format` reads at
+    /// `span` (descending TOML arrays of tables / inline tables on verification).
+    pub(super) fn record_value(span: ByteSpan, format: Format, value: &Value) -> Self {
+        Self {
+            span,
+            held: fingerprint(value),
+            format,
+            holds: Holds::RecordValue,
         }
     }
 
@@ -336,15 +352,27 @@ fn still_held(
                     check(member.key_span, Holds::Key, &|| {
                         Some(fingerprint_text(member.key))
                     });
-                    check(member.value_span, Holds::Value, &|| match member.value() {
+                    let value_fp = || match member.value() {
                         EntryValue::Scalar(value) => Some(fingerprint(&value)),
                         _ => None,
-                    });
+                    };
+                    check(member.value_span, Holds::Value, &value_fp);
+                    check(member.value_span, Holds::RecordValue, &value_fp);
                 });
             }
         }
+        let need_arrays = format == Format::Toml
+            && these
+                .iter()
+                .any(|(_, span)| span.holds == Holds::RecordValue);
         let table = (format != Format::Json)
-            .then(|| entry_table_with_arrays(format, text, &Limits::default()).ok())
+            .then(|| {
+                if need_arrays {
+                    entry_table_with_arrays(format, text, &Limits::default()).ok()
+                } else {
+                    entry_table(format, text, &Limits::default()).ok()
+                }
+            })
             .flatten();
         if let Some(table) = &table {
             walked = walked.max(table_held(table));
@@ -358,10 +386,12 @@ fn still_held(
                     },
                 );
                 let at = row.value_span.unwrap_or(row.key_span);
-                check(at, Holds::Value, &|| match table.values.get(position) {
+                let value_fp = || match table.values.get(position) {
                     Some(EntryValue::Scalar(value)) => Some(fingerprint(value)),
                     _ => None,
-                });
+                };
+                check(at, Holds::Value, &value_fp);
+                check(at, Holds::RecordValue, &value_fp);
             }
         }
         for (index, span) in these {

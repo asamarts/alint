@@ -59,10 +59,19 @@ impl<'r> Run<'r> {
         };
         for row in 0..self.rows.rows.len() {
             let tuple: Vec<Scalar> = src_cols.iter().map(|col| col[row].clone()).collect();
-            if let Some(missing_idx) = tuple.iter().position(Scalar::is_null) {
-                if reference.skip_missing {
-                    continue;
-                }
+            // Explicit `Null` is NEVER skipped by `skip_missing: true`
+            // (ADR-0050 D1); check `Null` first before `Missing`.
+            let unresolved_idx = tuple
+                .iter()
+                .position(|v| matches!(v, Scalar::Null))
+                .or_else(|| {
+                    if reference.skip_missing {
+                        None
+                    } else {
+                        tuple.iter().position(Scalar::is_missing)
+                    }
+                });
+            if let Some(missing_idx) = unresolved_idx {
                 if self.at_finding_cap() {
                     self.suppress_findings(1, false);
                     continue;
@@ -83,7 +92,11 @@ impl<'r> Run<'r> {
                 for (val, &hide) in tuple.iter().zip(&hide_cols) {
                     key.value(val, hide);
                 }
-                let at = self.spot(row, missing_pos);
+                let at = if self.cell(row, missing_pos).span.is_some() {
+                    self.spot(row, missing_pos)
+                } else {
+                    self.row_spot(row)
+                };
                 let placeholder =
                     format_reference_placeholder(&tuple, &hide_cols, self.rule.hide_literals);
                 self.report_with_value(
@@ -94,6 +107,10 @@ impl<'r> Run<'r> {
                     Some(row),
                     Some(placeholder.as_str()),
                 );
+                continue;
+            }
+            if tuple.iter().any(Scalar::is_missing) {
+                // `skip_missing: true` with no explicit `Null`.
                 continue;
             }
             if !target_set.contains(&tuple) {
@@ -107,7 +124,11 @@ impl<'r> Run<'r> {
                 for (val, &hide) in tuple.iter().zip(&hide_cols) {
                     key.value(val, hide);
                 }
-                let at = self.spot(row, src_at[0]);
+                let at = src_at
+                    .iter()
+                    .copied()
+                    .find(|&pos| self.cell(row, pos).span.is_some())
+                    .map_or_else(|| self.row_spot(row), |pos| self.spot(row, pos));
                 let placeholder =
                     format_reference_placeholder(&tuple, &hide_cols, self.rule.hide_literals);
                 self.report_with_value(
@@ -155,6 +176,10 @@ impl<'r> Run<'r> {
         let mut col_kinds: Vec<BTreeMap<Kind, usize>> = vec![BTreeMap::new(); k];
         let mut set: HashSet<Vec<Scalar>> = HashSet::new();
         let limits = self.limits;
+        let tuple_overhead = std::mem::size_of::<Vec<Scalar>>()
+            .saturating_add(k.saturating_mul(std::mem::size_of::<Scalar>()))
+            .saturating_add(16);
+        let mut held_bytes = 0usize;
         for (row_idx, row) in target_rows.rows.iter().enumerate() {
             let mut tuple = Vec::with_capacity(k);
             let mut skip = false;
@@ -181,19 +206,22 @@ impl<'r> Run<'r> {
                 }
                 tuple.push(scalar);
             }
-            if !skip
-                && set.insert(tuple)
-                && let Err(limit) = limits.check(LimitKind::DistinctValues, set.len())
-            {
-                self.fail(
-                    None,
-                    format!(
-                        "`assert.reference.to`: reads `{}`: {limit}, so the assertion has no \
-                         verdict rather than one over part of the target set; narrow `{}`",
-                        reference.written, reference.written
-                    ),
-                );
-                return None;
+            if !skip && set.insert(tuple) {
+                held_bytes = held_bytes.saturating_add(tuple_overhead);
+                if let Err(limit) = limits
+                    .check(LimitKind::DistinctValues, set.len())
+                    .and_then(|()| self.may_hold(held_bytes))
+                {
+                    self.fail(
+                        None,
+                        format!(
+                            "`assert.reference.to`: reads `{}`: {limit}, so the assertion has no \
+                             verdict rather than one over part of the target set; narrow `{}`",
+                            reference.written, reference.written
+                        ),
+                    );
+                    return None;
+                }
             }
         }
         let mut resolved_kinds = Vec::with_capacity(k);

@@ -69,7 +69,11 @@ impl Evaluator<'_> {
                 .iter()
                 .map(|(name, field)| FieldInfo {
                     name: name.clone(),
-                    sensitive: field.sensitive,
+                    sensitive: field.sensitive
+                        || relation
+                            .field_sources(name)
+                            .into_iter()
+                            .any(|f| f.sensitive),
                 })
                 .collect(),
             ..RelationRows::default()
@@ -115,6 +119,18 @@ impl Evaluator<'_> {
             return ControlFlow::Continue(());
         };
         let part_fields = relation.part_fields(part);
+        debug_assert_eq!(
+            part_fields.len(),
+            out.fields.len(),
+            "union part field count must match canonical relation.fields"
+        );
+        debug_assert!(
+            part_fields
+                .iter()
+                .zip(&out.fields)
+                .all(|((name, _), info)| name == &info.name),
+            "union part field order must match canonical relation.fields"
+        );
         let bound: Vec<String> = bound_queries(part_fields);
         let rec_fields: Vec<String> = record_queries(part_fields);
         let reader = match PartReader::new(&part.reader, &rec_fields, &bound, &self.limits) {
@@ -526,7 +542,7 @@ impl PartReader {
                         return Err(format!(
                             "a `bound:` field reads a JSON, YAML or TOML document, but this \
                              part reads with `{}`; bind the field in a part that reads \
-                             `entries:` or `read:` with `json:`, `yaml:` or `toml:`",
+                             `entries:`, `records:`, or `read:` with `json:`, `yaml:` or `toml:`",
                             read_text(read)
                         ));
                     }
@@ -949,7 +965,7 @@ impl<'r> Rows<'r> {
 
     /// Fails when an `at:` path selected something other than an object
     /// (the adapter labels that row with the path).
-    fn at_selects_objects(&self, output: &AdapterOutput) -> Result<(), String> {
+    fn at_selects_objects(&self, output: &AdapterOutput, for_records: bool) -> Result<(), String> {
         if let Some((row, query)) = output.rows.iter().find_map(|row| {
             row.label
                 .as_deref()
@@ -963,6 +979,9 @@ impl<'r> Rows<'r> {
             let advice = if kind == entry_values::ARRAY_TABLE {
                 "the members of a table in an array of tables are not entries, so select a \
                  table outside one"
+            } else if for_records {
+                "`at:` selects objects, each of which becomes a row, so select objects (read an \
+                 array's or a scalar's values with `read:`)"
             } else {
                 "`at:` selects objects, whose members become rows, so select an object (read an \
                  array's or a scalar's values with `read:`)"
@@ -990,7 +1009,7 @@ impl<'r> Rows<'r> {
             BoundCells::SkipResource => return Ok(false),
             BoundCells::Cells(cells) => cells,
         };
-        self.at_selects_objects(output)?;
+        self.at_selects_objects(output, true)?;
         let mut by_rec_query: HashMap<(u32, &str), Vec<&Row>> = HashMap::new();
         for row in &output.rows {
             if let Some(query) = row
@@ -1106,7 +1125,7 @@ impl<'r> Rows<'r> {
             }
         };
         Ok(Cell {
-            span: self.value_span(row, &value),
+            span: self.record_value_span(row, &value),
             value: Some(value),
             at: Arc::clone(provenance),
             path: None,
@@ -1124,7 +1143,7 @@ impl<'r> Rows<'r> {
             BoundCells::SkipResource => return Ok(false),
             BoundCells::Cells(cells) => cells,
         };
-        self.at_selects_objects(output)?;
+        self.at_selects_objects(output, false)?;
         for row in output.rows.iter().filter(|row| row.label.is_none()) {
             self.take_row()?;
             let provenance = self.provenance(
@@ -1195,6 +1214,17 @@ impl<'r> Rows<'r> {
     fn value_span(&self, row: &Row, value: &Value) -> Option<Span> {
         let span = row.value_span.or(row.span)?;
         Some(Span::Bytes(BytesSpan::value(span, self.format?, value)))
+    }
+
+    /// Like [`Self::value_span`], tagged as a `records:` subfield so TOML span
+    /// verification descends arrays of tables / inline tables only when needed.
+    fn record_value_span(&self, row: &Row, value: &Value) -> Option<Span> {
+        let span = row.value_span.or(row.span)?;
+        Some(Span::Bytes(BytesSpan::record_value(
+            span,
+            self.format?,
+            value,
+        )))
     }
 
     /// The cell of an `entry.*` source for one entry row at `pointer`, its
@@ -1342,10 +1372,9 @@ impl<'r> Rows<'r> {
                 message,
             });
         }
-        let value_sensitive = self
-            .fields
-            .iter()
-            .any(|(name, field)| field.source == FieldSource::Value && self.sensitive(name));
+        let value_sensitive = self.fields.iter().any(|(name, field)| {
+            field.source == FieldSource::Value && (field.sensitive || self.sensitive(name))
+        });
         for note in &output.notes {
             let AdapterNote::NonLiteral { value } = note;
             let message = if value_sensitive {

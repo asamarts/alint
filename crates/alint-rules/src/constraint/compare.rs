@@ -36,8 +36,8 @@ impl<'r> Run<'r> {
         other_at: usize,
         other: &str,
     ) {
-        let field_sensitive = self.redact_all || self.sensitive(field_at);
-        let other_sensitive = self.redact_all || self.sensitive(other_at);
+        let pair_sensitive =
+            self.redact_all || self.sensitive(field_at) || self.sensitive(other_at);
         for row in 0..self.rows.rows.len() {
             let (Some(lhs), Some(rhs)) = (
                 self.scalar(row, field_at, "assert.compare.field"),
@@ -67,8 +67,8 @@ impl<'r> Run<'r> {
             let message = format!(
                 "`{}` is {} and `{other}` is {} in this row; expected `{}` {} `{other}`",
                 compare.field,
-                show_operand(&lhs, field_sensitive, typed),
-                show_operand(&rhs, other_sensitive, typed),
+                show_operand(&lhs, pair_sensitive, typed),
+                show_operand(&rhs, pair_sensitive, typed),
                 compare.field,
                 compare.op.symbol(),
             );
@@ -77,9 +77,9 @@ impl<'r> Run<'r> {
                 .row(self.own(row), self.hide_keys);
             let other_cell = self.cell(row, other_at);
             let label = format!("`{other}` in this row");
-            let other_place = Spot::Cell(other_cell, self.point(other_at));
+            let other_place = Spot::Cell(other_cell, pair_sensitive || self.point(other_at));
             let related = self.related_at(vec![(other_place, label.as_str())], 0);
-            let at = self.spot(row, field_at);
+            let at = self.spot_point(row, field_at, pair_sensitive);
             self.report(at, message, key, related, Some(row), None);
         }
     }
@@ -90,8 +90,7 @@ impl<'r> Run<'r> {
         field_at: usize,
         literal: &CompareLiteral,
     ) {
-        let field_sensitive = self.redact_all || self.sensitive(field_at);
-        let lit_hidden = field_sensitive || self.rule.hide_literals;
+        let hide = self.redact_all || self.sensitive(field_at) || self.rule.hide_literals;
         let rhs_scalar = match literal {
             CompareLiteral::Scalar(v) => {
                 Scalar::of_value(v).expect("builder validated scalar literal")
@@ -124,18 +123,19 @@ impl<'r> Run<'r> {
             let message = format!(
                 "`{}` is {} here; expected {} {}",
                 compare.field,
-                show_operand(&lhs, field_sensitive, typed),
+                show_operand(&lhs, hide, typed),
                 compare.op.symbol(),
-                show_operand(&rhs_scalar, lit_hidden, typed),
+                show_operand(&rhs_scalar, hide, typed),
             );
             let mut key = Key::new("compare");
             key.part(compare.op.key())
                 .row(self.own(row), self.hide_keys);
-            let at = self.spot(row, field_at);
+            let at = self.spot_point(row, field_at, hide);
             self.report(at, message, key, Related::empty(), Some(row), None);
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn compare_to_row(
         &mut self,
         compare: &CompareAssertion,
@@ -165,8 +165,9 @@ impl<'r> Run<'r> {
         let Some(expected) = self.scalar(source, field_at, "assert.compare.field") else {
             return;
         };
+        let hide = self.redact_all || self.sensitive(field_at) || self.rule.hide_literals;
         let source_cell = self.cell(source, field_at);
-        let source_at = self.spot(source, field_at);
+        let source_at = self.spot_point(source, field_at, hide);
         let source_shown = self.located_at(source_at);
         if expected.is_null() {
             let message = format!(
@@ -177,7 +178,37 @@ impl<'r> Run<'r> {
             self.fail(Some(source_cell.at.resource.path().as_path()), message);
             return;
         }
-        let sensitive = self.redact_all || self.sensitive(field_at);
+        // Validate the source row's operand type even on 1-row relations where
+        // the comparison loop below has zero non-source rows.
+        match compare.order {
+            CompareOrder::Exact => {}
+            CompareOrder::Lexical => {
+                if !matches!(expected, Scalar::String(_)) {
+                    let message = format!(
+                        "`assert.compare.to.row`: `{}` holds {} at {}, but `order: lexical` \
+                         compares strings",
+                        compare.field,
+                        type_of(source_cell),
+                        self.located(source_cell)
+                    );
+                    self.fail(Some(source_cell.at.resource.path().as_path()), message);
+                    return;
+                }
+            }
+            CompareOrder::Numeric => {
+                if parse_finite_number(&expected).is_none() {
+                    let message = format!(
+                        "`assert.compare.to.row`: `{}` holds {} at {}, but `order: numeric` \
+                         compares finite numbers",
+                        compare.field,
+                        type_of(source_cell),
+                        self.located(source_cell)
+                    );
+                    self.fail(Some(source_cell.at.resource.path().as_path()), message);
+                    return;
+                }
+            }
+        }
         for row in 0..self.rows.rows.len() {
             if row == source {
                 continue;
@@ -208,15 +239,15 @@ impl<'r> Run<'r> {
                 "`{}` is {} here; expected {} {} (from the source row {source_desc}, at \
                  {source_shown})",
                 compare.field,
-                show_operand(&lhs, sensitive, typed),
+                show_operand(&lhs, hide, typed),
                 compare.op.symbol(),
-                show_operand(&expected, sensitive, typed),
+                show_operand(&expected, hide, typed),
             );
             let mut key = Key::new("compare");
             key.part(compare.op.key())
                 .row(self.own(row), self.hide_keys);
             let related = self.related_at(vec![(source_at, "the source row")], 0);
-            let at = self.spot(row, field_at);
+            let at = self.spot_point(row, field_at, hide);
             self.report(at, message, key, related, Some(row), None);
         }
     }
@@ -341,11 +372,47 @@ impl<'r> Run<'r> {
     }
 }
 
+/// Parse a JSON/YAML/TOML numeric lexeme into a finite `f64`, supporting TOML
+/// underscore separators (`1_000`, `1_000.5`) and TOML/YAML radix integers
+/// (`0x10`, `0o755`, `0b1010`), while rejecting non-finite values (`inf`, `NaN`).
 fn parse_finite_number(scalar: &Scalar) -> Option<f64> {
     let Scalar::Number(lexeme) = scalar else {
         return None;
     };
-    let parsed: f64 = lexeme.parse().ok()?;
+    let clean: std::borrow::Cow<'_, str> = if lexeme.contains('_') {
+        std::borrow::Cow::Owned(lexeme.replace('_', ""))
+    } else {
+        std::borrow::Cow::Borrowed(lexeme.as_ref())
+    };
+    let (negative, rest) = match clean.as_bytes().first() {
+        Some(b'-') => (true, &clean[1..]),
+        Some(b'+') => (false, &clean[1..]),
+        _ => (false, clean.as_ref()),
+    };
+    if let Some((radix, digits)) = rest
+        .strip_prefix("0x")
+        .or_else(|| rest.strip_prefix("0X"))
+        .map(|d| (16, d))
+        .or_else(|| {
+            rest.strip_prefix("0o")
+                .or_else(|| rest.strip_prefix("0O"))
+                .map(|d| (8, d))
+        })
+        .or_else(|| {
+            rest.strip_prefix("0b")
+                .or_else(|| rest.strip_prefix("0B"))
+                .map(|d| (2, d))
+        })
+    {
+        let unsigned = u128::from_str_radix(digits, radix).ok()?;
+        #[allow(clippy::cast_precision_loss)]
+        let mut value = unsigned as f64;
+        if negative {
+            value = -value;
+        }
+        return value.is_finite().then_some(value);
+    }
+    let parsed: f64 = clean.parse().ok()?;
     parsed.is_finite().then_some(parsed)
 }
 

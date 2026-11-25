@@ -1,24 +1,37 @@
 //! `constraint`: an assertion over the rows of a relation (design
-//! `v0.23/selectors-and-constraints.md` section 6, ADR-0034). A version 2
-//! kind, experimental as version 2 is: a config of `version: 1` cannot use
-//! it, and it cannot be nested under a `for_each_*` kind's `require:`.
+//! `v0.23/selectors-and-constraints.md` section 6, ADR-0034, ADR-0050). A
+//! version 2 kind, experimental as version 2 is: a config of `version: 1`
+//! cannot use it, and it cannot be nested under a `for_each_*` kind's
+//! `require:`.
 //!
 //! It takes one relation as `input:` (a name, or an inline relation, which
 //! the loader plans as a named one) and one assertion:
 //!
 //! - **`equal`:** rows agree on `field:` within each group (`group_by:`,
-//!   optional), with one named source row (`to: { row: { F: literal } }`), or
-//!   with another field of the same row (`to: { field: G }`);
+//!   optional, single or composite), with one named source row
+//!   (`to: { row: { F: literal } }`), or with another field of the same row
+//!   (`to: { field: G }`);
 //! - **`unique`:** no two rows share `key:`; with `determines:`, rows that
 //!   share `key:` agree on the determined fields;
-//! - **`set`:** the set of `field:`'s values in each group (`group_by:`, or
-//!   the relation as one group) is equal to, a subset of or disjoint from
-//!   another set: a reference group of the same relation (`{ group: literal
-//!   }`), or every value of another relation's field (`{ relation: R, field:
-//!   F }`). The groups are every value of `group_by:`, every resource the
-//!   relation reads when it groups by `path` or a path token, and every
+//! - **`set`:** the set of `field:`'s values in each group (`group_by:`, single
+//!   or composite, or the relation as one group) is equal to, a subset of or
+//!   disjoint from another set: a reference group of the same relation
+//!   (`{ group: literal | [...] }`), inline literals (`{ values: [...] }`), or
+//!   another relation's field (`{ relation: R, field: F, group_by?: ...,
+//!   all_target_groups?: bool }`). The groups are every value of `group_by:`,
+//!   every resource the relation reads when it groups by path tokens,
+//!   surviving single-root stub rows under `entry.root` (#598), and every
 //!   literal of `groups:`; `plurals: cldr` collapses CLDR plural groups of
-//!   an `entry.path` field against a reference group, as `key_parity` does.
+//!   an `entry.path` field against a reference group, as `key_parity` does;
+//! - **`reference`:** single-key (`field:`) or composite-key (`fields:`)
+//!   foreign-key check against `to: { relation: R, field | fields }` with
+//!   optional `skip_missing: true` (default `false`);
+//! - **`count`:** row or distinct-value (`distinct: true` + `field:`) count
+//!   bounds (`min`, `max`, `exact`, optional `group_by:` and `groups:`), with
+//!   per-row findings for emptiness checks (`max: 0` / `exact: 0`);
+//! - **`compare`:** pairwise row comparison (`eq`, `ne`, `lt`, `le`, `gt`,
+//!   `ge`) under `exact`, `lexical`, or `numeric` ordering against
+//!   `to: { field | value | row }`, failing loud on `Null`/`Missing`.
 //!
 //! Under `--changed`, the rule runs when a changed path is one the
 //! selectors of its relations read, followed through joins and membership
@@ -269,13 +282,41 @@ impl<'r> CounterpartIndex<'r> {
     }
 }
 
+/// Error returned when a `split` transform with `required: true` is out of
+/// range on a zero-row resource while computing path-token `resource_groups`.
+pub(super) struct SplitRequiredError<'a> {
+    pub(super) on: &'a str,
+    pub(super) part: i64,
+}
+
 impl ResourceGroups {
-    fn group_of(&self, resource: &Resource) -> Option<String> {
+    fn group_of(
+        &self,
+        resource: &Resource,
+    ) -> std::result::Result<Option<String>, SplitRequiredError<'_>> {
         let mut text = Some(eval::path_token(resource, self.token));
         for transform in &self.transforms {
-            text = text.and_then(|value| transform.apply_optional(&value));
+            let Some(current) = text else {
+                return Ok(None);
+            };
+            if let Some(next) = transform.apply_optional(&current) {
+                text = Some(next);
+            } else {
+                if let StringTransform::Split {
+                    on,
+                    part,
+                    required: true,
+                } = transform
+                {
+                    return Err(SplitRequiredError {
+                        on: on.as_str(),
+                        part: *part,
+                    });
+                }
+                text = None;
+            }
         }
-        text
+        Ok(text)
     }
 
     /// Build an `O(1)` lookup index of unique structural path-component

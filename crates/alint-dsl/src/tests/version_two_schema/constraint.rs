@@ -115,26 +115,39 @@ fn sweep() -> Vec<(&'static str, String)> {
     cases
 }
 
-/// The family keys, each left out, written or null.
+/// The family keys, each left out, written or null (sweeping all 6 families
+/// for pairwise mutual exclusion and null-key refusal).
 fn families(cases: &mut Vec<(&'static str, String)>) {
-    let family = [None, Some("~")];
-    for equal in family.iter().copied().chain([Some("{ field: range }")]) {
-        for unique in family
-            .iter()
-            .copied()
-            .chain([Some("{ key: [dependency] }")])
-        {
-            for set in family.iter().copied().chain([Some(
-                "{ field: dependency, subset_of: { relation: names, field: name } }",
-            )]) {
-                cases.push((
-                    "deps",
-                    flow([
-                        entry("equal", equal),
-                        entry("unique", unique),
-                        entry("set", set),
-                    ]),
-                ));
+    let entries: [(&str, &str); 6] = [
+        ("equal", "{ field: range }"),
+        ("unique", "{ key: [dependency] }"),
+        (
+            "set",
+            "{ field: dependency, subset_of: { relation: names, field: name } }",
+        ),
+        (
+            "reference",
+            "{ field: dependency, to: { relation: names, field: name } }",
+        ),
+        ("count", "{ min: 1 }"),
+        ("compare", "{ field: range, op: ne, to: { field: at } }"),
+    ];
+    // Empty `assert: {}`, single valid, single null.
+    cases.push(("deps", "{}".to_string()));
+    for (name, body) in entries {
+        cases.push(("deps", format!("{{ {name}: {body} }}")));
+        cases.push(("deps", format!("{{ {name}: ~ }}")));
+    }
+    // Every pair of families (valid+valid, valid+null, null+valid, null+null).
+    for (i, (a_name, a_body)) in entries.iter().enumerate() {
+        for (b_name, b_body) in &entries[i + 1..] {
+            for a_val in [a_body, &"~"] {
+                for b_val in [b_body, &"~"] {
+                    cases.push((
+                        "deps",
+                        format!("{{ {a_name}: {a_val}, {b_name}: {b_val} }}"),
+                    ));
+                }
             }
         }
     }
@@ -210,6 +223,7 @@ fn set(cases: &mut Vec<(&'static str, String)>) {
         "{ group: en }",
         "{ group: [en, core] }",
         "{ values: [a, b] }",
+        "{ values: [a, true] }",
         "{ values: [] }",
         "{ values: ~ }",
         "{ relation: names, field: name }",
@@ -643,6 +657,22 @@ fn builder_only() -> Vec<(&'static str, &'static str, &'static str)> {
             "keys",
             "{ set: { field: name, group_by: locale, equal_to: { group: en }, plurals: cldr } }",
         ),
+        (
+            "`count` with `min > max`",
+            "deps",
+            "{ count: { min: 3, max: 1 } }",
+        ),
+        (
+            "`reference` source/target arity mismatch",
+            "deps",
+            "{ reference: { fields: [dependency, at], to: { relation: names, field: name } } }",
+        ),
+        (
+            "per-group `set` source/target `group_by` arity mismatch",
+            "keys",
+            "{ set: { field: key, group_by: [locale, name], subset_of: { relation: deps, field: \
+             dependency, group_by: at } } }",
+        ),
     ]
 }
 
@@ -680,6 +710,10 @@ fn every_constraint_the_policies_and_fixtures_write_validates() {
         ("deps", "{ equal: { field: range, group_by: dependency } }"),
         (
             "deps",
+            "{ equal: { field: range, group_by: [dependency, at] } }",
+        ),
+        (
+            "deps",
             "{ equal: { field: range, to: { row: { dependency: react, at: x } } } }",
         ),
         ("deps", "{ equal: { field: range, to: { field: at } } }"),
@@ -690,7 +724,50 @@ fn every_constraint_the_policies_and_fixtures_write_validates() {
         ),
         (
             "keys",
+            "{ set: { field: key, group_by: [locale, name], equal_to: { group: [en, core] }, \
+             groups: [[fr, core]] } }",
+        ),
+        (
+            "keys",
+            "{ set: { field: key, group_by: locale, equal_to: { relation: deps, field: \
+             dependency, group_by: at, all_target_groups: true } } }",
+        ),
+        (
+            "keys",
+            "{ set: { field: key, subset_of: { values: [a, b] } } }",
+        ),
+        (
+            "keys",
             "{ set: { field: key, disjoint_from: { relation: names, field: name } } }",
+        ),
+        (
+            "deps",
+            "{ reference: { field: dependency, to: { relation: names, field: name }, \
+             skip_missing: true } }",
+        ),
+        (
+            "deps",
+            "{ reference: { fields: [dependency, at], to: { relation: deps, fields: [dependency, \
+             at] } } }",
+        ),
+        (
+            "deps",
+            "{ count: { group_by: [at, dependency], distinct: true, field: range, min: 1, max: 3, \
+             groups: [[a, react]] } }",
+        ),
+        ("deps", "{ count: { max: 0 } }"),
+        (
+            "deps",
+            "{ compare: { field: range, op: ne, to: { field: at } } }",
+        ),
+        (
+            "deps",
+            "{ compare: { field: range, op: ge, order: numeric, to: { value: 18 } } }",
+        ),
+        (
+            "deps",
+            "{ compare: { field: range, op: lt, order: lexical, to: { row: { dependency: react } \
+             } } }",
         ),
         (
             "{ from: { paths: x.json }, read: { json: $.v }, fields: { v: value } }",

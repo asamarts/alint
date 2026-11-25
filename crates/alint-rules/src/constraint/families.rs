@@ -34,6 +34,7 @@ mod set;
 const LISTED_VALUES: usize = 5;
 
 /// One evaluation of a rule's assertion over its relation's rows.
+#[allow(clippy::struct_excessive_bools)]
 pub(super) struct Run<'r> {
     rule: &'r ConstraintRule,
     rows: &'r RelationRows,
@@ -49,6 +50,11 @@ pub(super) struct Run<'r> {
     /// redaction for `{{value}}`, `{{row.FIELD}}`, and generated messages even
     /// when `Rule::evaluate` runs outside the engine's outer spec gate (#594).
     redact_all: bool,
+    /// Hide span lengths (point-only spans) on every cell: set whenever
+    /// `hide_keys`, rule-level `sensitive: true`, or env-derived assertion
+    /// literals (`hide_literals`) apply, so SARIF/JSON/LSP ranges never leak
+    /// secret byte lengths.
+    hide_spans: bool,
     /// Number of pre-existing findings (e.g. `Skipped::NonString` from relation
     /// reads) that already count toward [`LimitKind::FindingsPerRule`].
     earlier_findings: usize,
@@ -145,6 +151,7 @@ impl<'r> Run<'r> {
                 .iter()
                 .any(|&id| alint_core::relation::eval::keys_sensitive(&rule.plan, id));
         let redact_all = rule.explicit_sensitive || reads_environment;
+        let hide_spans = hide_keys || redact_all || rule.hide_literals;
         let limits = ctx
             .index
             .decode_cache()
@@ -156,6 +163,7 @@ impl<'r> Run<'r> {
             places: Places::new(ctx),
             hide_keys,
             redact_all,
+            hide_spans,
             earlier_findings,
             findings: Vec::new(),
             suppressed_findings: 0,
@@ -276,7 +284,11 @@ impl<'r> Run<'r> {
     /// Whether a place at a cell of the field at `position` shows only its
     /// start ([`point`]).
     fn point(&self, position: usize) -> bool {
-        point(self.rows, position, self.hide_keys)
+        point(self.rows, position, self.hide_spans)
+    }
+
+    fn may_hold(&self, bytes: usize) -> Result<(), alint_core::relation::LimitExceeded> {
+        self.places.may_hold(bytes)
     }
 
     fn name(&self, position: usize) -> &str {
@@ -299,7 +311,87 @@ impl<'r> Run<'r> {
     /// Where a finding about row `row`'s field at `position` sits
     /// ([`spot_in`]).
     fn spot(&self, row: usize, position: usize) -> Spot<'r> {
-        spot_in(self.rows, row, position, self.hide_keys)
+        spot_in(self.rows, row, position, self.hide_spans)
+    }
+
+    /// Like [`Self::spot`], additionally forcing a point-only span when
+    /// `force_point` is true (for example when paired with a sensitive sibling
+    /// field in `compare` / `equal`).
+    fn spot_point(&self, row: usize, position: usize, force_point: bool) -> Spot<'r> {
+        spot_in(self.rows, row, position, self.hide_spans || force_point)
+    }
+
+    /// Where a row-level finding with no specific field sits: the row's first
+    /// own cell carrying a span (skipping spanless `PathToken` cells), falling
+    /// back to the first own cell or the row's resource.
+    fn row_spot(&self, row: usize) -> Spot<'r> {
+        let own = &self.rows.rows[row].at;
+        let is_own = |cell: &Cell| Arc::ptr_eq(&cell.at, own) || cell.at == *own;
+        let cells = &self.rows.rows[row].cells;
+        cells
+            .iter()
+            .position(|cell| is_own(cell) && cell.span.is_some())
+            .or_else(|| cells.iter().position(is_own))
+            .map_or(Spot::Row(own), |pos| {
+                Spot::Cell(&cells[pos], point(self.rows, pos, self.hide_spans))
+            })
+    }
+
+    /// Verify that across `tuples` (e.g. `groups:` literals), every column
+    /// uses one uniform scalar type even when the input relation has 0 rows.
+    fn check_uniform_literal_tuples(&mut self, tuples: &[Vec<Value>], option: &str) -> bool {
+        let Some(first) = tuples.first() else {
+            return true;
+        };
+        for col in 0..first.len() {
+            let mut seen: Option<(Kind, usize, Scalar)> = None;
+            for (idx, tuple) in tuples.iter().enumerate() {
+                let scalar =
+                    Scalar::of_value(&tuple[col]).expect("the builder takes scalar literals");
+                let Some(kind) = scalar.kind() else {
+                    continue;
+                };
+                match &seen {
+                    Some((prev_kind, prev_idx, prev_scalar)) if *prev_kind != kind => {
+                        self.fail(
+                            None,
+                            format!(
+                                "`{option}`: item {prev_idx} is {} and item {idx} is {}; group \
+                                 literals in one column must share one type",
+                                literal_type(prev_scalar),
+                                literal_type(&scalar)
+                            ),
+                        );
+                        return false;
+                    }
+                    None => seen = Some((kind, idx, scalar)),
+                    _ => {}
+                }
+            }
+        }
+        true
+    }
+
+    /// Report a `split { required: true }` failure encountered while computing
+    /// path-token `resource_groups` for an empty kept resource.
+    fn fail_required_split(
+        &mut self,
+        path: &Path,
+        pos: usize,
+        err: &super::SplitRequiredError<'_>,
+    ) {
+        let field = self.name(pos);
+        let detail = if self.redact_all || self.sensitive(pos) {
+            format!("`transform.{field}`: required `split` part is out of range")
+        } else {
+            format!(
+                "`transform.{field}`: `split` on \"{}\" part {} is out of range; set `required: \
+                 false` to emit a missing cell instead",
+                escaped(err.on),
+                err.part
+            )
+        };
+        self.fail(Some(path), detail);
     }
 
     /// Where `spot` is, as a message names it.
@@ -650,7 +742,7 @@ impl<'r> Run<'r> {
                 format!(
                     "`{}` {}",
                     self.name(position),
-                    value.show(self.sensitive(position))
+                    value.show(self.redact_all || self.sensitive(position))
                 )
             })
             .collect::<Vec<_>>()
@@ -664,7 +756,7 @@ impl<'r> Run<'r> {
             .iter()
             .zip(values)
             .map(|(&position, value)| {
-                let sensitive = self.sensitive(position);
+                let sensitive = self.redact_all || self.sensitive(position);
                 if typed {
                     value.show_typed(sensitive)
                 } else {
@@ -730,7 +822,7 @@ impl<'r> Run<'r> {
                 let subject = format!("rows with {}", self.describe(&key_at, value));
                 let mut base = Key::new("unique");
                 for (&position, part) in key_at.iter().zip(value) {
-                    base.value(part, self.sensitive(position));
+                    base.value(part, self.redact_all || self.sensitive(position));
                 }
                 self.disagreements(
                     members,
@@ -756,7 +848,7 @@ impl<'r> Run<'r> {
         let first_shown = self.located_at(first);
         let mut key = Key::new("unique");
         for (&position, part) in key_at.iter().zip(value) {
-            key.value(part, self.sensitive(position));
+            key.value(part, self.redact_all || self.sensitive(position));
         }
         for (offset, &row) in members[1..].iter().enumerate() {
             if self.at_finding_cap() {
@@ -803,7 +895,7 @@ impl<'r> Run<'r> {
             let subject = format!("rows with {}", self.describe(&group_at, value));
             let mut base = Key::new("equal");
             for (&position, part) in group_at.iter().zip(value) {
-                base.value(part, self.sensitive(position));
+                base.value(part, self.redact_all || self.sensitive(position));
             }
             self.disagreements(members, &[field_at], &subject, &base, "assert.equal.field");
         }
@@ -925,7 +1017,7 @@ impl<'r> Run<'r> {
             }
             let mut key = base.clone();
             for (&position, part) in fields.iter().zip(value) {
-                key.value(part, self.sensitive(position));
+                key.value(part, self.redact_all || self.sensitive(position));
             }
             self.report(at, message, key, related, Some(holders[0]), None);
         }
@@ -949,7 +1041,7 @@ impl<'r> Run<'r> {
         let positions: Vec<usize> = wanted.iter().map(|(position, _)| *position).collect();
         let literal_values: Vec<Scalar> =
             wanted.iter().map(|(_, literal)| literal.clone()).collect();
-        let source_desc = if self.rule.hide_literals {
+        let source_desc = if self.redact_all || self.rule.hide_literals {
             "the literals `to.row` names".to_string()
         } else {
             self.describe(&positions, &literal_values)
@@ -973,7 +1065,7 @@ impl<'r> Run<'r> {
             self.fail(Some(source_cell.at.resource.path().as_path()), message);
             return;
         }
-        let sensitive = self.sensitive(field_at);
+        let sensitive = self.redact_all || self.sensitive(field_at);
         for row in 0..self.rows.rows.len() {
             if row == source {
                 continue;
@@ -1109,10 +1201,12 @@ impl<'r> Run<'r> {
                     scalar.show(sensitive)
                 }
             };
+            let pair_sensitive =
+                self.redact_all || self.sensitive(field_at) || self.sensitive(other_at);
             let mut message = format!(
                 "`{field}` is {} and `{other}` is {} in this row",
-                shown(&value, self.sensitive(field_at)),
-                shown(&theirs, self.sensitive(other_at)),
+                shown(&value, pair_sensitive),
+                shown(&theirs, pair_sensitive),
             );
             for (scalar, position) in [(&value, field_at), (&theirs, other_at)] {
                 if scalar.is_missing() {
@@ -1126,9 +1220,9 @@ impl<'r> Run<'r> {
             let mut key = Key::new("equal");
             key.part("row").row(self.own(row), self.hide_keys);
             let label = format!("`{other}` in this row");
-            let other_place = Spot::Cell(other_cell, self.point(other_at));
+            let other_place = Spot::Cell(other_cell, pair_sensitive || self.point(other_at));
             let related = self.related_at(vec![(other_place, label.as_str())], 0);
-            let at = self.spot(row, field_at);
+            let at = self.spot_point(row, field_at, pair_sensitive);
             self.report(at, message, key, related, Some(row), None);
         }
     }

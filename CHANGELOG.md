@@ -95,10 +95,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reference file (for example `locales/fr/errors.json` for a key from `locales/en/errors.json`),
   falling back to the group's first file on ambiguity, missing counterparts, or cross-relation
   targets while keeping baseline keys path-free (#595).
-- `constraint` `set` rules grouped by `entry.root` under `strip-root` now form zero-row groups
-  anchored at single-root stub files (`fr:`, `fr: {}`, `fr: []`) that survive `entry.root`,
-  path-token, and `bound:` transforms and `where:` filters, both with and without `groups:`, while
-  multi-root stub files remain analysis failures (#598).
+- `constraint` `set` and `count` rules grouped by `entry.root` under `strip-root` now form
+  zero-row groups anchored at single-root stub files (`fr:`, `fr: {}`, `fr: []`) that survive
+  `entry.root`, path-token, and `bound:` transforms and `where:` filters, both with and without
+  `groups:`, while multi-root stub files remain analysis failures (#598).
 - Added `ci/scripts/check-v2-schema-id.sh` (with hermetic regression suite
   `ci/scripts/test-check-v2-schema-id.sh`), wired into `ci/scripts/preflight.sh`,
   `ci/scripts/docs.sh`, `.github/workflows/release.yml` (`--release "$GITHUB_REF_NAME"`), and

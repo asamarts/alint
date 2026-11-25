@@ -1240,25 +1240,49 @@ fn close_compared_sensitivity(plan: &mut Plan, order: &[RelationId], compared: &
                 continue;
             };
             if relation.uses_part_fields() {
-                if !field.sensitive {
-                    let rel = &mut plan.relations[edge.input.0].relation;
-                    for (name, held) in &mut rel.fields {
-                        if name == &edge.field {
-                            held.sensitive = true;
+                // Propagate sensitivity to every field sharing the same source
+                // `Family` within any union part (even when `edge.field` was
+                // already marked sensitive), then synchronize across all parts
+                // and canonical `relation.fields`.
+                let mut tainted: std::collections::HashSet<String> =
+                    std::collections::HashSet::new();
+                tainted.insert(edge.field.clone());
+                if let plan::Rows::Union(parts) = &relation.rows {
+                    for part in parts {
+                        let Some(part_fields) = &part.fields else {
+                            continue;
+                        };
+                        let Some((_, src_field)) =
+                            part_fields.iter().find(|(name, _)| name == &edge.field)
+                        else {
+                            continue;
+                        };
+                        let family = Family::of(&src_field.source, None);
+                        for (name, held) in part_fields {
+                            if Family::of(&held.source, None) == family {
+                                tainted.insert(name.clone());
+                            }
                         }
                     }
-                    if let plan::Rows::Union(parts) = &mut rel.rows {
-                        for part in parts {
-                            if let Some(fields) = &mut part.fields {
-                                for (name, held) in fields {
-                                    if name == &edge.field {
-                                        held.sensitive = true;
-                                    }
+                }
+                let rel = &mut plan.relations[edge.input.0].relation;
+                for (name, held) in &mut rel.fields {
+                    if tainted.contains(name) && !held.sensitive {
+                        held.sensitive = true;
+                        changed = true;
+                    }
+                }
+                if let plan::Rows::Union(parts) = &mut rel.rows {
+                    for part in parts {
+                        if let Some(fields) = &mut part.fields {
+                            for (name, held) in fields {
+                                if tainted.contains(name) && !held.sensitive {
+                                    held.sensitive = true;
+                                    changed = true;
                                 }
                             }
                         }
                     }
-                    changed = true;
                 }
                 continue;
             }
@@ -1569,8 +1593,9 @@ impl Resolved<'_> {
                 )?);
             }
         }
-        // Cross-relation sensitivity propagation for `set` (both `field` and
-        // per-group `group_by[j]`) and `reference` (`fields[j]`).
+        // Bidirectional sensitivity propagation for `set` (both `field` and
+        // per-group `group_by[j]`), `reference` (`fields[j]`), `compare`
+        // (`field` <-> `to.field`), and `equal` (`field` <-> `to.field`).
         let input = references
             .iter()
             .find(|reference| reference.field == "input");
@@ -1585,6 +1610,23 @@ impl Resolved<'_> {
             }
         };
         if let Some(input) = input {
+            let mut push_pair = |left_rel: RelationId,
+                                 left_field: &str,
+                                 right_rel: RelationId,
+                                 right_field: &str| {
+                self.compared.push(Compared {
+                    input: left_rel,
+                    field: left_field.to_string(),
+                    other: right_rel,
+                    other_field: right_field.to_string(),
+                });
+                self.compared.push(Compared {
+                    input: right_rel,
+                    field: right_field.to_string(),
+                    other: left_rel,
+                    other_field: left_field.to_string(),
+                });
+            };
             if let Some(set) = rule.get("assert").and_then(|assert| assert.get("set")) {
                 let compared = set.get("field").and_then(ayaml::Value::as_str);
                 let input_groups = name_list(set.get("group_by"));
@@ -1602,21 +1644,16 @@ impl Resolved<'_> {
                     if let (Some(compared), Some(other_field)) =
                         (compared, target.get("field").and_then(ayaml::Value::as_str))
                     {
-                        self.compared.push(Compared {
-                            input: input.relation.id,
-                            field: compared.to_string(),
-                            other: reference.relation.id,
-                            other_field: other_field.to_string(),
-                        });
+                        push_pair(
+                            input.relation.id,
+                            compared,
+                            reference.relation.id,
+                            other_field,
+                        );
                     }
                     let target_groups = name_list(target.get("group_by"));
                     for (in_g, out_g) in input_groups.iter().zip(&target_groups) {
-                        self.compared.push(Compared {
-                            input: input.relation.id,
-                            field: in_g.clone(),
-                            other: reference.relation.id,
-                            other_field: out_g.clone(),
-                        });
+                        push_pair(input.relation.id, in_g, reference.relation.id, out_g);
                     }
                 }
             }
@@ -1645,12 +1682,18 @@ impl Resolved<'_> {
                     }
                 };
                 for (src_f, dst_f) in src_fields.iter().zip(&dst_fields) {
-                    self.compared.push(Compared {
-                        input: input.relation.id,
-                        field: src_f.clone(),
-                        other: target_ref.relation.id,
-                        other_field: dst_f.clone(),
-                    });
+                    push_pair(input.relation.id, src_f, target_ref.relation.id, dst_f);
+                }
+            }
+            for family in ["compare", "equal"] {
+                if let Some(assert_map) = rule.get("assert").and_then(|assert| assert.get(family))
+                    && let Some(field) = assert_map.get("field").and_then(ayaml::Value::as_str)
+                    && let Some(other) = assert_map
+                        .get("to")
+                        .and_then(|to| to.get("field"))
+                        .and_then(ayaml::Value::as_str)
+                {
+                    push_pair(input.relation.id, field, input.relation.id, other);
                 }
             }
         }

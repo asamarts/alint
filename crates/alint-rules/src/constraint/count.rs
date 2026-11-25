@@ -59,6 +59,8 @@ impl<'r> Run<'r> {
             self.count_empty(&groups, field_at, distinct_values.as_deref());
             return;
         }
+        let mut total_distinct = 0usize;
+        let mut distinct_bytes = 0usize;
         for group in &groups {
             self.count_aggregate(
                 count,
@@ -66,6 +68,8 @@ impl<'r> Run<'r> {
                 group,
                 field_at,
                 distinct_values.as_deref(),
+                &mut total_distinct,
+                &mut distinct_bytes,
             );
             if !self.failures.is_empty() {
                 return;
@@ -97,6 +101,9 @@ impl<'r> Run<'r> {
             }]);
         }
         let (grouped, group_cols) = self.groups_by_fields(group_at, "assert.count.group_by")?;
+        if !self.check_uniform_literal_tuples(&count.groups, "assert.count.groups") {
+            return None;
+        }
         for (index, tuple) in count.groups.iter().enumerate() {
             if !self.check_group_tuple_types(
                 tuple,
@@ -124,15 +131,24 @@ impl<'r> Run<'r> {
         }
         if !count.resource_groups.is_empty() {
             for resource in resources {
-                let Some(tuple) = count
-                    .resource_groups
-                    .iter()
-                    .map(|rg| rg.group_of(resource).map(|s| Scalar::String(s.into())))
-                    .collect::<Option<Vec<_>>>()
-                else {
-                    continue;
-                };
-                add_count_resource(&mut out, &mut index, tuple, resource.path());
+                let mut tuple = Vec::with_capacity(count.resource_groups.len());
+                let mut skipped = false;
+                for (j, rg) in count.resource_groups.iter().enumerate() {
+                    match rg.group_of(resource) {
+                        Ok(Some(s)) => tuple.push(Scalar::String(s.into())),
+                        Ok(None) => {
+                            skipped = true;
+                            break;
+                        }
+                        Err(err) => {
+                            self.fail_required_split(resource.path().as_path(), group_at[j], &err);
+                            return None;
+                        }
+                    }
+                }
+                if !skipped {
+                    add_count_resource(&mut out, &mut index, tuple, resource.path());
+                }
             }
         }
         if count.stub_root_groups {
@@ -162,6 +178,7 @@ impl<'r> Run<'r> {
                 });
             }
         }
+        out.sort_by(|a, b| a.value.cmp(&b.value));
         Some(out)
     }
 
@@ -182,8 +199,7 @@ impl<'r> Run<'r> {
                     self.suppress_findings(1, false);
                     continue;
                 }
-                let anchor = field_at.unwrap_or(0);
-                let at = self.spot(row, anchor);
+                let at = field_at.map_or_else(|| self.row_spot(row), |pos| self.spot(row, pos));
                 let message = match field_at {
                     Some(pos) => format!(
                         "expected no values of `{}`, but found {} here",
@@ -203,7 +219,7 @@ impl<'r> Run<'r> {
         }
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
     fn count_aggregate(
         &mut self,
         count: &CountAssertion,
@@ -211,22 +227,30 @@ impl<'r> Run<'r> {
         group: &CountGroup<'r>,
         field_at: Option<usize>,
         distinct_values: Option<&[Scalar]>,
+        total_distinct: &mut usize,
+        distinct_bytes: &mut usize,
     ) {
-        let (actual, sample_rows, sample_values) = if let (Some(pos), Some(values)) =
-            (field_at, distinct_values)
-        {
-            let mut seen: HashMap<&Scalar, usize> = HashMap::new();
-            let mut order: Vec<(usize, &Scalar)> = Vec::new();
-            for &row in &group.rows {
-                let value = &values[row];
-                if value.is_null() {
-                    continue;
-                }
-                if !seen.contains_key(value) {
-                    seen.insert(value, row);
-                    order.push((row, value));
-                    if let Err(limit) = self.limits.check(LimitKind::DistinctValues, seen.len()) {
-                        self.fail(
+        let (actual, sample_rows, sample_values) =
+            if let (Some(pos), Some(values)) = (field_at, distinct_values) {
+                let mut seen: HashMap<&Scalar, usize> = HashMap::new();
+                let mut order: Vec<(usize, &Scalar)> = Vec::new();
+                let entry_overhead = std::mem::size_of::<(&Scalar, usize)>().saturating_add(16);
+                for &row in &group.rows {
+                    let value = &values[row];
+                    if value.is_null() {
+                        continue;
+                    }
+                    if !seen.contains_key(value) {
+                        seen.insert(value, row);
+                        order.push((row, value));
+                        *total_distinct = total_distinct.saturating_add(1);
+                        *distinct_bytes = distinct_bytes.saturating_add(entry_overhead);
+                        if let Err(limit) = self
+                            .limits
+                            .check(LimitKind::DistinctValues, *total_distinct)
+                            .and_then(|()| self.may_hold(*distinct_bytes))
+                        {
+                            self.fail(
                             None,
                             format!(
                                 "`assert.count.distinct`: `{}`: {limit}, so the assertion has no \
@@ -234,33 +258,41 @@ impl<'r> Run<'r> {
                                 self.name(pos)
                             ),
                         );
-                        return;
+                            return;
+                        }
                     }
                 }
+                let sample_rows: Vec<usize> = order.iter().map(|(row, _)| *row).collect();
+                let sample_vals: Vec<Scalar> = order
+                    .iter()
+                    .take(LISTED_VALUES)
+                    .map(|(_, v)| (*v).clone())
+                    .collect();
+                (order.len() as u64, sample_rows, sample_vals)
+            } else {
+                (group.rows.len() as u64, group.rows.clone(), Vec::new())
+            };
+        let hide_bound = self.redact_all || self.rule.hide_literals;
+        let show_bound = |n: u64| {
+            if hide_bound {
+                "<redacted>".to_string()
+            } else {
+                n.to_string()
             }
-            let sample_rows: Vec<usize> = order.iter().map(|(row, _)| *row).collect();
-            let sample_vals: Vec<Scalar> = order
-                .iter()
-                .take(LISTED_VALUES)
-                .map(|(_, v)| (*v).clone())
-                .collect();
-            (order.len() as u64, sample_rows, sample_vals)
-        } else {
-            (group.rows.len() as u64, group.rows.clone(), Vec::new())
         };
         let (bound_kind, expectation) = if let Some(exact) = count.exact {
             if actual == exact {
                 return;
             }
-            ("exact", format!("expected exactly {exact}"))
+            ("exact", format!("expected exactly {}", show_bound(exact)))
         } else if let Some(min) = count.min
             && actual < min
         {
-            ("min", format!("expected at least {min}"))
+            ("min", format!("expected at least {}", show_bound(min)))
         } else if let Some(max) = count.max
             && actual > max
         {
-            ("max", format!("expected at most {max}"))
+            ("max", format!("expected at most {}", show_bound(max)))
         } else {
             return;
         };
@@ -289,17 +321,18 @@ impl<'r> Run<'r> {
             }
             message.push(')');
         }
-        let anchor_col = field_at.unwrap_or(0);
+        let spot_for =
+            |row: usize| field_at.map_or_else(|| self.row_spot(row), |pos| self.spot(row, pos));
         let (at, reported, related) = if let Some(&first_row) = sample_rows.first() {
             let rest = &sample_rows[1..];
             let spots: Vec<_> = rest
                 .iter()
                 .take(MAX_RELATED_LOCATIONS)
-                .map(|&row| (self.spot(row, anchor_col), "another counted row"))
+                .map(|&row| (spot_for(row), "another counted row"))
                 .collect();
             let omitted = rest.len() - spots.len();
             (
-                Place::At(self.spot(first_row, anchor_col)),
+                Place::At(spot_for(first_row)),
                 Some(first_row),
                 self.related_at(spots, omitted),
             )

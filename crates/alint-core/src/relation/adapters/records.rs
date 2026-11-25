@@ -4,7 +4,7 @@
 //! CST/spanned-event source spans and number lexemes across JSON, YAML, and
 //! TOML.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde_json_path::JsonPath;
 
@@ -139,16 +139,27 @@ impl Adapter for RecordsAdapter {
         };
         let mut seen_nodes: HashSet<*const serde_json::Value> = HashSet::new();
         let mut rec_index = 0u32;
-        for (query, path) in &self.at {
-            out.extract_at(
-                query,
-                path,
-                &tree,
-                &document,
-                &self.fields,
-                &mut seen_nodes,
-                &mut rec_index,
-            )?;
+        // An empty / whitespace / BOM-only file parses to synthetic `{}` under
+        // `Format::parse_shared` (whereas comment-only YAML parses to `null`).
+        // Emit 0 record rows for empty input so `at: "$"` agrees with
+        // comment-only YAML and `entries:`, while still evaluating `bound:`.
+        if !text
+            .trim_matches(|c: char| c == '\u{feff}' || c.is_whitespace())
+            .is_empty()
+        {
+            for (query, path) in &self.at {
+                if !out.extract_at(
+                    query,
+                    path,
+                    &tree,
+                    &document,
+                    &self.fields,
+                    &mut seen_nodes,
+                    &mut rec_index,
+                )? {
+                    break;
+                }
+            }
         }
         for (query, path) in &self.bound {
             out.extract_bound(query, path, &tree, &document)?;
@@ -173,6 +184,9 @@ impl Output<'_> {
         Ok(())
     }
 
+    /// Returns `Ok(false)` as soon as a non-object element is encountered so
+    /// remaining `at:` work stops immediately (preventing error masking and
+    /// wasted budget) while allowing `extract_bound` to run afterwards.
     #[allow(clippy::too_many_arguments)]
     fn extract_at(
         &mut self,
@@ -183,35 +197,35 @@ impl Output<'_> {
         fields: &[(String, JsonPath)],
         seen_nodes: &mut HashSet<*const serde_json::Value>,
         rec_index: &mut u32,
-    ) -> Result<(), AdapterError> {
+    ) -> Result<bool, AdapterError> {
         let at_label = format!("{AT_LABEL}{query}");
         let mut selected = path.query(tree).all();
         selected.sort_by_key(|node| document.rank(node));
-        let mut reported = false;
+        // Lazily materialize `query_located` at most once per `at:` query so
+        // arrays containing many empty `{}` objects stay O(N) instead of O(N^2).
+        let mut located_cache: Option<HashMap<*const serde_json::Value, Pointer>> = None;
         for node in selected {
             let at = document.path(node);
             if at == Some(PathId::ROOT) && node.is_null() {
                 continue;
             }
             if let Some(kind) = non_object(self.format, node) {
-                if !std::mem::replace(&mut reported, true) {
-                    let pointer = self.locate(path, tree, node, at)?;
-                    self.push(
-                        Row::new(
-                            self.resource.clone(),
-                            Some(pointer),
-                            0,
-                            RowState::Error(kind.into()),
-                        )
-                        .with_label(&at_label),
-                    )?;
-                }
-                continue;
+                let pointer = self.locate_cached(path, tree, node, at, &mut located_cache)?;
+                self.push(
+                    Row::new(
+                        self.resource.clone(),
+                        Some(pointer),
+                        0,
+                        RowState::Error(kind.into()),
+                    )
+                    .with_label(&at_label),
+                )?;
+                return Ok(false);
             }
             if !seen_nodes.insert(std::ptr::from_ref(node)) {
                 continue;
             }
-            let elem_pointer = self.locate(path, tree, node, at)?;
+            let elem_pointer = self.locate_cached(path, tree, node, at, &mut located_cache)?;
             let ordinal = *rec_index;
             *rec_index = rec_index.saturating_add(1);
             self.push(
@@ -234,7 +248,7 @@ impl Output<'_> {
                 )?;
             }
         }
-        Ok(())
+        Ok(true)
     }
 
     fn extract_record_field(
@@ -371,6 +385,34 @@ impl Output<'_> {
             .with_label(label);
         row.value_span = entry.value_span;
         Ok(row)
+    }
+
+    fn locate_cached(
+        &mut self,
+        path: &JsonPath,
+        tree: &serde_json::Value,
+        node: &serde_json::Value,
+        at: Option<PathId>,
+        cache: &mut Option<HashMap<*const serde_json::Value, Pointer>>,
+    ) -> Result<Pointer, AdapterError> {
+        if let Some(at) = at {
+            return Ok(self.budget.pointer(&self.entries.paths, at)?);
+        }
+        let map = cache.get_or_insert_with(|| {
+            let mut built = HashMap::new();
+            for found in path.query_located(tree) {
+                built
+                    .entry(std::ptr::from_ref(found.node()))
+                    .or_insert_with(|| pointer_of(found.location()));
+            }
+            built
+        });
+        let pointer = map
+            .get(&std::ptr::from_ref(node))
+            .cloned()
+            .unwrap_or_else(Pointer::root);
+        self.budget.take(pointer.heap_bytes())?;
+        Ok(pointer)
     }
 
     fn locate(

@@ -113,8 +113,6 @@ struct Fields<'p> {
     transformed: Vec<HashSet<&'p str>>,
     /// What [`Fields::holds`] found, by relation and field.
     holds: RefCell<HashMap<(usize, &'p str), Holds>>,
-    /// What [`Fields::copied`] found, by relation and field.
-    copied: RefCell<HashMap<(usize, &'p str), Option<&'p FieldSource>>>,
 }
 
 impl<'p> Fields<'p> {
@@ -145,59 +143,45 @@ impl<'p> Fields<'p> {
             declared,
             transformed,
             holds: RefCell::default(),
-            copied: RefCell::default(),
         }
     }
 
-    /// The source field `field` of relation `id` takes its value from before
-    /// its own transforms run: its own source, or for a join's `left.F` or
-    /// `right.F` the source of the side's field it copies, followed while no
-    /// field it copies is transformed (`None` once one is, or when a field
-    /// is missing). Each field a chain passes is found once, and remembered.
-    fn copied(&self, id: RelationId, field: &'p str) -> Option<&'p FieldSource> {
-        let mut known = self.copied.borrow_mut();
-        let mut walked = Vec::new();
+    /// Inspect the underlying origin of `field` in relation `id`, following
+    /// `join:` copies while distinguishing a mixed-source per-part `union:` from
+    /// an intermediate transformed field.
+    fn origin_info(&self, id: RelationId, field: &'p str) -> FieldOrigin<'p> {
         let mut at = (id.0, field);
-        let mut found = None;
         for _ in 0..=self.plan.relations.len() {
-            if let Some(&held) = known.get(&at) {
-                found = held;
-                break;
-            }
-            walked.push(at);
             let Some(definition) = self.field(RelationId(at.0), at.1) else {
-                break;
+                return FieldOrigin::Missing;
             };
             let relation = &self.plan.relations[at.0].relation;
             if relation.uses_part_fields() {
                 let sources = relation.field_sources(at.1);
-                if let Some(first) = sources.first()
-                    && sources.iter().all(|f| f.source == first.source)
-                {
-                    found = Some(&first.source);
+                let Some(first) = sources.first() else {
+                    return FieldOrigin::Missing;
+                };
+                if sources.iter().all(|f| f.source == first.source) {
+                    return FieldOrigin::Single(&first.source);
                 }
-                break;
+                return FieldOrigin::MixedUnion(sources.into_iter().map(|f| &f.source).collect());
             }
             let FieldSource::Side(side, name) = &definition.source else {
-                found = Some(&definition.source);
-                break;
+                return FieldOrigin::Single(&definition.source);
             };
             let Rows::Join(join) = &self.plan.relations[at.0].relation.rows else {
-                break;
+                return FieldOrigin::Missing;
             };
             let next = match side {
                 JoinSide::Left => join.left.id,
                 JoinSide::Right => join.right.id,
             };
             if self.transformed[next.0].contains(name.as_str()) {
-                break;
+                return FieldOrigin::Transformed;
             }
             at = (next.0, name.as_str());
         }
-        for step in walked {
-            known.insert(step, found);
-        }
-        found
+        FieldOrigin::Missing
     }
 
     /// Field `name` of relation `id`, as [`RelationDef::field`] finds it.
@@ -720,6 +704,14 @@ fn check_rows(fields: &Fields<'_>, relation: &RelationDef, at: &At<'_>) -> Resul
     Ok(())
 }
 
+/// Underlying non-join origin of a relation field for `check_transforms`.
+enum FieldOrigin<'p> {
+    Single(&'p FieldSource),
+    MixedUnion(Vec<&'p FieldSource>),
+    Transformed,
+    Missing,
+}
+
 /// Each transformed field exists, and its transforms fit its source.
 fn check_transforms(fields: &Fields<'_>, id: RelationId, at: &At<'_>) -> Result<()> {
     let named = fields.plan.relation(id);
@@ -731,26 +723,36 @@ fn check_transforms(fields: &Fields<'_>, id: RelationId, at: &At<'_>) -> Result<
                 not_a_field(field_name, &format!("relation `{}`", named.name), relation),
             ));
         };
-        // A join's output field holds what the side's field it copies held.
-        let origin = fields.copied(id, field_name);
-        let any_path_origin = if relation.uses_part_fields() {
-            relation
-                .field_sources(field_name)
-                .into_iter()
-                .any(|f| matches!(f.source, FieldSource::Path(_) | FieldSource::EntryPath))
-        } else {
-            matches!(origin, Some(FieldSource::Path(_) | FieldSource::EntryPath))
+        // A join's output field holds what the side's field it copies held,
+        // including when that side is a mixed-reader per-part `union:`.
+        let origin_info = fields.origin_info(id, field_name);
+        let origin = match &origin_info {
+            FieldOrigin::Single(source) => Some(*source),
+            FieldOrigin::MixedUnion(_) | FieldOrigin::Transformed | FieldOrigin::Missing => None,
         };
-        let bound_to = match (&field.source, origin) {
-            (_, None) if relation.uses_part_fields() => {
+        let any_path_origin = match &origin_info {
+            FieldOrigin::Single(source) => {
+                matches!(source, FieldSource::Path(_) | FieldSource::EntryPath)
+            }
+            FieldOrigin::MixedUnion(sources) => sources
+                .iter()
+                .any(|source| matches!(source, FieldSource::Path(_) | FieldSource::EntryPath)),
+            FieldOrigin::Transformed | FieldOrigin::Missing => false,
+        };
+        let bound_to = match (&field.source, &origin_info) {
+            (_, FieldOrigin::MixedUnion(_)) if relation.uses_part_fields() => {
                 "different sources across `union:` parts".to_string()
             }
-            (FieldSource::Side(..), Some(origin)) => format!(
+            (FieldSource::Side(..), FieldOrigin::MixedUnion(_)) => format!(
+                "`{}`, a copy of a union field with different sources across `union:` parts",
+                source_text(&field.source)
+            ),
+            (FieldSource::Side(..), FieldOrigin::Single(origin)) => format!(
                 "`{}`, a copy of `{}`",
                 source_text(&field.source),
                 source_text(origin)
             ),
-            (FieldSource::Side(..), None) => format!(
+            (FieldSource::Side(..), FieldOrigin::Transformed | FieldOrigin::Missing) => format!(
                 "`{}`, a copy of a transformed field",
                 source_text(&field.source)
             ),

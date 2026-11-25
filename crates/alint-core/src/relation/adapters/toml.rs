@@ -5,7 +5,7 @@ use toml_edit::{Document, InlineTable, Item, Key, Table, Value};
 use crate::ByteSpan;
 use crate::extract::EntryValue;
 use crate::relation::adapter::{Adapter, AdapterError, AdapterOutput, check_row_count};
-use crate::relation::key_paths::{EntryAt, EntryTable, PathId};
+use crate::relation::key_paths::{EntryAt, EntryTable, PathId, PathStack};
 use crate::relation::limits::{Limits, RunBudget};
 use crate::relation::pointer::Segment;
 use crate::relation::resource::Resource;
@@ -55,6 +55,7 @@ impl Adapter for TomlRowsAdapter {
             values: false,
             descend_arrays: false,
             entries: EntryTable::default(),
+            stack: PathStack::default(),
         };
         walk.document()?;
         Ok(AdapterOutput::new(super::entry::key_rows(
@@ -79,6 +80,7 @@ impl TomlRowsAdapter {
             values: true,
             descend_arrays: false,
             entries: EntryTable::default(),
+            stack: PathStack::default(),
         };
         walk.document()?;
         Ok(walk.entries)
@@ -97,6 +99,7 @@ impl TomlRowsAdapter {
             values: true,
             descend_arrays: true,
             entries: EntryTable::default(),
+            stack: PathStack::default(),
         };
         walk.document()?;
         Ok(walk.entries)
@@ -110,13 +113,23 @@ struct TomlValue {
 }
 
 /// One walk over a document, a member per table member and, in the value
-/// mode, each member's value beside it.
+/// mode, each member's value beside it. Uses a lazy [`PathStack`] (matching
+/// JSON and YAML) so empty tables, empty inline tables, and empty nested
+/// arrays inside `[[...]]` / `[...]` allocate zero `KeyPaths` nodes.
 struct Walk<'w> {
     text: &'w str,
     limits: &'w Limits,
     values: bool,
     descend_arrays: bool,
     entries: EntryTable,
+    stack: PathStack,
+}
+
+enum WalkStep<'t> {
+    Enter(Segment),
+    Leave,
+    Inline(&'t InlineTable),
+    Array(&'t toml_edit::Array),
 }
 
 impl Walk<'_> {
@@ -133,20 +146,20 @@ impl Walk<'_> {
         })?;
         // The lexer's tokens, held while the document was built.
         self.entries.parsed += crate::structured_format::toml_tokens(self.text);
-        self.table(document.as_table(), PathId::ROOT)
+        self.table(document.as_table())
     }
 
-    fn table(&mut self, table: &Table, parent: PathId) -> Result<(), AdapterError> {
+    fn table(&mut self, table: &Table) -> Result<(), AdapterError> {
         for key_text in table.iter().map(|(key, _)| key) {
             let (key, item) = table
                 .get_key_value(key_text)
                 .unwrap_or_else(|| unreachable!("table.iter yielded a missing key"));
-            self.item(key, item, parent)?;
+            self.item(key, item)?;
         }
         Ok(())
     }
 
-    fn item(&mut self, key: &Key, item: &Item, parent: PathId) -> Result<(), AdapterError> {
+    fn item(&mut self, key: &Key, item: &Item) -> Result<(), AdapterError> {
         let key_text = key.get();
         if matches!(item, Item::None) {
             return Ok(());
@@ -155,10 +168,8 @@ impl Walk<'_> {
             .span()
             .or_else(|| item.span())
             .ok_or_else(|| AdapterError::Parse(format!("the TOML key {key_text:?} has no span")))?;
-        let path = self
-            .entries
-            .paths
-            .child(parent, Segment::Key(key_text.into()));
+        self.stack.enter(Segment::Key(key_text.into()));
+        let path = self.stack.path(&mut self.entries.paths);
         let text = self.text;
         let owned = text_of(key_text, item.as_value());
         self.push(path, span, owned, || item_value(item, text))?;
@@ -172,45 +183,107 @@ impl Walk<'_> {
         }
 
         match item {
-            Item::Table(table) => self.table(table, path)?,
-            Item::Value(Value::InlineTable(inline)) => self.inline_table(inline, path)?,
+            Item::Table(table) => self.table(table)?,
+            Item::Value(Value::InlineTable(inline)) => {
+                self.walk_values(WalkStep::Inline(inline))?;
+            }
             Item::ArrayOfTables(tables) if self.descend_arrays => {
                 for (index, table) in tables.iter().enumerate() {
                     self.entries.parsed += std::mem::size_of::<Item>();
-                    let elem = self.entries.paths.child(path, Segment::Index(index));
-                    self.table(table, elem)?;
+                    self.stack.enter(Segment::Index(index));
+                    self.table(table)?;
+                    self.stack.leave();
                 }
             }
             Item::Value(Value::Array(array)) if self.descend_arrays => {
-                self.array(array, path)?;
+                self.walk_values(WalkStep::Array(array))?;
             }
             Item::None | Item::Value(_) | Item::ArrayOfTables(_) => {}
         }
+        self.stack.leave();
         Ok(())
     }
 
-    /// Descend a TOML array in `records:` mode so inline tables and nested
-    /// arrays inside it record their members' spans and number lexemes.
-    fn array(&mut self, array: &toml_edit::Array, parent: PathId) -> Result<(), AdapterError> {
-        let mut pending: Vec<(PathId, &toml_edit::Array)> = vec![(parent, array)];
-        while let Some((prefix, current)) = pending.pop() {
-            let mut nested = Vec::new();
-            for (index, value) in current.iter().enumerate() {
-                self.entries.parsed += std::mem::size_of::<Item>();
-                match value {
-                    Value::InlineTable(table) => {
-                        let elem = self.entries.paths.child(prefix, Segment::Index(index));
-                        self.inline_table(table, elem)?;
+    /// Iteratively descend inline tables and (when `descend_arrays` is set)
+    /// arrays using the lazy [`PathStack`], preserving source order and zero
+    /// `KeyPaths` allocation on empty inline tables or nested arrays.
+    fn walk_values<'t>(&mut self, root: WalkStep<'t>) -> Result<(), AdapterError> {
+        let mut pending: Vec<WalkStep<'t>> = vec![root];
+        while let Some(step) = pending.pop() {
+            match step {
+                WalkStep::Enter(segment) => self.stack.enter(segment),
+                WalkStep::Leave => self.stack.leave(),
+                WalkStep::Array(array) => {
+                    let mut children: Vec<(Segment, WalkStep<'t>)> = Vec::new();
+                    for (index, value) in array.iter().enumerate() {
+                        self.entries.parsed += std::mem::size_of::<Item>();
+                        match value {
+                            Value::InlineTable(table) => {
+                                children.push((Segment::Index(index), WalkStep::Inline(table)));
+                            }
+                            Value::Array(inner) => {
+                                children.push((Segment::Index(index), WalkStep::Array(inner)));
+                            }
+                            Value::String(string) => self.entries.parsed += string.value().len(),
+                            _ => {}
+                        }
                     }
-                    Value::Array(inner) => {
-                        let elem = self.entries.paths.child(prefix, Segment::Index(index));
-                        nested.push((elem, inner));
+                    for (segment, child) in children.into_iter().rev() {
+                        pending.push(WalkStep::Leave);
+                        pending.push(child);
+                        pending.push(WalkStep::Enter(segment));
                     }
-                    Value::String(string) => self.entries.parsed += string.value().len(),
-                    _ => {}
+                }
+                WalkStep::Inline(table) => {
+                    if self.values {
+                        let mut children: Vec<(Segment, WalkStep<'t>)> = Vec::new();
+                        self.inline_members(table, &mut children)?;
+                        for (segment, child) in children.into_iter().rev() {
+                            pending.push(WalkStep::Leave);
+                            pending.push(child);
+                            pending.push(WalkStep::Enter(segment));
+                        }
+                    } else {
+                        let mut children: Vec<(Vec<Segment>, &'t InlineTable)> = Vec::new();
+                        for (path, value) in table.get_values() {
+                            let span = path
+                                .iter()
+                                .filter_map(|key| key.span())
+                                .next_back()
+                                .ok_or_else(|| {
+                                    AdapterError::Parse(
+                                        "a TOML inline-table key has no span".to_string(),
+                                    )
+                                })?;
+                            for key in &path {
+                                self.stack.enter(Segment::Key(key.get().into()));
+                            }
+                            let at = self.stack.path(&mut self.entries.paths);
+                            for _ in 0..path.len() {
+                                self.stack.leave();
+                            }
+                            let text = self.text;
+                            let owned = path.iter().map(|key| key.get().len()).sum::<usize>()
+                                + text_of("", Some(value));
+                            self.push(at, span, owned, || value_of(value, text))?;
+                            if let Value::InlineTable(inner) = value {
+                                let segs =
+                                    path.iter().map(|k| Segment::Key(k.get().into())).collect();
+                                children.push((segs, inner));
+                            }
+                        }
+                        for (segs, inner) in children.into_iter().rev() {
+                            for _ in 0..segs.len() {
+                                pending.push(WalkStep::Leave);
+                            }
+                            pending.push(WalkStep::Inline(inner));
+                            for seg in segs.into_iter().rev() {
+                                pending.push(WalkStep::Enter(seg));
+                            }
+                        }
+                    }
                 }
             }
-            pending.extend(nested.into_iter().rev());
         }
         Ok(())
     }
@@ -349,60 +422,13 @@ fn value_of(value: &Value, text: &str) -> TomlValue {
 }
 
 impl Walk<'_> {
-    /// Descend an inline table and every inline table nested in it, so
-    /// `x = { a = { b = 1 } }` yields the same leaf `x.a.b` as `[x.a] b = 1`.
-    /// The walk uses an explicit stack: nesting depth cannot exhaust the call
-    /// stack, and the row limit bounds the work.
-    ///
-    /// The key rows (`key_parity`'s) keep what they have always held: a
-    /// dotted key inside an inline table (`x = { a.b = 1 }`) gives the row
-    /// `x.a.b` and none for `x.a`. The value mode reads such a key as the
-    /// table walk reads a dotted key in a table (`[x]` then `a.b = 1`), with
-    /// a row for `x.a` that holds an object, so its rows are those of the
-    /// same document written as JSON ([`Self::inline_members`]).
-    fn inline_table(&mut self, table: &InlineTable, at: PathId) -> Result<(), AdapterError> {
-        let mut pending: Vec<(PathId, &InlineTable)> = vec![(at, table)];
-        while let Some((prefix, table)) = pending.pop() {
-            let mut nested = Vec::new();
-            if self.values {
-                self.inline_members(prefix, table, &mut nested)?;
-                pending.extend(nested.into_iter().rev());
-                continue;
-            }
-            for (path, value) in table.get_values() {
-                let span = path
-                    .iter()
-                    .filter_map(|key| key.span())
-                    .next_back()
-                    .ok_or_else(|| {
-                        AdapterError::Parse("a TOML inline-table key has no span".to_string())
-                    })?;
-                let at = path.iter().fold(prefix, |at, key| {
-                    self.entries.paths.child(at, Segment::Key(key.get().into()))
-                });
-                let text = self.text;
-                // Each key of a dotted path, and the value's text.
-                let owned = path.iter().map(|key| key.get().len()).sum::<usize>()
-                    + text_of("", Some(value));
-                self.push(at, span, owned, || value_of(value, text))?;
-                if let Value::InlineTable(inner) = value {
-                    nested.push((at, inner));
-                }
-            }
-            // Reverse so the stack visits nested tables in source order.
-            pending.extend(nested.into_iter().rev());
-        }
-        Ok(())
-    }
-
     /// The value mode's rows for one inline table: a row per key it holds,
-    /// as [`Self::table`] reads a table, and each inline table among them,
-    /// a dotted key's included, in `nested` to descend next.
+    /// as [`Self::table`] reads a table, and each inline table or (in
+    /// `records:` mode) array among them, in `children` to descend next.
     fn inline_members<'t>(
         &mut self,
-        prefix: PathId,
         table: &'t InlineTable,
-        nested: &mut Vec<(PathId, &'t InlineTable)>,
+        children: &mut Vec<(Segment, WalkStep<'t>)>,
     ) -> Result<(), AdapterError> {
         for (key_text, _) in table {
             let (key, item) = table
@@ -414,20 +440,20 @@ impl Walk<'_> {
             let span = key.span().or_else(|| value.span()).ok_or_else(|| {
                 AdapterError::Parse(format!("the TOML key {key_text:?} has no span"))
             })?;
-            let at = self
-                .entries
-                .paths
-                .child(prefix, Segment::Key(key_text.into()));
+            let segment = Segment::Key(key_text.into());
+            self.stack.enter(segment.clone());
+            let at = self.stack.path(&mut self.entries.paths);
+            self.stack.leave();
             let text = self.text;
             self.push(at, span, text_of(key_text, Some(value)), || {
                 value_of(value, text)
             })?;
             if let Value::InlineTable(inner) = value {
-                nested.push((at, inner));
+                children.push((segment, WalkStep::Inline(inner)));
             } else if self.descend_arrays
                 && let Value::Array(array) = value
             {
-                self.array(array, at)?;
+                children.push((segment, WalkStep::Array(array)));
             }
         }
         Ok(())
@@ -692,5 +718,51 @@ mod tests {
             assert_eq!(length, same, "{shape}");
             assert_eq!(long - short, 2 * (LONG - 1), "{shape}");
         }
+    }
+
+    #[test]
+    fn values_with_arrays_descends_tables_and_keeps_empty_elements_lazy() {
+        let doc = concat!(
+            "[[items]]\n",
+            "name = \"api\"\n",
+            "port = 1_000\n",
+            "inline = [{ tag = \"v1\" }, {}]\n",
+            "[[items]]\n",
+        );
+        let table = TomlRowsAdapter::values_with_arrays(doc, &Limits::default()).unwrap();
+        let pointers: Vec<String> = table
+            .rows
+            .iter()
+            .map(|r| table.paths.pointer(r.path).render())
+            .collect();
+        assert!(
+            pointers.contains(&"items[0].name".to_string()),
+            "{pointers:?}"
+        );
+        assert!(
+            pointers.contains(&"items[0].port".to_string()),
+            "{pointers:?}"
+        );
+        assert!(
+            pointers.contains(&"items[0].inline[0].tag".to_string()),
+            "{pointers:?}"
+        );
+        // Empty `[[items]]` and empty `{}` inline table allocate zero KeyPaths nodes.
+        let empty_many = format!(
+            "a = [{}]\n",
+            std::iter::repeat_n("{}", 1_000)
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let tight = Limits::default()
+            .with(crate::relation::LimitKind::RowsPerExtractor, 5)
+            .unwrap();
+        let empty_table = TomlRowsAdapter::values_with_arrays(&empty_many, &tight).unwrap();
+        assert_eq!(empty_table.rows.len(), 1, "only top-level `a` row");
+        assert_eq!(
+            empty_table.paths.len(),
+            2,
+            "lazy PathStack must allocate only ROOT + `a`, not 1,000 empty inline tables"
+        );
     }
 }

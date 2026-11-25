@@ -217,11 +217,66 @@ fn shape_refusals() -> Vec<(&'static str, String)> {
             ),
         ),
         (
-            "a union part with `fields:`",
+            "a union with both top-level `fields:` and per-part `fields:`",
             rel(
-                "{ union: [{ from: s, read: { json: $ }, fields: {} }, { from: t, read: { json: \
-                    $ } }], fields: { f: value } }",
+                "{ union: [{ from: s, read: { json: $ }, fields: { f: value } }, { from: t, read: \
+                    { json: $ }, fields: { f: value } }], fields: { f: value } }",
             ),
+        ),
+        (
+            "a union with neither top-level nor per-part `fields:`",
+            rel("{ union: [{ from: s, read: { json: $ } }, { from: t, read: { json: $ } }] }"),
+        ),
+        (
+            "a union with per-part `fields:` on only one part",
+            rel(
+                "{ union: [{ from: s, read: { json: $ }, fields: { f: value } }, { from: t, read: \
+                    { json: $ } }] }",
+            ),
+        ),
+        (
+            "`records:` with unknown format",
+            rel(
+                "{ from: s, records: { format: xml, at: '$.items[*]' }, fields: { f: 'record: $.n' } }",
+            ),
+        ),
+        (
+            "`records:` with empty `at:` list",
+            rel("{ from: s, records: { format: json, at: [] }, fields: { f: 'record: $.n' } }"),
+        ),
+        (
+            "`records:` with relation-level `optional: true`",
+            rel(
+                "{ from: s, records: { format: json, at: '$.items[*]' }, optional: true, fields: \
+                    { f: 'record: $.n' } }",
+            ),
+        ),
+        (
+            "`record:` field with `on_missing:`",
+            rel(
+                "{ from: s, records: { format: json, at: '$.items[*]' }, fields: { f: { source: \
+                    'record: $.n', optional: true, on_missing: skip } } }",
+            ),
+        ),
+        (
+            "`optional: true` on a non-`bound:`/non-`record:` field",
+            rel("{ from: s, read: { json: $ }, fields: { f: { source: value, optional: true } } }"),
+        ),
+        (
+            "parameterized `split` with empty `on:`",
+            read_rel(", transform: { f: [{ split: { on: '', part: 0 } }] }"),
+        ),
+        (
+            "parameterized `split` missing `part:`",
+            read_rel(", transform: { f: [{ split: { on: ':' } }] }"),
+        ),
+        (
+            "parameterized `strip_suffix` with empty list",
+            read_rel(", transform: { f: [{ strip_suffix: [] }] }"),
+        ),
+        (
+            "parameterized transform map with two keys",
+            read_rel(", transform: { f: [{ prefix: a, suffix: b }] }"),
         ),
         (
             "a union part without `from:`",
@@ -610,6 +665,30 @@ fn unexpressed() -> Vec<(&'static str, String)> {
         (
             "a JSONPath that does not parse",
             rel("{ from: s, read: { json: $ }, fields: { f: 'bound: $.a[' } }"),
+        ),
+        (
+            "a JSONPath that does not parse",
+            rel("{ from: s, records: { format: json, at: '$.a[' }, fields: { f: 'record: $.n' } }"),
+        ),
+        (
+            "a JSONPath that does not parse",
+            rel(
+                "{ from: s, records: { format: json, at: '$.items[*]' }, fields: { f: 'record: $.a[' } }",
+            ),
+        ),
+        (
+            "per-part `union:` with mismatched field names",
+            rel(
+                "{ union: [{ from: s, read: { json: $ }, fields: { a: value } }, { from: t, read: \
+                    { json: $ }, fields: { b: value } }] }",
+            ),
+        ),
+        (
+            "per-part `union:` with mismatched `sensitive` flags",
+            rel(
+                "{ union: [{ from: s, read: { json: $ }, fields: { a: { source: value, sensitive: \
+                    true } } }, { from: t, read: { json: $ }, fields: { a: value } }] }",
+            ),
         ),
     ];
     // A 2 written as another number is the number 2 to JSON, which `const:

@@ -564,7 +564,7 @@
           "uniqueItems": true
         },
         "skip_missing": {
-          "description": "When true, skip rows where any source key field is `Missing` or `Null` instead of emitting a finding (default false).",
+          "description": "When true, skip rows where any source key field is `Missing` (for example from an optional `bound:` or `record:` field) instead of emitting a finding (default false; explicit `Null` values still emit a finding).",
           "type": "boolean"
         },
         "to": {
@@ -1049,11 +1049,23 @@
           "description": "Another relation: its name, bare or qualified by an `extends:` alias (`ws.names`); not an inline relation."
         },
         "values": {
-          "description": "An inline non-empty list of allowed/expected/forbidden scalar literals (strings and booleans only, ADR-0050 D3).",
+          "description": "An inline non-empty list of allowed/expected/forbidden scalar literals of one uniform type (all strings or all booleans, ADR-0050 D3).",
           "items": {
             "$ref": "#/$defs/ConstraintLiteral"
           },
           "minItems": 1,
+          "oneOf": [
+            {
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "items": {
+                "type": "boolean"
+              }
+            }
+          ],
           "type": "array"
         }
       },
