@@ -2097,3 +2097,78 @@ fn dotenv_native_edits_preserve_multiple_boms_and_original_coordinates() {
     }
     assert_eq!(output, "\u{feff}\u{feff}".as_bytes());
 }
+
+#[test]
+fn hcl_removal_preserves_closing_brace_and_multiline_block_comment_openers() {
+    // H6: `/* c1 */ } /* c2 */` contains a closing `}` between two block comments.
+    assert!(!super::hcl::line_tail_is_blank_or_comment(
+        " /* c1 */ } /* c2 */\n"
+    ));
+    assert!(!super::hcl::line_tail_is_blank_or_comment(" /*/\n"));
+    assert!(super::hcl::line_tail_is_blank_or_comment(" /* a */ # b\n"));
+
+    let single_line = "block { drop = 1 /* c1 */ } /* c2 */\n";
+    let span = resolve_removal_span(
+        Format::Hcl,
+        single_line.as_bytes(),
+        &[key("block"), key("drop")],
+    )
+    .expect("attribute span resolves");
+    assert_eq!(&single_line[span], "drop = 1");
+
+    // H6: `/*/` starts an unclosed multiline block comment, not a closed `/* */`.
+    let slash_star_slash = "drop = 1 /*/\nstill comment */\nkeep = 2\n";
+    let span = resolve_removal_span(Format::Hcl, slash_star_slash.as_bytes(), &[key("drop")])
+        .expect("attribute span resolves");
+    assert_eq!(&slash_star_slash[span], "drop = 1");
+
+    // Trailing `/* a */ # b` genuinely owns its line and removes the full line.
+    let trailing_both = "drop = 1 /* a */ # b\nkeep = 2\n";
+    let span = resolve_removal_span(Format::Hcl, trailing_both.as_bytes(), &[key("drop")])
+        .expect("full line span resolves");
+    assert_eq!(&trailing_both[span], "drop = 1 /* a */ # b\n");
+}
+
+#[test]
+fn hcl_span_resolution_declines_shadowed_nodes_and_unwraps_parenthesized_objects() {
+    // H7a: attribute shadowed by labeled block declines instead of editing dead attr.
+    let attr_block = "foo = 1\nfoo \"a\" { x = 1 }\n";
+    assert!(resolve_value_span(Format::Hcl, attr_block.as_bytes(), &[key("foo")]).is_none());
+    assert!(resolve_removal_span(Format::Hcl, attr_block.as_bytes(), &[key("foo")]).is_none());
+
+    // H7b: block shadowed by longer/shorter prefix block declines both paths.
+    let prefix_clash = "foo \"a\" { y = 2 }\nfoo \"a\" \"b\" { x = 1 }\n";
+    assert!(
+        resolve_value_span(
+            Format::Hcl,
+            prefix_clash.as_bytes(),
+            &[key("foo"), key("a"), key("y")],
+        )
+        .is_none()
+    );
+    assert!(
+        resolve_value_span(
+            Format::Hcl,
+            prefix_clash.as_bytes(),
+            &[key("foo"), key("a"), key("b"), key("x")],
+        )
+        .is_none()
+    );
+
+    // H7c: ident object key shadowed by quoted key declines.
+    let quoted_shadow = "tags = {\n  Team = \"old\"\n  \"Team\" = \"real\"\n}\n";
+    assert!(
+        resolve_value_span(
+            Format::Hcl,
+            quoted_shadow.as_bytes(),
+            &[key("tags"), key("Team")],
+        )
+        .is_none()
+    );
+
+    // L13: parenthesized object expression unwraps cleanly when unambiguous.
+    let parens = "tags = ({ Team = \"core\" })\n";
+    let span = resolve_value_span(Format::Hcl, parens.as_bytes(), &[key("tags"), key("Team")])
+        .expect("parenthesized object resolves");
+    assert_eq!(&parens[span], "\"core\"");
+}

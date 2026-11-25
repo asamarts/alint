@@ -456,6 +456,7 @@ fn hover_shows_repository_markdown_literally() {
         fixable: false,
         sensitive: false,
         per_file: true,
+        is_pattern_hint: false,
         description: None,
         docs_url: None,
         related_information: Vec::new(),

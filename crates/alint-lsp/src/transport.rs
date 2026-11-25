@@ -4,10 +4,10 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
-use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
-use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
+use crossbeam_channel::{Receiver, Sender, bounded, select, select_biased, unbounded};
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestId};
 use lsp_types::notification::{
     Cancel, DidChangeTextDocument, DidChangeWatchedFiles, DidChangeWorkspaceFolders,
@@ -29,20 +29,19 @@ use super::{
     panic_summary,
 };
 
-/// Interactive work queued from the main LSP dispatch loop onto the 8 MiB
-/// worker pool (`Reeval` and `CodeAction` only; full checks run on their own
-/// dedicated thread).
-enum Job {
-    Reeval {
-        uri: Url,
-        text: String,
-        version: i32,
-        seq: u64,
-    },
-    CodeAction {
-        id: RequestId,
-        params: CodeActionParams,
-    },
+/// Result of [`run_connection_outcome`]: LSP process exit code plus whether the
+/// outbound relay finished draining within [`EXIT_JOIN_TIMEOUT`].
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ConnectionOutcome {
+    pub(super) code: i32,
+    pub(super) relay_drained: bool,
+}
+
+/// Interactive `codeAction` request queued onto the prioritized worker channel.
+struct CodeActionJob {
+    id: RequestId,
+    token: u64,
+    params: CodeActionParams,
 }
 
 /// Convert an LSP `$/cancelRequest` `NumberOrString` id into `lsp_server::RequestId`.
@@ -69,24 +68,38 @@ impl Drop for ThreadDoneGuard {
     }
 }
 
-/// Drop guard ensuring every accepted `codeAction` request clears its
-/// `in_flight_code_actions` count and `pending_code_actions` entry even if a
-/// worker panics or exits early.
+/// Drop guard ensuring every accepted `codeAction` request clears its active
+/// slot (and notifies any pending `shutdown` once the last one finishes) even
+/// if a worker panics or returns early.
 struct CodeActionGuard<'a> {
     core: &'a ServerCore,
-    id: RequestId,
+    token: u64,
 }
 
 impl Drop for CodeActionGuard<'_> {
     fn drop(&mut self) {
-        self.core.finish_code_action(&self.id);
+        self.core.finish_code_action(self.token);
     }
 }
 
-/// Wait up to `timeout` for `remaining` threads to reach zero, returning `true`
+/// Drop guard ensuring `shutting_down`, `exiting`, and `close_outbound` run on
+/// every exit path of `run_connection_outcome` (including early thread-spawn
+/// errors), so the outbound relay can never leak.
+struct TeardownGuard<'a> {
+    core: &'a ServerCore,
+}
+
+impl Drop for TeardownGuard<'_> {
+    fn drop(&mut self) {
+        self.core.shutting_down.store(true, Ordering::SeqCst);
+        self.core.exiting.store(true, Ordering::SeqCst);
+        self.core.close_outbound();
+    }
+}
+
+/// Wait until `deadline` for `remaining` threads to reach zero, returning `true`
 /// if all finished in time.
-fn wait_for_threads(done: &(Mutex<usize>, Condvar), timeout: Duration) -> bool {
-    let deadline = Instant::now() + timeout;
+fn wait_for_threads_until(done: &(Mutex<usize>, Condvar), deadline: Instant) -> bool {
     let mut remaining = done.0.lock();
     while *remaining > 0 {
         let now = Instant::now();
@@ -98,78 +111,72 @@ fn wait_for_threads(done: &(Mutex<usize>, Condvar), timeout: Duration) -> bool {
     true
 }
 
-fn run_worker_job(core: &ServerCore, job: Job) {
-    match job {
-        Job::Reeval {
-            uri,
-            text,
-            version,
-            seq,
-        } => {
-            if core.is_stopping() {
-                return;
-            }
-            if let Err(payload) = catch_unwind(AssertUnwindSafe(|| {
-                core.reeval_file_seq(uri, text, version, Some(seq));
-            })) {
-                tracing::error!(
-                    panic = %panic_summary(&*payload),
-                    "alint LSP reeval worker panicked"
-                );
-            }
+fn run_code_action_job(core: &ServerCore, job: CodeActionJob) {
+    let CodeActionJob { id, token, params } = job;
+    // Declared FIRST so its Drop runs AFTER `send_ok`/`send_err` queues this
+    // response onto FIFO `outbound` -- guaranteeing `shutdown`'s `Ok(null)`
+    // never overtakes an in-flight `codeAction` response.
+    let _ca_guard = CodeActionGuard { core, token };
+    if core.exiting.load(Ordering::SeqCst) {
+        return;
+    }
+    if core.is_canceled(token) {
+        core.send_err(
+            id,
+            ErrorCode::RequestCanceled,
+            "request canceled".to_string(),
+        );
+        return;
+    }
+    let res = catch_unwind(AssertUnwindSafe(|| core.compute_code_action(params)));
+    if core.exiting.load(Ordering::SeqCst) {
+        return;
+    }
+    if core.is_canceled(token) {
+        core.send_err(
+            id,
+            ErrorCode::RequestCanceled,
+            "request canceled".to_string(),
+        );
+        return;
+    }
+    match res {
+        Ok(Ok(resp)) => {
+            let value = serde_json::to_value(resp).unwrap_or(serde_json::Value::Null);
+            core.send_ok(id, value);
         }
-        Job::CodeAction { id, params } => {
-            let _ca_guard = CodeActionGuard {
-                core,
-                id: id.clone(),
-            };
-            if core.exiting.load(Ordering::SeqCst) {
-                return;
-            }
-            if core.is_canceled(&id) {
-                core.send_err(
-                    id,
-                    ErrorCode::RequestCanceled,
-                    "request canceled".to_string(),
-                );
-                return;
-            }
-            let res = catch_unwind(AssertUnwindSafe(|| core.compute_code_action(params)));
-            if core.exiting.load(Ordering::SeqCst) {
-                return;
-            }
-            if core.is_canceled(&id) {
-                core.send_err(
-                    id,
-                    ErrorCode::RequestCanceled,
-                    "request canceled".to_string(),
-                );
-                return;
-            }
-            match res {
-                Ok(Ok(resp)) => {
-                    let value = serde_json::to_value(resp).unwrap_or(serde_json::Value::Null);
-                    core.send_ok(id, value);
-                }
-                Ok(Err(msg)) => core.send_err(id, ErrorCode::InternalError, msg),
-                Err(payload) => {
-                    tracing::error!(
-                        panic = %panic_summary(&*payload),
-                        "alint LSP codeAction worker panicked"
-                    );
-                    core.send_err(
-                        id,
-                        ErrorCode::InternalError,
-                        "alint: code action panicked".to_string(),
-                    );
-                }
-            }
+        Ok(Err(msg)) => core.send_err(id, ErrorCode::InternalError, msg),
+        Err(payload) => {
+            tracing::error!(
+                panic = %panic_summary(&*payload),
+                "alint LSP codeAction worker panicked"
+            );
+            core.send_err(
+                id,
+                ErrorCode::InternalError,
+                "alint: code action panicked".to_string(),
+            );
         }
     }
 }
 
+fn run_reeval_job(core: &ServerCore, uri: Url) {
+    if core.is_stopping() {
+        core.pending_reevals.lock().remove(&uri);
+        return;
+    }
+    if let Err(payload) = catch_unwind(AssertUnwindSafe(|| {
+        core.reeval_latest(uri);
+    })) {
+        tracing::error!(
+            panic = %panic_summary(&*payload),
+            "alint LSP reeval worker panicked"
+        );
+    }
+}
+
 fn spawn_outbound_relay(
-    core: Arc<ServerCore>,
+    exiting: Arc<AtomicBool>,
     conn_tx: Sender<Message>,
     out_rx: Receiver<Message>,
     done: Arc<(Mutex<usize>, Condvar)>,
@@ -179,7 +186,7 @@ fn spawn_outbound_relay(
         .spawn(move || {
             let _guard = ThreadDoneGuard { done };
             while let Ok(msg) = out_rx.recv() {
-                if core.exiting.load(Ordering::SeqCst) && !matches!(msg, Message::Response(_)) {
+                if exiting.load(Ordering::SeqCst) && !matches!(msg, Message::Response(_)) {
                     continue;
                 }
                 if conn_tx.send(msg).is_err() {
@@ -215,25 +222,101 @@ fn spawn_check_thread(
                             panic = %panic_summary(&*payload),
                             "alint LSP check thread panicked"
                         );
+                        // Advance `completed_check_gen` and break so a
+                        // deterministic panic cannot spin at 100% CPU.
+                        core.completed_check_gen.fetch_max(target, Ordering::SeqCst);
+                        break;
                     }
                 }
             }
         })
 }
 
+type ThreadDone = Arc<(Mutex<usize>, Condvar)>;
+type WorkerHandles = (Vec<std::thread::JoinHandle<()>>, ThreadDone);
+
+fn spawn_workers(
+    core: &Arc<ServerCore>,
+    code_action_rx: &Receiver<CodeActionJob>,
+    reeval_rx: &Receiver<Url>,
+) -> std::io::Result<WorkerHandles> {
+    let workers_done = Arc::new((Mutex::new(WORKER_COUNT), Condvar::new()));
+    let mut workers = Vec::with_capacity(WORKER_COUNT);
+    for idx in 0..WORKER_COUNT {
+        let core = Arc::clone(core);
+        let ca_rx = code_action_rx.clone();
+        let re_rx = reeval_rx.clone();
+        let done = Arc::clone(&workers_done);
+        let handle = std::thread::Builder::new()
+            .name(format!("alint-lsp-worker-{idx}"))
+            .stack_size(WORKER_STACK_SIZE)
+            .spawn(move || {
+                let _guard = ThreadDoneGuard { done };
+                let mut ca_open = true;
+                let mut re_open = true;
+                while ca_open || re_open {
+                    if ca_open && re_open {
+                        // Strictly prioritize interactive `codeAction` over
+                        // coalesced background `didChange` re-evaluations so
+                        // rapid typing bursts can never starve quick-fixes or
+                        // `shutdown`.
+                        select_biased! {
+                            recv(ca_rx) -> msg => match msg {
+                                Ok(job) => run_code_action_job(&core, job),
+                                Err(_) => ca_open = false,
+                            },
+                            recv(re_rx) -> msg => match msg {
+                                Ok(uri) => run_reeval_job(&core, uri),
+                                Err(_) => re_open = false,
+                            },
+                        }
+                    } else if ca_open {
+                        match ca_rx.recv() {
+                            Ok(job) => run_code_action_job(&core, job),
+                            Err(_) => ca_open = false,
+                        }
+                    } else {
+                        match re_rx.recv() {
+                            Ok(uri) => run_reeval_job(&core, uri),
+                            Err(_) => re_open = false,
+                        }
+                    }
+                }
+            })?;
+        workers.push(handle);
+    }
+    Ok((workers, workers_done))
+}
+
+fn complete_shutdown(core: &ServerCore, shutdown_id: RequestId) {
+    let publish_drain = core.reeval_publish.lock();
+    drop(publish_drain);
+    core.send_ok(shutdown_id, serde_json::Value::Null);
+}
+
+#[cfg(test)]
+pub(super) fn run_connection(connection: &Connection, options: LspOptions) -> std::io::Result<i32> {
+    run_connection_outcome(connection, options).map(|outcome| outcome.code)
+}
+
 /// Drive the LSP protocol loop over `connection` until `exit` or EOF, returning
 /// the LSP-mandated process exit code (`0` after `shutdown` or EOF, `1` on
-/// `exit` without a prior `shutdown`).
-pub(super) fn run_connection(connection: &Connection, options: LspOptions) -> std::io::Result<i32> {
+/// `exit` without a prior `shutdown`) and whether the outbound relay drained
+/// within [`EXIT_JOIN_TIMEOUT`].
+pub(super) fn run_connection_outcome(
+    connection: &Connection,
+    options: LspOptions,
+) -> std::io::Result<ConnectionOutcome> {
     // Buffer outbound messages through an unbounded channel + dedicated relay
     // thread so `Connection::stdio()`'s `bounded(0)` writer channel can never
     // block workers holding `reeval_publish` or deadlock teardown.
     let (out_tx, out_rx) = unbounded::<Message>();
     let core = Arc::new(ServerCore::new(out_tx, options));
+    let _teardown = TeardownGuard { core: &core };
 
     let relay_done = Arc::new((Mutex::new(1usize), Condvar::new()));
     let relay_handle = spawn_outbound_relay(
-        Arc::clone(&core),
+        Arc::clone(&core.exiting),
         connection.sender.clone(),
         out_rx,
         Arc::clone(&relay_done),
@@ -245,38 +328,49 @@ pub(super) fn run_connection(connection: &Connection, options: LspOptions) -> st
     let check_done = Arc::new((Mutex::new(1usize), Condvar::new()));
     let check_handle = spawn_check_thread(Arc::clone(&core), check_rx, Arc::clone(&check_done))?;
 
-    let (job_tx, job_rx) = unbounded::<Job>();
-    let workers_done = Arc::new((Mutex::new(WORKER_COUNT), Condvar::new()));
-    let mut workers = Vec::with_capacity(WORKER_COUNT);
-    for idx in 0..WORKER_COUNT {
-        let core = Arc::clone(&core);
-        let rx = job_rx.clone();
-        let done = Arc::clone(&workers_done);
-        let handle = std::thread::Builder::new()
-            .name(format!("alint-lsp-worker-{idx}"))
-            .stack_size(WORKER_STACK_SIZE)
-            .spawn(move || {
-                let _guard = ThreadDoneGuard { done };
-                while let Ok(job) = rx.recv() {
-                    run_worker_job(&core, job);
-                }
-            })?;
-        workers.push(handle);
-    }
+    let (code_action_tx, code_action_rx) = unbounded::<CodeActionJob>();
+    let (reeval_tx, reeval_rx) = unbounded::<Url>();
+    let (workers, workers_done) = spawn_workers(&core, &code_action_rx, &reeval_rx)?;
 
     let mut initialized = false;
     let mut shutdown_received = false;
     let mut exit_received = false;
+    let mut pending_shutdown: Option<(RequestId, Receiver<()>)> = None;
 
-    for msg in &connection.receiver {
+    loop {
+        let msg = if let Some((shutdown_id, done_rx)) = pending_shutdown.take() {
+            // Stay responsive to `$/cancelRequest`, `exit`, EOF, and
+            // post-`shutdown` `InvalidRequest` while in-flight `codeAction`s
+            // drain, preventing `shutdown` from deadlocking the dispatch loop.
+            select! {
+                recv(done_rx) -> _ => {
+                    complete_shutdown(&core, shutdown_id);
+                    continue;
+                }
+                recv(connection.receiver) -> incoming => {
+                    pending_shutdown = Some((shutdown_id, done_rx));
+                    match incoming {
+                        Ok(msg) => msg,
+                        Err(_) => break,
+                    }
+                }
+            }
+        } else {
+            match connection.receiver.recv() {
+                Ok(msg) => msg,
+                Err(_) => break,
+            }
+        };
+
         match msg {
             Message::Request(req) => {
                 handle_request(
                     &core,
-                    &job_tx,
+                    &code_action_tx,
                     req,
                     &mut initialized,
                     &mut shutdown_received,
+                    &mut pending_shutdown,
                 );
             }
             Message::Notification(notif) => {
@@ -284,10 +378,18 @@ pub(super) fn run_connection(connection: &Connection, options: LspOptions) -> st
                     exit_received = true;
                     break;
                 }
-                if !initialized || shutdown_received {
+                if !initialized {
                     continue;
                 }
-                handle_notification(&core, &check_tx, &job_tx, notif);
+                if shutdown_received {
+                    // Still accept `$/cancelRequest` while `shutdown` is
+                    // waiting for in-flight `codeAction`s to drain.
+                    if pending_shutdown.is_some() && notif.method == Cancel::METHOD {
+                        handle_cancel(&core, notif.params);
+                    }
+                    continue;
+                }
+                handle_notification(&core, &check_tx, &reeval_tx, notif);
             }
             Message::Response(_) => {}
         }
@@ -296,29 +398,49 @@ pub(super) fn run_connection(connection: &Connection, options: LspOptions) -> st
     core.shutting_down.store(true, Ordering::SeqCst);
     core.exiting.store(true, Ordering::SeqCst);
     drop(check_tx);
-    drop(job_tx);
+    drop(code_action_tx);
+    drop(reeval_tx);
     core.close_outbound();
 
-    if wait_for_threads(&workers_done, EXIT_JOIN_TIMEOUT) {
+    // Share one bounded `EXIT_JOIN_TIMEOUT` deadline across all teardown joins.
+    let deadline = Instant::now() + EXIT_JOIN_TIMEOUT;
+    if wait_for_threads_until(&workers_done, deadline) {
         for worker in workers {
             let _ = worker.join();
         }
     }
-    if wait_for_threads(&check_done, EXIT_JOIN_TIMEOUT) {
+    if wait_for_threads_until(&check_done, deadline) {
         let _ = check_handle.join();
     }
-    if wait_for_threads(&relay_done, EXIT_JOIN_TIMEOUT) {
+    let relay_drained = wait_for_threads_until(&relay_done, deadline);
+    if relay_drained {
         let _ = relay_handle.join();
     }
-    Ok(exit_code(exit_received, shutdown_received))
+    Ok(ConnectionOutcome {
+        code: exit_code(exit_received, shutdown_received),
+        relay_drained,
+    })
+}
+
+fn handle_cancel(core: &ServerCore, params: serde_json::Value) {
+    match serde_json::from_value::<CancelParams>(params) {
+        Ok(params) => {
+            let id = cancel_id_to_request_id(params.id);
+            core.cancel_request(&id);
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, "ignoring malformed $/cancelRequest notification");
+        }
+    }
 }
 
 fn handle_request(
     core: &ServerCore,
-    job_tx: &Sender<Job>,
+    code_action_tx: &Sender<CodeActionJob>,
     req: Request,
     initialized: &mut bool,
     shutdown_received: &mut bool,
+    pending_shutdown: &mut Option<(RequestId, Receiver<()>)>,
 ) {
     if *shutdown_received {
         core.send_err(
@@ -352,14 +474,15 @@ fn handle_request(
     }
     if req.method == Shutdown::METHOD {
         *shutdown_received = true;
-        // Stop background notifications, wait for in-flight `codeAction`
-        // responses to queue, and wait for any active publish batch to finish
-        // so the `shutdown` response is the final message sent before `exit`.
+        // Stop background notifications, wait asynchronously for any in-flight
+        // `codeAction` responses to queue, and drain active publish batches so
+        // the `shutdown` response is the final message sent before `exit`.
         core.shutting_down.store(true, Ordering::SeqCst);
-        core.wait_for_code_actions();
-        let publish_drain = core.reeval_publish.lock();
-        drop(publish_drain);
-        core.send_ok(req.id, serde_json::Value::Null);
+        if let Some(done_rx) = core.arm_shutdown_wait() {
+            *pending_shutdown = Some((req.id, done_rx));
+        } else {
+            complete_shutdown(core, req.id);
+        }
         return;
     }
 
@@ -381,15 +504,21 @@ fn handle_request(
         },
         CodeActionRequest::METHOD => match serde_json::from_value::<CodeActionParams>(req.params) {
             Ok(params) => {
-                core.register_code_action(&req.id);
-                if job_tx
-                    .send(Job::CodeAction {
+                let token = core.register_code_action(&req.id);
+                if code_action_tx
+                    .send(CodeActionJob {
                         id: req.id.clone(),
+                        token,
                         params,
                     })
                     .is_err()
                 {
-                    core.finish_code_action(&req.id);
+                    core.send_err(
+                        req.id,
+                        ErrorCode::InternalError,
+                        "alint: worker pool unavailable".to_string(),
+                    );
+                    core.finish_code_action(token);
                 }
             }
             Err(err) => core.send_err(req.id, ErrorCode::InvalidParams, err.to_string()),
@@ -404,7 +533,7 @@ fn handle_request(
     }
 }
 
-fn handle_did_change(core: &ServerCore, job_tx: &Sender<Job>, params: serde_json::Value) {
+fn handle_did_change(core: &ServerCore, reeval_tx: &Sender<Url>, params: serde_json::Value) {
     match serde_json::from_value::<DidChangeTextDocumentParams>(params) {
         Ok(mut params) => {
             // FULL document sync -> the last content change carries the whole
@@ -419,23 +548,17 @@ fn handle_did_change(core: &ServerCore, job_tx: &Sender<Job>, params: serde_json
             }
             let uri = params.text_document.uri;
             let version = params.text_document.version;
-            let seq = {
+            {
                 let mut state = core.state.lock();
                 if !state.open.contains(&uri) {
                     return;
                 }
                 let seq = core.next_doc_seq.fetch_add(1, Ordering::SeqCst);
-                state.documents.insert(uri.clone(), change.text.clone());
+                state.documents.insert(uri.clone(), change.text);
                 state.versions.insert(uri.clone(), version);
                 state.doc_seq.insert(uri.clone(), seq);
-                seq
-            };
-            let _ = job_tx.send(Job::Reeval {
-                uri,
-                text: change.text,
-                version,
-                seq,
-            });
+            }
+            core.enqueue_reeval(reeval_tx, &uri);
         }
         Err(err) => {
             tracing::warn!(error = %err, "ignoring malformed didChange notification");
@@ -476,7 +599,7 @@ fn handle_workspace_folders(core: &ServerCore, params: serde_json::Value) -> boo
 fn handle_notification(
     core: &ServerCore,
     check_tx: &Sender<()>,
-    job_tx: &Sender<Job>,
+    reeval_tx: &Sender<Url>,
     notif: Notification,
 ) {
     let trigger_full_check = || {
@@ -488,15 +611,7 @@ fn handle_notification(
         Initialized::METHOD => {
             core.log_message(MessageType::INFO, "alint language server ready");
         }
-        Cancel::METHOD => match serde_json::from_value::<CancelParams>(notif.params) {
-            Ok(params) => {
-                let id = cancel_id_to_request_id(params.id);
-                core.cancel_request(&id);
-            }
-            Err(err) => {
-                tracing::warn!(error = %err, "ignoring malformed $/cancelRequest notification");
-            }
-        },
+        Cancel::METHOD => handle_cancel(core, notif.params),
         DidOpenTextDocument::METHOD => {
             match serde_json::from_value::<DidOpenTextDocumentParams>(notif.params) {
                 Ok(params) => {
@@ -518,7 +633,7 @@ fn handle_notification(
                 }
             }
         }
-        DidChangeTextDocument::METHOD => handle_did_change(core, job_tx, notif.params),
+        DidChangeTextDocument::METHOD => handle_did_change(core, reeval_tx, notif.params),
         DidSaveTextDocument::METHOD | DidChangeWatchedFiles::METHOD => trigger_full_check(),
         DidChangeWorkspaceFolders::METHOD => {
             if handle_workspace_folders(core, notif.params) {

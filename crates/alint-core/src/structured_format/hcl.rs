@@ -45,12 +45,28 @@ pub(crate) const MAX_HCL_BYTES: usize = 4 * 1024 * 1024;
 /// unaffected.
 pub(crate) const MAX_HCL_OBJECT_ITEMS: usize = 1_024;
 
-/// File-wide quadratic object-key work budget (`sum` of `(offset - object_start)`
-/// across object entries, roughly `0.5 * K * S` per object). Rejects adversarial
-/// files that pack many sibling wide objects or long expression keys inside a
-/// single object while admitting thousands of normal `tags = { ... }` maps or
-/// a large 1,024-entry lookup map.
+/// File-wide quadratic object-key work budget across object expressions.
+/// Counts cumulative key-expression bytes and multiplicative `VecMap::eq` cost
+/// for nested objects inside object keys, rejecting adversarial wide/nested
+/// object-key inputs while admitting large legitimate lookup maps and objects
+/// with multi-megabyte heredoc values.
 pub(crate) const MAX_HCL_OBJECT_WORK: u64 = 64_000_000;
+
+/// Maximum total heredoc-backtracking rescan bytes per file (`16 * MAX_HCL_BYTES`
+/// = 64 MiB). Admits dozens of legitimate empty heredocs (`<<EOF\nEOF`) inside
+/// multi-MiB Terraform files while strictly bounding worst-case rescan work.
+const MAX_HCL_RESCAN_BYTES: usize = 16 * MAX_HCL_BYTES;
+
+/// Maximum nesting depth of object literals opened inside an enclosing object
+/// literal's key expression (`{ { ... } = 1 }`). Bounds `hcl-edit`'s `VecMap::eq`
+/// recursive key comparisons (`O(K^(2D))`) before `body_to_value` rejects
+/// non-string keys, while still admitting realistic expression keys such as
+/// `{ jsonencode({ a = { b = 1 } }) = "v" }`.
+const MAX_HCL_KEY_OBJECT_DEPTH: usize = 4;
+
+/// Maximum entries allowed in a single object literal opened inside an
+/// enclosing object's key expression.
+const MAX_HCL_KEY_OBJECT_ITEMS: usize = 64;
 
 /// Maximum cumulative nesting depth contributed by HCL blocks and their labels
 /// (`sum(1 + block.labels.len())` along any root-to-leaf block path). `hcl-edit`
@@ -114,10 +130,47 @@ enum WidthScope {
     /// `in_expr` is `true` while scanning an attribute's RHS expression (so `{`
     /// opens an `ObjectBrace`, not a nested `BlockBrace`); `last_was_op` tracks
     /// whether the previous token was an operator that can continue across a
-    /// newline inside an expression.
-    BlockBrace { in_expr: bool, last_was_op: bool },
+    /// newline inside an expression; `last_was_dot` distinguishes legacy attr
+    /// splat (`a.*`) from binary `*`.
+    BlockBrace {
+        in_expr: bool,
+        last_was_op: bool,
+        last_was_dot: bool,
+    },
     /// Inside an HCL object expression (`{ k = v, ... }` or `{ k: v, ... }`).
-    ObjectBrace { count: usize, start: usize },
+    ObjectBrace {
+        count: usize,
+        /// Cumulative bytes consumed in key positions across entries of this object.
+        key_bytes: u64,
+        /// Byte offset where the current entry's key expression began.
+        key_start: usize,
+        /// Whether any non-whitespace/non-comment token has been seen for the
+        /// current entry's key expression (so leading comments/whitespace do not
+        /// inflate `key_bytes`).
+        key_seen: bool,
+        /// `false` while scanning an entry's key; flips to `true` on `=` / `:` at
+        /// `ternary_depth == 0` and resets to `false` on `,` or newline at end of
+        /// value expression.
+        in_value: bool,
+        /// Tracks whether the previous value token was an operator that can
+        /// continue across a newline.
+        last_was_op: bool,
+        /// Tracks `last_was_dot` for legacy attr splat (`a.*`) in value expressions.
+        last_was_dot: bool,
+        /// Unparenthesized `? ... :` ternary nesting depth inside a value.
+        ternary_depth: usize,
+        /// Multiplicative `VecMap::eq` cost multiplier contributed by nested
+        /// `ObjectBrace`s inside the current entry's key expression.
+        current_key_eq_cost: u64,
+        /// Worst-case `VecMap::eq` cost of any child object inside this object
+        /// (propagated upward if this object itself sits inside an outer key).
+        max_child_eq_cost: u64,
+        /// Whether this object was opened while an enclosing `ObjectBrace` was in
+        /// key position (`in_value == false`).
+        in_ancestor_key: bool,
+    },
+    /// Inside a `{ for ... }` object comprehension (uses `ForExpr`, not `VecMap`).
+    ForBrace,
     /// Inside `[ ... ]` (array literal or list `for` expression).
     Bracket,
     /// Inside `( ... )` (parenthesized expression or function arguments).
@@ -134,15 +187,29 @@ enum WidthScope {
         /// heredoc. `hcl-edit`'s `heredoc_template` greedily looks for
         /// `(line_ending, space0, delim, !is_id_continue)` first and only
         /// falls back to closing an empty heredoc on line 1 (`empty_close`) if
-        /// no later body-terminated delimiter exists before EOF.
+        /// no later body-terminated delimiter exists or a template element
+        /// backtracks.
         seen_body_line: bool,
         empty_close: Option<usize>,
+        /// Whether an unescaped `${` or `%{` appeared inside this heredoc (only
+        /// template markers can trigger mid-file winnow `opt(...)` backtracking).
+        saw_marker: bool,
+        /// `total_work` captured when this heredoc opened, restored on empty-close
+        /// backtrack so scanned expressions inside the discarded branch are not
+        /// double-charged.
+        work_at_open: u64,
+        /// Index into the scanner's snapshot table storing the scope stack right
+        /// after this heredoc would close empty on line 1.
+        snapshot_idx: Option<usize>,
     },
     /// Inside a `%{if ...}...%{endif}` or `%{for ...}...%{endfor}` directive
     /// body, where `hcl-edit` (`parser/template.rs`) ignores `"` and outer
     /// heredoc terminators and only stops on `${` / `%{`.
     TemplateDirective,
 }
+
+/// Deferred empty-heredoc branch `(scopes, resume_at, work_at_open)`.
+type BacktrackBranch = (Vec<WidthScope>, usize, u64);
 
 fn push_scope(scopes: &mut Vec<WidthScope>, scope: WidthScope) -> Result<(), String> {
     if scopes.len() >= MAX_HCL_SCAN_DEPTH {
@@ -159,15 +226,46 @@ fn bump_object_entry(
     pos: usize,
     total_work: &mut u64,
 ) -> Result<(), String> {
-    if let Some(WidthScope::ObjectBrace { count, start }) = scopes.last_mut() {
+    if let Some(WidthScope::ObjectBrace {
+        count,
+        key_bytes,
+        key_start,
+        key_seen,
+        in_value,
+        last_was_op,
+        last_was_dot,
+        ternary_depth,
+        current_key_eq_cost,
+        in_ancestor_key,
+        ..
+    }) = scopes.last_mut()
+    {
+        if *in_value || *ternary_depth > 0 {
+            return Ok(());
+        }
+        let this_key_bytes = if *key_seen {
+            pos.saturating_sub(*key_start) as u64
+        } else {
+            0
+        };
+        *key_bytes = key_bytes.saturating_add(this_key_bytes);
+        *in_value = true;
+        *last_was_op = true;
+        *last_was_dot = false;
         *count += 1;
-        if *count > MAX_HCL_OBJECT_ITEMS {
+        let max_items = if *in_ancestor_key {
+            MAX_HCL_KEY_OBJECT_ITEMS
+        } else {
+            MAX_HCL_OBJECT_ITEMS
+        };
+        if *count > max_items {
             return Err(format!(
-                "HCL object exceeds the maximum supported width ({MAX_HCL_OBJECT_ITEMS} entries)"
+                "HCL object exceeds the maximum supported width ({max_items} entries)"
             ));
         }
-        let span = pos.saturating_sub(*start) as u64;
-        *total_work = total_work.saturating_add(span.max(*count as u64));
+        let eq_work = (*count as u64).saturating_mul((*current_key_eq_cost).max(1));
+        let entry_work = (*key_bytes).max(eq_work);
+        *total_work = total_work.saturating_add(entry_work);
         if *total_work > MAX_HCL_OBJECT_WORK {
             return Err(format!(
                 "HCL object literals exceed the maximum supported parse complexity ({MAX_HCL_OBJECT_WORK})"
@@ -175,6 +273,52 @@ fn bump_object_entry(
         }
     }
     Ok(())
+}
+
+fn note_object_key_token(scopes: &mut [WidthScope], pos: usize) {
+    if let Some(WidthScope::ObjectBrace {
+        key_start,
+        key_seen,
+        in_value: false,
+        ..
+    }) = scopes.last_mut()
+        && !*key_seen
+    {
+        *key_start = pos;
+        *key_seen = true;
+    }
+}
+
+fn reset_object_entry(scopes: &mut [WidthScope], next_pos: usize) {
+    if let Some(WidthScope::ObjectBrace {
+        key_start,
+        key_seen,
+        in_value,
+        last_was_op,
+        last_was_dot,
+        ternary_depth,
+        current_key_eq_cost,
+        ..
+    }) = scopes.last_mut()
+    {
+        *in_value = false;
+        *last_was_op = false;
+        *last_was_dot = false;
+        *ternary_depth = 0;
+        *current_key_eq_cost = 0;
+        *key_start = next_pos;
+        *key_seen = false;
+    }
+}
+
+fn mark_enclosing_heredoc_saw_marker(scopes: &mut [WidthScope]) {
+    if let Some(WidthScope::Heredoc { saw_marker, .. }) = scopes
+        .iter_mut()
+        .rev()
+        .find(|s| matches!(s, WidthScope::Heredoc { .. }))
+    {
+        *saw_marker = true;
+    }
 }
 
 /// Skip HCL `ws` (ASCII whitespace plus `#`, `//`, and `/* ... */` comments)
@@ -245,10 +389,12 @@ fn scan_template_marker(
         *i += 3;
         Ok(false)
     } else if tail.starts_with(b"${") {
+        mark_enclosing_heredoc_saw_marker(scopes);
         *i += 2;
         push_scope(scopes, WidthScope::InterpBrace)?;
         Ok(true)
     } else if tail.starts_with(b"%{") {
+        mark_enclosing_heredoc_saw_marker(scopes);
         enter_directive_control(b, i, scopes)?;
         Ok(true)
     } else {
@@ -257,17 +403,25 @@ fn scan_template_marker(
     }
 }
 
-fn scan_string_scope(b: &[u8], i: &mut usize, scopes: &mut Vec<WidthScope>) -> Result<(), String> {
+fn scan_string_scope(
+    text: &str,
+    i: &mut usize,
+    scopes: &mut Vec<WidthScope>,
+) -> Result<(), String> {
+    let b = text.as_bytes();
     let n = b.len();
     while *i < n {
         match b[*i] {
-            b'\\' => *i = (*i + 2).min(n),
+            b'\\' => {
+                // Step past `\` and one full UTF-8 scalar so invalid non-ASCII
+                // escapes like `\é` never land on a continuation byte.
+                let next_len = text[*i + 1..].chars().next().map_or(0, char::len_utf8);
+                *i = (*i + 1 + next_len).min(n);
+            }
             b'"' => {
                 *i += 1;
                 scopes.pop();
-                if let Some(WidthScope::BlockBrace { last_was_op, .. }) = scopes.last_mut() {
-                    *last_was_op = false;
-                }
+                set_expr_op(scopes, false, false);
                 break;
             }
             b'$' | b'%' => {
@@ -322,12 +476,23 @@ fn match_heredoc_delimiter(text: &str, pos: usize, tag: &[u8]) -> Option<usize> 
 
 fn scan_heredoc_scope(
     text: &str,
-    tag_start: usize,
-    tag_end: usize,
-    seen_body_line: bool,
     i: &mut usize,
     scopes: &mut Vec<WidthScope>,
+    snapshots: &mut Vec<Vec<WidthScope>>,
+    worklist: &mut Vec<BacktrackBranch>,
 ) -> Result<(), String> {
+    let WidthScope::Heredoc {
+        tag_start,
+        tag_end,
+        seen_body_line,
+        empty_close,
+        saw_marker,
+        work_at_open,
+        snapshot_idx,
+    } = *scopes.last().expect("caller matched Heredoc")
+    else {
+        return Ok(());
+    };
     let b = text.as_bytes();
     let n = b.len();
     let tag = &b[tag_start..tag_end];
@@ -335,21 +500,37 @@ fn scan_heredoc_scope(
         && let Some(after) = match_heredoc_delimiter(text, *i, tag)
     {
         if seen_body_line {
+            // If an unescaped `${` / `%{` appeared inside this heredoc after an
+            // empty-heredoc candidate on line 1, `hcl-edit`'s `opt(...)` could
+            // have backtracked mid-file (e.g. `%{x}`, `${<}`, `${"`). Queue the
+            // empty-close branch so both interpretations are bounded.
+            if saw_marker && let (Some(resume_at), Some(idx)) = (empty_close, snapshot_idx) {
+                worklist.push((snapshots[idx].clone(), resume_at, work_at_open));
+            }
             *i = after;
             scopes.pop();
-            if let Some(WidthScope::BlockBrace { last_was_op, .. }) = scopes.last_mut() {
-                *last_was_op = false;
-            }
+            set_expr_op(scopes, false, false);
             return Ok(());
         }
         // Line 1 matches `[space0]<delim>[!id_continue]`. Record it as the
         // empty-heredoc fallback (matching `hcl-edit`'s `opt(...)` in
         // `heredoc_template`) and continue scanning for a greedy body-line
         // terminator.
-        if let Some(WidthScope::Heredoc { empty_close, .. }) = scopes.last_mut()
-            && empty_close.is_none()
-        {
-            *empty_close = Some(after);
+        if empty_close.is_none() {
+            let mut snap = scopes.clone();
+            snap.pop();
+            set_expr_op(&mut snap, false, false);
+            let idx = snapshots.len();
+            snapshots.push(snap);
+            if let Some(WidthScope::Heredoc {
+                empty_close,
+                snapshot_idx,
+                ..
+            }) = scopes.last_mut()
+            {
+                *empty_close = Some(after);
+                *snapshot_idx = Some(idx);
+            }
         }
     }
     while *i < n {
@@ -372,16 +553,65 @@ fn scan_heredoc_scope(
     Ok(())
 }
 
-fn set_block_op(scopes: &mut [WidthScope], in_expr: bool, last_was_op: bool) {
-    if let Some(WidthScope::BlockBrace {
-        in_expr: cur_in_expr,
-        last_was_op: cur_last,
-    }) = scopes.last_mut()
-    {
-        if in_expr {
-            *cur_in_expr = true;
+fn set_expr_op(scopes: &mut [WidthScope], in_expr: bool, last_was_op: bool) {
+    match scopes.last_mut() {
+        Some(WidthScope::BlockBrace {
+            in_expr: cur_in_expr,
+            last_was_op: cur_last,
+            last_was_dot,
+        }) => {
+            if in_expr {
+                *cur_in_expr = true;
+            }
+            *cur_last = last_was_op;
+            *last_was_dot = false;
         }
-        *cur_last = last_was_op;
+        Some(WidthScope::ObjectBrace {
+            last_was_op: cur_last,
+            last_was_dot,
+            ..
+        }) => {
+            *cur_last = last_was_op;
+            *last_was_dot = false;
+        }
+        _ => {}
+    }
+}
+
+fn set_expr_dot(scopes: &mut [WidthScope]) {
+    match scopes.last_mut() {
+        Some(WidthScope::BlockBrace {
+            in_expr,
+            last_was_op,
+            last_was_dot,
+        }) => {
+            *in_expr = true;
+            *last_was_op = true;
+            *last_was_dot = true;
+        }
+        Some(WidthScope::ObjectBrace {
+            last_was_op,
+            last_was_dot,
+            ..
+        }) => {
+            *last_was_op = true;
+            *last_was_dot = true;
+        }
+        _ => {}
+    }
+}
+
+fn take_last_was_dot(scopes: &mut [WidthScope]) -> bool {
+    match scopes.last_mut() {
+        Some(
+            WidthScope::BlockBrace { last_was_dot, .. }
+            | WidthScope::ObjectBrace { last_was_dot, .. },
+        ) => {
+            let was = *last_was_dot;
+            *last_was_dot = false;
+            was
+        }
+        _ => false,
     }
 }
 
@@ -389,6 +619,7 @@ fn scan_heredoc_opener(
     text: &str,
     i: &mut usize,
     scopes: &mut Vec<WidthScope>,
+    total_work: u64,
 ) -> Result<(), String> {
     let b = text.as_bytes();
     let mut j = *i + 2;
@@ -414,6 +645,7 @@ fn scan_heredoc_opener(
             j += 1;
         }
         if b.get(j) == Some(&b'\n') {
+            note_object_key_token(scopes, *i);
             *i = j + 1;
             push_scope(
                 scopes,
@@ -422,64 +654,209 @@ fn scan_heredoc_opener(
                     tag_end,
                     seen_body_line: false,
                     empty_close: None,
+                    saw_marker: false,
+                    work_at_open: total_work,
+                    snapshot_idx: None,
                 },
             )?;
-        } else {
-            *i = tag_end;
+            return Ok(());
         }
-    } else {
-        *i += 2;
     }
+    // Not a valid `<<[-]<ident>\r?\n` heredoc opener: consume ONLY the first
+    // `<` byte as a binary `<` operator so adjacent `<<<EOT` (`<` followed by
+    // `<<EOT\n`) still recognizes the heredoc opener on the next iteration.
+    note_object_key_token(scopes, *i);
+    set_expr_op(scopes, true, true);
+    *i += 1;
     Ok(())
 }
 
-fn scan_delim_token(byte: u8, pos: usize, scopes: &mut Vec<WidthScope>) -> Result<(), String> {
-    match byte {
-        b'{' => {
-            let next_scope = match scopes.last() {
-                Some(WidthScope::BlockBrace { in_expr: false, .. }) => WidthScope::BlockBrace {
-                    in_expr: false,
-                    last_was_op: false,
-                },
-                _ => WidthScope::ObjectBrace {
-                    count: 0,
-                    start: pos,
-                },
-            };
-            push_scope(scopes, next_scope)?;
+fn skip_hcl_ident(text: &str, idx: usize) -> Option<usize> {
+    let first = text[idx..].chars().next()?;
+    if !is_hcl_id_start(first) {
+        return None;
+    }
+    let mut end = idx + first.len_utf8();
+    while let Some(ch) = text[end..].chars().next() {
+        if is_hcl_id_continue(ch) {
+            end += ch.len_utf8();
+        } else {
+            break;
         }
-        b'}' => {
-            if scopes.len() > 1
-                && matches!(
-                    scopes.last(),
-                    Some(
-                        WidthScope::BlockBrace { .. }
-                            | WidthScope::ObjectBrace { .. }
-                            | WidthScope::InterpBrace
-                    )
+    }
+    Some(end)
+}
+
+/// Whether the `{` at `brace_pos` opens an HCL `for` object expression
+/// (`{ for k [, v] in <expr> : ... }`), which parses as `ForExpr` rather than
+/// an `Object` (`VecMap`). Matching `for <ident> [, <ident>] in` prevents both
+/// false-positive `in_ancestor_key` throttling on `{ for k, v in { ... } : ... }`
+/// and spoofing of real object literals.
+fn is_for_object_intro(text: &str, brace_pos: usize) -> bool {
+    let b = text.as_bytes();
+    let mut idx = skip_hcl_ws(b, brace_pos + 1);
+    let Some(after_for) = skip_hcl_ident(text, idx) else {
+        return false;
+    };
+    if &text[idx..after_for] != "for" {
+        return false;
+    }
+    idx = skip_hcl_ws(b, after_for);
+    let Some(after_first) = skip_hcl_ident(text, idx) else {
+        return false;
+    };
+    idx = skip_hcl_ws(b, after_first);
+    if b.get(idx) == Some(&b',') {
+        idx = skip_hcl_ws(b, idx + 1);
+        let Some(after_second) = skip_hcl_ident(text, idx) else {
+            return false;
+        };
+        idx = skip_hcl_ws(b, after_second);
+    }
+    let Some(after_in) = skip_hcl_ident(text, idx) else {
+        return false;
+    };
+    &text[idx..after_in] == "in"
+}
+
+fn open_brace_scope(text: &str, pos: usize, scopes: &mut Vec<WidthScope>) -> Result<(), String> {
+    let next_scope = match scopes.last() {
+        Some(WidthScope::BlockBrace { in_expr: false, .. }) => WidthScope::BlockBrace {
+            in_expr: false,
+            last_was_op: false,
+            last_was_dot: false,
+        },
+        _ if is_for_object_intro(text, pos) => {
+            note_object_key_token(scopes, pos);
+            WidthScope::ForBrace
+        }
+        _ => {
+            note_object_key_token(scopes, pos);
+            let in_ancestor_key = scopes.iter().any(|s| {
+                matches!(
+                    s,
+                    WidthScope::ObjectBrace {
+                        in_value: false,
+                        ..
+                    }
                 )
-            {
-                let popped = scopes.pop();
-                if matches!(popped, Some(WidthScope::ObjectBrace { .. })) {
-                    set_block_op(scopes, false, false);
+            });
+            if in_ancestor_key {
+                let key_obj_depth = scopes
+                    .iter()
+                    .filter(|s| {
+                        matches!(
+                            s,
+                            WidthScope::ObjectBrace {
+                                in_ancestor_key: true,
+                                ..
+                            }
+                        )
+                    })
+                    .count();
+                if key_obj_depth >= MAX_HCL_KEY_OBJECT_DEPTH {
+                    return Err(format!(
+                        "HCL object key nesting exceeds the maximum supported depth ({MAX_HCL_KEY_OBJECT_DEPTH})"
+                    ));
                 }
             }
+            WidthScope::ObjectBrace {
+                count: 0,
+                key_bytes: 0,
+                key_start: pos + 1,
+                key_seen: false,
+                in_value: false,
+                last_was_op: false,
+                last_was_dot: false,
+                ternary_depth: 0,
+                current_key_eq_cost: 0,
+                max_child_eq_cost: 1,
+                in_ancestor_key,
+            }
         }
-        b'[' => push_scope(scopes, WidthScope::Bracket)?,
-        b'(' => push_scope(scopes, WidthScope::Paren)?,
+    };
+    push_scope(scopes, next_scope)
+}
+
+fn close_brace_scope(scopes: &mut Vec<WidthScope>) {
+    if scopes.len() <= 1
+        || !matches!(
+            scopes.last(),
+            Some(
+                WidthScope::BlockBrace { .. }
+                    | WidthScope::ObjectBrace { .. }
+                    | WidthScope::ForBrace
+                    | WidthScope::InterpBrace
+            )
+        )
+    {
+        return;
+    }
+    match scopes.pop() {
+        Some(WidthScope::ObjectBrace {
+            count,
+            max_child_eq_cost,
+            in_ancestor_key,
+            ..
+        }) => {
+            if in_ancestor_key {
+                let pairs =
+                    ((count as u64).saturating_mul((count as u64).saturating_add(1)) / 2).max(1);
+                let self_eq_cost = pairs.saturating_mul(max_child_eq_cost.max(1));
+                if let Some(WidthScope::ObjectBrace {
+                    in_value,
+                    current_key_eq_cost,
+                    max_child_eq_cost: parent_max,
+                    ..
+                }) = scopes
+                    .iter_mut()
+                    .rev()
+                    .find(|s| matches!(s, WidthScope::ObjectBrace { .. }))
+                {
+                    *parent_max = (*parent_max).max(self_eq_cost);
+                    if !*in_value {
+                        *current_key_eq_cost = current_key_eq_cost.saturating_add(self_eq_cost);
+                    }
+                }
+            }
+            set_expr_op(scopes, false, false);
+        }
+        Some(WidthScope::ForBrace) => set_expr_op(scopes, false, false),
+        _ => {}
+    }
+}
+
+fn scan_delim_token(
+    text: &str,
+    byte: u8,
+    pos: usize,
+    scopes: &mut Vec<WidthScope>,
+) -> Result<(), String> {
+    match byte {
+        b'{' => open_brace_scope(text, pos, scopes)?,
+        b'}' => close_brace_scope(scopes),
+        b'[' => {
+            note_object_key_token(scopes, pos);
+            push_scope(scopes, WidthScope::Bracket)?;
+        }
+        b'(' => {
+            note_object_key_token(scopes, pos);
+            push_scope(scopes, WidthScope::Paren)?;
+        }
         b']' if matches!(scopes.last(), Some(WidthScope::Bracket)) => {
             scopes.pop();
-            set_block_op(scopes, false, false);
+            set_expr_op(scopes, false, false);
         }
         b')' if matches!(scopes.last(), Some(WidthScope::Paren)) => {
             scopes.pop();
-            set_block_op(scopes, false, false);
+            set_expr_op(scopes, false, false);
         }
         _ => {}
     }
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 fn scan_code_token(
     text: &str,
     i: &mut usize,
@@ -491,13 +868,24 @@ fn scan_code_token(
     match b[*i] {
         b' ' | b'\t' | b'\r' => *i += 1,
         b'\n' => {
-            if let Some(WidthScope::BlockBrace {
-                in_expr,
-                last_was_op,
-            }) = scopes.last_mut()
-                && !*last_was_op
-            {
-                *in_expr = false;
+            match scopes.last_mut() {
+                Some(WidthScope::BlockBrace {
+                    in_expr,
+                    last_was_op,
+                    last_was_dot,
+                }) if !*last_was_op => {
+                    *in_expr = false;
+                    *last_was_dot = false;
+                }
+                Some(WidthScope::ObjectBrace {
+                    in_value: true,
+                    last_was_op: false,
+                    ternary_depth: 0,
+                    ..
+                }) => {
+                    reset_object_entry(scopes, *i + 1);
+                }
+                _ => {}
             }
             *i += 1;
         }
@@ -519,89 +907,156 @@ fn scan_code_token(
             *i = (*i + 2).min(n);
         }
         b'"' => {
+            note_object_key_token(scopes, *i);
             *i += 1;
             push_scope(scopes, WidthScope::String)?;
         }
-        b'<' if b.get(*i + 1) == Some(&b'<') => scan_heredoc_opener(text, i, scopes)?,
+        b'<' if b.get(*i + 1) == Some(&b'<') => {
+            scan_heredoc_opener(text, i, scopes, *total_work)?;
+        }
         b'{' | b'}' | b'[' | b']' | b'(' | b')' => {
-            scan_delim_token(b[*i], *i, scopes)?;
+            scan_delim_token(text, b[*i], *i, scopes)?;
+            *i += 1;
+        }
+        b',' => {
+            if matches!(scopes.last(), Some(WidthScope::ObjectBrace { .. })) {
+                reset_object_entry(scopes, *i + 1);
+            } else {
+                set_expr_op(scopes, true, true);
+            }
+            *i += 1;
+        }
+        b'.' => {
+            note_object_key_token(scopes, *i);
+            set_expr_dot(scopes);
+            *i += 1;
+        }
+        b'*' => {
+            note_object_key_token(scopes, *i);
+            if take_last_was_dot(scopes) {
+                // Legacy attribute splat (`a.*`): completes the traversal
+                // rather than acting as a binary `*` operator.
+                set_expr_op(scopes, false, false);
+            } else {
+                set_expr_op(scopes, true, true);
+            }
+            *i += 1;
+        }
+        b'?' => {
+            note_object_key_token(scopes, *i);
+            if let Some(WidthScope::ObjectBrace {
+                in_value: true,
+                ternary_depth,
+                ..
+            }) = scopes.last_mut()
+            {
+                *ternary_depth = ternary_depth.saturating_add(1);
+            }
+            set_expr_op(scopes, true, true);
             *i += 1;
         }
         b'!' | b'<' | b'>' if b.get(*i + 1) == Some(&b'=') => {
-            set_block_op(scopes, true, true);
+            note_object_key_token(scopes, *i);
+            set_expr_op(scopes, true, true);
             *i += 2;
         }
         b'=' => {
-            set_block_op(scopes, true, true);
             if matches!(b.get(*i + 1), Some(b'=' | b'>')) {
+                note_object_key_token(scopes, *i);
+                set_expr_op(scopes, true, true);
                 *i += 2;
             } else {
+                let pos = *i;
+                set_expr_op(scopes, true, true);
                 *i += 1;
-                bump_object_entry(scopes, *i, total_work)?;
+                bump_object_entry(scopes, pos, total_work)?;
             }
         }
         b':' => {
             if b.get(*i + 1) == Some(&b':') {
-                set_block_op(scopes, false, true);
+                note_object_key_token(scopes, *i);
+                set_expr_op(scopes, false, true);
                 *i += 2;
-            } else {
-                set_block_op(scopes, true, true);
+            } else if let Some(WidthScope::ObjectBrace {
+                in_value: true,
+                ternary_depth,
+                ..
+            }) = scopes.last_mut()
+                && *ternary_depth > 0
+            {
+                *ternary_depth -= 1;
+                set_expr_op(scopes, true, true);
                 *i += 1;
-                bump_object_entry(scopes, *i, total_work)?;
+            } else {
+                let pos = *i;
+                set_expr_op(scopes, true, true);
+                *i += 1;
+                bump_object_entry(scopes, pos, total_work)?;
             }
         }
-        b'?' | b'+' | b'-' | b'*' | b'/' | b'%' | b'!' | b'<' | b'>' | b'&' | b'|' => {
-            set_block_op(scopes, true, true);
+        b'+' | b'-' | b'/' | b'%' | b'!' | b'<' | b'>' | b'&' | b'|' => {
+            note_object_key_token(scopes, *i);
+            set_expr_op(scopes, true, true);
             *i += 1;
         }
         _ => {
-            set_block_op(scopes, false, false);
-            *i += 1;
+            note_object_key_token(scopes, *i);
+            if let Some(first) = text[*i..].chars().next()
+                && is_hcl_id_start(first)
+            {
+                // Consume a complete HCL identifier (including `-` and Unicode
+                // XID continue chars) so hyphenated block types/labels like
+                // `env us-east-1 { ... }` and trailing-`-` identifiers never
+                // trip the binary `-` operator path.
+                *i += first.len_utf8();
+                while let Some(ch) = text[*i..].chars().next() {
+                    if is_hcl_id_continue(ch) {
+                        *i += ch.len_utf8();
+                    } else {
+                        break;
+                    }
+                }
+            } else {
+                *i += 1;
+            }
+            set_expr_op(scopes, false, false);
         }
     }
     Ok(())
 }
 
 /// Iterative, zero-recursion scan counting `=` / `:` assignments directly
-/// inside each `{ ... }` object expression (plus cumulative quadratic work)
-/// while skipping comments, double-quoted string bodies, heredoc bodies, and
-/// `%{if}`/`%{for}` directive bodies (still descending into `${...}` / `%{...}`
-/// template expressions).
+/// inside each `{ ... }` object expression (plus cumulative key-comparison and
+/// nested-object-key complexity) while skipping comments, double-quoted string
+/// bodies, heredoc bodies, and `%{if}`/`%{for}` directive bodies (still
+/// descending into `${...}` / `%{...}` template expressions).
 fn check_object_width(text: &str) -> Result<(), String> {
     let b = text.as_bytes();
     let n = b.len();
     let mut i = 0usize;
     let mut total_work = 0u64;
-    let mut rescan_budget = MAX_HCL_BYTES;
+    let mut rescan_budget = MAX_HCL_RESCAN_BYTES;
+    let mut snapshots: Vec<Vec<WidthScope>> = Vec::new();
+    let mut worklist: Vec<BacktrackBranch> = Vec::new();
     let mut scopes: Vec<WidthScope> = vec![WidthScope::BlockBrace {
         in_expr: false,
         last_was_op: false,
+        last_was_dot: false,
     }];
 
     loop {
         while i < n {
             match *scopes.last().expect("root BlockBrace always present") {
-                WidthScope::String => scan_string_scope(b, &mut i, &mut scopes)?,
+                WidthScope::String => scan_string_scope(text, &mut i, &mut scopes)?,
                 WidthScope::TemplateDirective => {
                     scan_directive_body_scope(b, &mut i, &mut scopes)?;
                 }
-                WidthScope::Heredoc {
-                    tag_start,
-                    tag_end,
-                    seen_body_line,
-                    ..
-                } => {
-                    scan_heredoc_scope(
-                        text,
-                        tag_start,
-                        tag_end,
-                        seen_body_line,
-                        &mut i,
-                        &mut scopes,
-                    )?;
+                WidthScope::Heredoc { .. } => {
+                    scan_heredoc_scope(text, &mut i, &mut scopes, &mut snapshots, &mut worklist)?;
                 }
                 WidthScope::BlockBrace { .. }
                 | WidthScope::ObjectBrace { .. }
+                | WidthScope::ForBrace
                 | WidthScope::Bracket
                 | WidthScope::Paren
                 | WidthScope::InterpBrace => {
@@ -610,24 +1065,51 @@ fn check_object_width(text: &str) -> Result<(), String> {
             }
         }
 
-        // If EOF was reached while still inside an unclosed heredoc whose line 1
-        // matched `[space0]<delim>[!id_continue]`, emulate `hcl-edit`'s `opt(...)`
-        // fallback for empty heredocs and continue scanning right after line 1's
-        // delimiter.
-        if let Some(WidthScope::Heredoc {
+        // If EOF was reached while ANY enclosing heredoc had a line-1
+        // empty-heredoc fallback (even if an inner `InterpBrace` / `String` /
+        // `TemplateDirective` was left unclosed above it), emulate `hcl-edit`'s
+        // `opt(...)` fallback and resume right after line 1's delimiter.
+        if let Some(heredoc_idx) = scopes.iter().rposition(|s| {
+            matches!(
+                s,
+                WidthScope::Heredoc {
+                    empty_close: Some(_),
+                    ..
+                }
+            )
+        }) && let WidthScope::Heredoc {
             empty_close: Some(resume_at),
+            work_at_open,
+            snapshot_idx: Some(snap_idx),
             ..
-        }) = scopes.last().copied()
+        } = scopes[heredoc_idx]
         {
             let cost = n.saturating_sub(resume_at);
             if cost > rescan_budget {
                 return Err(format!(
-                    "HCL heredoc backtracking exceeds the maximum supported complexity ({MAX_HCL_BYTES} bytes)"
+                    "HCL heredoc backtracking exceeds the maximum supported complexity ({MAX_HCL_RESCAN_BYTES} bytes)"
                 ));
             }
             rescan_budget -= cost;
-            scopes.pop();
-            set_block_op(&mut scopes, false, false);
+            scopes = snapshots[snap_idx].clone();
+            total_work = work_at_open;
+            i = resume_at;
+            continue;
+        }
+
+        // Also scan any deferred empty-heredoc branch recorded when a heredoc
+        // containing `${` / `%{` markers closed on a later line (covering
+        // mid-file winnow `opt(...)` backtracking such as `# %{x}` or `# ${<}`).
+        if let Some((next_scopes, resume_at, work_at_open)) = worklist.pop() {
+            let cost = n.saturating_sub(resume_at);
+            if cost > rescan_budget {
+                return Err(format!(
+                    "HCL heredoc backtracking exceeds the maximum supported complexity ({MAX_HCL_RESCAN_BYTES} bytes)"
+                ));
+            }
+            rescan_budget -= cost;
+            scopes = next_scopes;
+            total_work = work_at_open;
             i = resume_at;
             continue;
         }

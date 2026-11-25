@@ -751,3 +751,185 @@ fn hcl_heredoc_terminators_and_interp_comments_behave_consistently() {
         assert!(Format::Hcl.parse(&bomb).is_err());
     }
 }
+
+#[test]
+fn hcl_nested_object_in_object_key_dos_is_rejected_while_for_and_jsonencode_pass() {
+    use std::fmt::Write as _;
+
+    // C1: Depth-3 nested objects in key position (`O(K^(2D))` in `VecMap::eq`).
+    let mut inner = String::from("{ ");
+    for k in 0..39 {
+        let _ = write!(inner, "a{k} = 1, ");
+    }
+    let mut nested = String::from("x = {\n");
+    for outer in 0..40 {
+        nested.push_str("  { ");
+        for mid in 0..39 {
+            let _ = write!(nested, "{inner}id = {mid} }} = 1, ");
+        }
+        let _ = writeln!(nested, "z = {outer} }} = 1");
+    }
+    nested.push_str("}\n");
+    let err = Format::Hcl
+        .parse(&nested)
+        .expect_err("exponential nested object-in-key DoS must be rejected");
+    assert!(
+        err.contains("object") || err.contains("complexity") || err.contains("width"),
+        "unexpected error: {err}"
+    );
+
+    // Value-side wide object inside a key object is also bounded.
+    let mut val_key = String::from("x = {\n");
+    let mut wide_val = String::from("{ ");
+    for k in 0..70 {
+        let _ = write!(wide_val, "k{k} = 1, ");
+    }
+    wide_val.push('}');
+    for i in 0..5 {
+        let _ = writeln!(val_key, "  {{ a = {wide_val}, z = {i} }} = 1");
+    }
+    val_key.push_str("}\n");
+    assert!(Format::Hcl.parse(&val_key).is_err());
+
+    // Legitimate small expression key and wide `{ for ... in { ... } : ... }`
+    // comprehension remain accepted.
+    let legit_key = r#"x = { jsonencode({ a = { b = 1 } }) = "v" }"#;
+    assert!(Format::Hcl.parse(legit_key).is_ok());
+
+    let mut for_expr = String::from("x = { for k, v in {\n");
+    for i in 0..200 {
+        let _ = writeln!(for_expr, "  k{i} = {i}");
+    }
+    for_expr.push_str("} : k => v }\n");
+    assert!(Format::Hcl.parse(&for_expr).is_ok());
+}
+
+#[test]
+fn hcl_adjacent_less_than_heredoc_cannot_bypass_object_width_guard() {
+    use std::fmt::Write as _;
+
+    for opener in ["<<<EOT", "<<<-EOT"] {
+        let mut hcl = format!("x = a {opener}\n\"\nEOT\nz = {{\n");
+        for i in 0..=MAX_HCL_OBJECT_ITEMS {
+            let _ = writeln!(hcl, "  k{i} = {i}");
+        }
+        hcl.push_str("}\n");
+        let err = Format::Hcl
+            .parse(&hcl)
+            .expect_err("`<` adjacent to heredoc must not bypass object width guard");
+        assert!(
+            err.contains("maximum supported width"),
+            "opener={opener}: {err}"
+        );
+    }
+}
+
+#[test]
+fn hcl_empty_heredoc_mid_file_and_buried_eof_backtracking_cannot_bypass_guard() {
+    use std::fmt::Write as _;
+
+    let mut wide_obj = String::from("z = {\n");
+    for i in 0..=MAX_HCL_OBJECT_ITEMS {
+        let _ = writeln!(wide_obj, "  k{i} = {i}");
+    }
+    wide_obj.push_str("}\n");
+
+    // Repro 3a: inner unclosed scope (`# %{x"` and `# ${"`) buried above empty heredoc.
+    for trigger in ["# %{x\"", "# ${\""] {
+        let hcl = format!("a = <<EOT\nEOT\n{trigger}\n{wide_obj}");
+        let err = Format::Hcl
+            .parse(&hcl)
+            .expect_err("buried empty heredoc EOF backtrack must enforce object width");
+        assert!(
+            err.contains("maximum supported width"),
+            "trigger={trigger}: {err}"
+        );
+    }
+
+    // Repro 3b: mid-file winnow backtrack (`# %{x}`, `# ${<}`) hidden by a later
+    // delimiter inside a multiline string.
+    for trigger in ["# %{x}", "# ${<}", "# %{else}"] {
+        let hcl = format!("a = <<EOT\nEOT\n{trigger}\n{wide_obj}c = \"\nEOT\n\"\n");
+        let err = Format::Hcl
+            .parse(&hcl)
+            .expect_err("mid-file empty heredoc backtrack must enforce object width");
+        assert!(
+            err.contains("maximum supported width"),
+            "trigger={trigger}: {err}"
+        );
+    }
+}
+
+#[test]
+fn hcl_hyphenated_blocks_legacy_splat_and_trailing_hyphen_idents_are_not_misclassified() {
+    use std::fmt::Write as _;
+
+    let mut attrs = String::new();
+    for i in 0..=MAX_HCL_OBJECT_ITEMS {
+        let _ = writeln!(attrs, "    k{i} = {i}");
+    }
+
+    // Hyphenated block label (`env us-east-1 { locals { ... } }`).
+    let hyphen_block = format!("env us-east-1 {{\n  locals {{\n{attrs}  }}\n}}\n");
+    assert!(Format::Hcl.parse(&hyphen_block).is_ok());
+
+    // Preceding legacy attribute splat (`a.*`).
+    let splat = format!("all = aws_instance.web.*\nlocals {{\n{attrs}}}\n");
+    assert!(Format::Hcl.parse(&splat).is_ok());
+
+    // Preceding identifier with trailing `-`.
+    let trailing_dash = format!("x = foo-\nlocals {{\n{attrs}}}\n");
+    assert!(Format::Hcl.parse(&trailing_dash).is_ok());
+}
+
+#[test]
+fn hcl_large_value_objects_ternaries_and_multiple_empty_heredocs_pass_cleanly() {
+    use std::fmt::Write as _;
+
+    // H5: 17-entry object with a ~3.5 MiB heredoc value must NOT trip MAX_HCL_OBJECT_WORK.
+    let mut big_val = String::from("x = {\n  policy = <<EOF\n");
+    for _ in 0..56_000 {
+        big_val.push_str("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde\n");
+    }
+    big_val.push_str("EOF\n");
+    for i in 1..=17 {
+        let _ = writeln!(big_val, "  k{i} = {i}");
+    }
+    big_val.push_str("}\n");
+    assert!(Format::Hcl.parse(&big_val).is_ok());
+
+    // H5: 500-entry lookup map where each value is a ~500 B nested object.
+    let mut lookup = String::from("x = {\n");
+    for i in 0..500 {
+        let _ = writeln!(
+            lookup,
+            "  k{i} = {{ a = \"{}\", b = \"{}\", c = {i} }}",
+            "x".repeat(200),
+            "y".repeat(200)
+        );
+    }
+    lookup.push_str("}\n");
+    assert!(Format::Hcl.parse(&lookup).is_ok());
+
+    // L10: 600-entry object with unparenthesized ternaries must NOT double-charge.
+    let mut ternaries = String::from("x = {\n");
+    for i in 0..600 {
+        let _ = writeln!(ternaries, "  k{i} = var.flag ? \"yes\" : \"no\"");
+    }
+    ternaries.push_str("}\n");
+    assert!(Format::Hcl.parse(&ternaries).is_ok());
+
+    // M8 & M9: Multi-MiB file with multiple empty heredocs near the top passes
+    // without exceeding rescan budget or multi-charging `total_work`.
+    let mut multi_empty = String::from("a = <<EOF\nEOF\nb = <<EOT\nEOT\nc = <<END\nEND\n");
+    multi_empty.push_str("big = <<BODY\n");
+    for _ in 0..34_000 {
+        multi_empty.push_str("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde\n");
+    }
+    multi_empty.push_str("BODY\n");
+    assert!(multi_empty.len() > 2 * 1024 * 1024);
+    assert!(Format::Hcl.parse(&multi_empty).is_ok());
+
+    // L11: Invalid non-ASCII string escape `\é` must return Err cleanly without panicking.
+    assert!(Format::Hcl.parse("x = \"\\é\"\n").is_err());
+}

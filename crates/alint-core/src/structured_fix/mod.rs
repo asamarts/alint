@@ -478,26 +478,51 @@ mod hcl {
             return None;
         };
         let mut found: Option<Target> = None;
+        let mut matched_block: Option<&Block> = None;
         let mut matches = 0usize;
+        let mut has_attr = false;
+        let mut has_block = false;
         for structure in body {
             if let Some(attr) = structure.as_attribute() {
                 if attr.key.as_str() == key {
+                    has_attr = true;
                     matches += 1;
                     found = resolve_in_attribute(attr, rest);
                 }
             } else if let Some(block) = structure.as_block()
                 && block.ident.as_str() == key
-                && labels_match(block, rest)
             {
-                matches += 1;
-                found = resolve_block_body(block, &rest[block.labels.len()..]);
+                has_block = true;
+                if labels_match(block, rest) {
+                    matches += 1;
+                    matched_block = Some(block);
+                    found = resolve_block_body(block, &rest[block.labels.len()..]);
+                }
             }
         }
-        // Exactly one structure matched the key (and, for a block, its labels).
-        // Two matches -- an attribute AND a block, or two blocks sharing
-        // ident+labels -- is ambiguous: decline.
-        if matches != 1 {
+        // Any attribute+block name clash (even when the block has labels) or
+        // repeated match shadows earlier definitions in `Format::Hcl.parse`:
+        // decline so we never splice a dead node.
+        if (has_attr && has_block) || matches != 1 {
             return None;
+        }
+        // Also decline if another block with the same `ident` has labels that
+        // strictly prefix (or are strictly prefixed by) the matched block's
+        // labels: `Format::Hcl.parse` merges `Body` with `Map` and overwrites
+        // one of them.
+        if let Some(matched) = matched_block {
+            let clash = body.iter().filter_map(|s| s.as_block()).any(|other| {
+                other.ident.as_str() == key
+                    && other.labels.len() != matched.labels.len()
+                    && other
+                        .labels
+                        .iter()
+                        .zip(&matched.labels)
+                        .all(|(a, b)| a.as_str() == b.as_str())
+            });
+            if clash {
+                return None;
+            }
         }
         found
     }
@@ -542,8 +567,11 @@ mod hcl {
 
     /// Navigate an object `Expression` by `rest`, returning the target member's
     /// value span. IDENT keys only (`{ a = 1 }`); a quoted / expression key
-    /// (`{ "a" = 1 }`) or an ambiguous match declines.
-    fn object_value_span(expr: &Expression, rest: &[PathSeg]) -> Option<Range<usize>> {
+    /// (`{ "a" = 1 }`) or an ambiguous/shadowed match declines.
+    fn object_value_span(mut expr: &Expression, rest: &[PathSeg]) -> Option<Range<usize>> {
+        while let Some(parens) = expr.as_parenthesis() {
+            expr = parens.inner();
+        }
         let object = expr.as_object()?;
         let (seg, sub) = rest.split_first()?;
         let PathSeg::Key(key) = seg else {
@@ -552,9 +580,20 @@ mod hcl {
         let mut found = None;
         let mut matches = 0usize;
         for (k, v) in object {
-            if k.as_ident().is_some_and(|i| i.as_str() == key.as_str()) {
-                matches += 1;
-                found = Some(v);
+            if let Some(ident) = k.as_ident() {
+                if ident.as_str() == key.as_str() {
+                    matches += 1;
+                    found = Some(v);
+                }
+            } else if let Some(mut key_expr) = k.as_expr() {
+                while let Some(parens) = key_expr.as_parenthesis() {
+                    key_expr = parens.inner();
+                }
+                // A quoted `"Team" = ...` or dynamic expression key can shadow
+                // an ident `Team = ...` in `Format::Hcl.parse` (last write wins).
+                if key_expr.as_str().is_none_or(|s| s == key.as_str()) {
+                    return None;
+                }
             }
         }
         if matches != 1 {
@@ -633,12 +672,21 @@ mod hcl {
     /// closes on this same line (the tail ends with `*/`); a multi-line block
     /// comment's tail would not end with `*/`, so removal stays conservative
     /// (attribute-span only) and never splits the comment.
-    fn line_tail_is_blank_or_comment(after: &str) -> bool {
-        let tail = after.trim_matches(char::is_whitespace);
-        tail.is_empty()
-            || tail.starts_with('#')
-            || tail.starts_with("//")
-            || (tail.starts_with("/*") && tail.ends_with("*/"))
+    pub(super) fn line_tail_is_blank_or_comment(mut tail: &str) -> bool {
+        loop {
+            tail = tail.trim_start_matches(char::is_whitespace);
+            if tail.is_empty() || tail.starts_with('#') || tail.starts_with("//") {
+                return true;
+            }
+            if let Some(rest) = tail.strip_prefix("/*") {
+                let Some(end) = rest.find("*/") else {
+                    return false;
+                };
+                tail = &rest[end + 2..];
+                continue;
+            }
+            return false;
+        }
     }
 
     /// Serialize a scalar `Value` as HCL bytes. Strings are quoted with HCL
