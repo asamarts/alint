@@ -69,6 +69,7 @@ toml_edit.workspace = true
 jsonc-parser.workspace = true
 roxmltree.workspace = true
 hcl.workspace = true
+unicode-ident.workspace = true
 adotenv.workspace = true
 # The parser facade's reference backends (ADR-0036, ADR-0041), behind the
 # test-only `yaml-reference` feature, which no release build enables.

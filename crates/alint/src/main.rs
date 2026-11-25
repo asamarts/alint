@@ -532,10 +532,11 @@ fn reject_non_human_baseline_format(cli: &Cli) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Start the LSP server over stdio. Blocks (running its own async
-/// runtime inside `alint-lsp`) until the client sends `exit` or
-/// disconnects; exits `0` after a clean `shutdown` + `exit`, `1` for an
-/// `exit` without `shutdown` (per the LSP specification).
+/// Start the LSP server over stdio. Blocks (running its synchronous
+/// `lsp-server` transport loop and worker threads inside `alint-lsp`) until
+/// the client sends `exit` or disconnects; exits `0` after a clean
+/// `shutdown` + `exit`, `1` for an `exit` without `shutdown` (per the LSP
+/// specification).
 /// `--show-notes` lists informational notes on stderr after each check;
 /// `--config` lints every workspace folder with that config (trusted, as the
 /// user's own), `--no-gitignore` and `--no-spawn` apply as in `check`.

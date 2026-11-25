@@ -1868,10 +1868,12 @@ the owner decisions are
   skips bad ignore files above the checked root with a warning, and hoists/narrows remaining
   nested-rule per-iteration work.
 - **LSP rewrite and supply-chain diet (#607, #609 to #613, #615, #608).** Migrates `alint-lsp`
-  from unmaintained `tower-lsp 0.20` to `lsp-server` (dropping ~80 async crates), upgrades
-  `roxmltree` past CVE-2026-92987 (`0.21.2+`), replaces `directories` (removing the sole MPL-2.0
-  exception), `content_inspector`, `java-properties` (plus `encoding_rs`), and `node-tar` (VS Code
-  extension), adopts `adotenv 1.6.0` APIs, and runs a feasibility spike on HCL2 parsing (#608).
+  from unmaintained `tower-lsp 0.20` to `lsp-server` (dropping 19 async crates, net `-17`
+  `Cargo.lock` entries), upgrades `roxmltree` past CVE-2026-92987 (`0.21.2+`), replaces
+  `directories` (removing the sole MPL-2.0 exception), `content_inspector`, `java-properties`
+  (plus `encoding_rs`), and `node-tar` (VS Code extension), adopts `adotenv 1.6.0` APIs, and
+  upgrades `hcl-rs` from `0.18` to `0.20` (`hcl-edit 0.10.0`), retiring the 512 MiB parse
+  thread, 64 KiB cap, and recursion pre-scanner (#608; no `ahcl` crate needed).
 - **Security, trust, and cross-platform fixes.** JetBrains workspace trust pass-through (#545),
   per-rule 10,000-finding cap on `constraint` `set` and `key_parity` (#596), JUnit and agent
   bidi/zero-width escaping (#600), `key_parity` pointer cap (#569), nested-rule option escaping

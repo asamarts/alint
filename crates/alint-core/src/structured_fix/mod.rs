@@ -96,9 +96,10 @@ pub fn resolve_removal_span(
     }
 }
 
-/// [`resolve_value_span`] for each of `paths`, in order. YAML and `.properties`
-/// documents are parsed once for all of them, so a fix with many matches costs
-/// one parse, not one per match; other formats resolve each path on their own.
+/// [`resolve_value_span`] for each of `paths`, in order. YAML, `.properties`,
+/// and HCL documents are parsed once for all of them, so a fix with many
+/// matches costs one parse, not one per match; other formats resolve each path
+/// on their own.
 #[must_use]
 pub fn resolve_value_spans(
     format: Format,
@@ -108,6 +109,7 @@ pub fn resolve_value_spans(
     match (format, std::str::from_utf8(bytes)) {
         (Format::Yaml, Ok(text)) => yaml_::yaml_value_spans(text, paths),
         (Format::Properties, Ok(text)) => properties::properties_value_spans(text, paths),
+        (Format::Hcl, Ok(text)) => hcl::hcl_value_spans(text, paths),
         _ => paths
             .iter()
             .map(|path| resolve_value_span(format, bytes, path))
@@ -116,7 +118,8 @@ pub fn resolve_value_spans(
 }
 
 /// [`resolve_removal_span`] for each of `paths`, in order, with one parse of a
-/// YAML or `.properties` document for all of them (see [`resolve_value_spans`]).
+/// YAML, `.properties`, or HCL document for all of them (see
+/// [`resolve_value_spans`]).
 /// Each range is the path's alone: where the paths remove every entry of a YAML
 /// block mapping, deleting all their ranges leaves the mapping's key with no
 /// value, which reads as null, and [`resolve_removal_edits`] gives the edits
@@ -130,6 +133,7 @@ pub fn resolve_removal_spans(
     match (format, std::str::from_utf8(bytes)) {
         (Format::Yaml, Ok(text)) => yaml_::yaml_removal_spans(text, paths),
         (Format::Properties, Ok(text)) => properties::properties_removal_spans(text, paths),
+        (Format::Hcl, Ok(text)) => hcl::hcl_removal_spans(text, paths),
         _ => paths
             .iter()
             .map(|path| resolve_removal_span(format, bytes, path))
@@ -423,6 +427,14 @@ mod hcl {
         attr_span: Option<Range<usize>>,
     }
 
+    /// Strip leading BOMs (`hcl-rs` rejects them) and parse the HCL CST once.
+    fn parse_bom_stripped(text: &str) -> Option<(&str, usize, Body)> {
+        let stripped = text.trim_start_matches('\u{feff}');
+        let bom_len = text.len() - stripped.len();
+        let body = crate::structured_format::parse_hcl_edit_body(stripped).ok()?;
+        Some((stripped, bom_len, body))
+    }
+
     /// Parse `text` into a spanned CST and return the VALUE span at `path`
     /// (what `set_value` overwrites).
     pub(super) fn hcl_value_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
@@ -431,11 +443,23 @@ mod hcl {
         // BOM length -- else a BOM-prefixed HCL file is advertised fixable yet
         // always skipped (HCL was the lone format not offsetting the BOM; the
         // other 7 do). `trim_start_matches` drops any run of BOMs.
-        let stripped = text.trim_start_matches('\u{feff}');
-        let bom_len = text.len() - stripped.len();
-        let body = crate::structured_format::parse_hcl_edit_body(stripped).ok()?;
+        let (_, bom_len, body) = parse_bom_stripped(text)?;
         let span = resolve_in_body(&body, path).map(|t| t.value_span)?;
         Some(span.start + bom_len..span.end + bom_len)
+    }
+
+    /// Batch version of [`hcl_value_span`]: parses `text` once for all `paths`.
+    pub(super) fn hcl_value_spans(text: &str, paths: &[Vec<PathSeg>]) -> Vec<Option<Range<usize>>> {
+        let Some((_, bom_len, body)) = parse_bom_stripped(text) else {
+            return vec![None; paths.len()];
+        };
+        paths
+            .iter()
+            .map(|path| {
+                resolve_in_body(&body, path)
+                    .map(|t| t.value_span.start + bom_len..t.value_span.end + bom_len)
+            })
+            .collect()
     }
 
     /// Resolve `path` within a block body to a single unambiguous target. A
@@ -544,22 +568,13 @@ mod hcl {
         }
     }
 
-    /// The byte range `remove_value` deletes for the leaf attribute `path`
-    /// names. Removes the whole physical line (`key = value`, a trailing
-    /// `# comment`, and the newline) when the attribute OWNS its line; when the
-    /// attribute shares its line with a single-line block wrapper
-    /// (`ident { key = value }`), removes ONLY the attribute span, leaving the
-    /// wrapper (`ident {  }`) -- never engulfing the `{`/`}` (the single-line
-    /// block over-deletion the audit found). Declines (`None`) for an object
-    /// member (comma surgery deferred) or a block.
-    pub(super) fn hcl_removal_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
-        // Strip a leading BOM (hcl-rs rejects it) and offset the result back into
-        // the original byte space -- see `hcl_value_span`. All line math below is
-        // on the stripped text.
-        let stripped = text.trim_start_matches('\u{feff}');
-        let bom_len = text.len() - stripped.len();
-        let body = crate::structured_format::parse_hcl_edit_body(stripped).ok()?;
-        let attr_span = resolve_in_body(&body, path)?.attr_span?;
+    fn hcl_removal_span_in_body(
+        stripped: &str,
+        bom_len: usize,
+        body: &Body,
+        path: &[PathSeg],
+    ) -> Option<Range<usize>> {
+        let attr_span = resolve_in_body(body, path)?.attr_span?;
         let bytes = stripped.as_bytes();
         let line_start = bytes[..attr_span.start]
             .iter()
@@ -582,6 +597,33 @@ mod hcl {
                 attr_span
             };
         Some(span.start + bom_len..span.end + bom_len)
+    }
+
+    /// The byte range `remove_value` deletes for the leaf attribute `path`
+    /// names. Removes the whole physical line (`key = value`, a trailing
+    /// `# comment`, and the newline) when the attribute OWNS its line; when the
+    /// attribute shares its line with a single-line block wrapper
+    /// (`ident { key = value }`), removes ONLY the attribute span, leaving the
+    /// wrapper (`ident {  }`) -- never engulfing the `{`/`}` (the single-line
+    /// block over-deletion the audit found). Declines (`None`) for an object
+    /// member (comma surgery deferred) or a block.
+    pub(super) fn hcl_removal_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
+        let (stripped, bom_len, body) = parse_bom_stripped(text)?;
+        hcl_removal_span_in_body(stripped, bom_len, &body, path)
+    }
+
+    /// Batch version of [`hcl_removal_span`]: parses `text` once for all `paths`.
+    pub(super) fn hcl_removal_spans(
+        text: &str,
+        paths: &[Vec<PathSeg>],
+    ) -> Vec<Option<Range<usize>>> {
+        let Some((stripped, bom_len, body)) = parse_bom_stripped(text) else {
+            return vec![None; paths.len()];
+        };
+        paths
+            .iter()
+            .map(|path| hcl_removal_span_in_body(stripped, bom_len, &body, path))
+            .collect()
     }
 
     /// Whether the bytes from an attribute's end to the line end are only

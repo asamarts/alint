@@ -258,6 +258,60 @@ fn hcl_serialize_escapes_control_chars() {
 }
 
 #[test]
+fn hcl_batch_value_and_removal_spans_resolve_multiple_paths_and_bom_in_one_parse() {
+    let src = "\u{feff}region = \"us-east-1\"\n\
+               resource \"aws_s3_bucket\" \"a\" {\n  bucket = \"one\"\n  acl = \"public\"\n}\n\
+               resource \"aws_s3_bucket\" \"b\" {\n  bucket = \"two\"\n}\n";
+    let paths = vec![
+        vec![key("region")],
+        vec![
+            key("resource"),
+            key("aws_s3_bucket"),
+            key("a"),
+            key("bucket"),
+        ],
+        vec![
+            key("resource"),
+            key("aws_s3_bucket"),
+            key("b"),
+            key("bucket"),
+        ],
+        vec![key("missing")],
+    ];
+    let val_spans = resolve_value_spans(Format::Hcl, src.as_bytes(), &paths);
+    assert_eq!(val_spans.len(), 4);
+    assert_eq!(&src[val_spans[0].clone().unwrap()], "\"us-east-1\"");
+    assert_eq!(&src[val_spans[1].clone().unwrap()], "\"one\"");
+    assert_eq!(&src[val_spans[2].clone().unwrap()], "\"two\"");
+    assert!(val_spans[3].is_none());
+
+    let rem_paths = vec![
+        vec![key("region")],
+        vec![key("resource"), key("aws_s3_bucket"), key("a"), key("acl")],
+        vec![key("missing")],
+    ];
+    let rem_spans = resolve_removal_spans(Format::Hcl, src.as_bytes(), &rem_paths);
+    assert_eq!(rem_spans.len(), 3);
+    assert_eq!(
+        &src[rem_spans[0].clone().unwrap()],
+        "region = \"us-east-1\"\n"
+    );
+    assert_eq!(&src[rem_spans[1].clone().unwrap()], "  acl = \"public\"\n");
+    assert!(rem_spans[2].is_none());
+
+    // Parse-invalid HCL returns all `None` cleanly in batch mode.
+    let broken = "a = [\n";
+    assert_eq!(
+        resolve_value_spans(Format::Hcl, broken.as_bytes(), &paths),
+        vec![None; paths.len()]
+    );
+    assert_eq!(
+        resolve_removal_spans(Format::Hcl, broken.as_bytes(), &rem_paths),
+        vec![None; rem_paths.len()]
+    );
+}
+
+#[test]
 fn every_format_is_classified_for_structured_fix() {
     // A new `Format` must be consciously classified into ONE of three
     // structured-fix regimes. The exhaustive match is compile-forced, so a new

@@ -29,8 +29,10 @@ rejecting `\b`, `\f`, and `\/` (#573):
 - `MAX_OPERATOR_DEPTH = 128`: enforced via `check_operator_depth` / `operator_scope` so chained
   binary operators cannot build a deep left-leaning expression tree that overflows the stack on
   conversion, formatting, or drop.
-- Supply chain & MSRV: adds one tiny MIT/Apache-2.0 crate (`pratt 0.4.0`), passes `cargo deny`
-  with zero license exceptions, and compiles cleanly on MSRV Rust `1.88.0`.
+- Supply chain & MSRV: adds one tiny MIT/Apache-2.0 crate (`pratt 0.4.0`) while deduplicating
+  `winnow 0.7.15` -> `winnow 1.0.2` (net `0` `Cargo.lock` entries; `unicode-ident` promoted from
+  existing transitive dep for `0` additional entries), passes `cargo deny` with zero license
+  exceptions, and compiles cleanly on MSRV Rust `1.88.0`.
 - Byte spans: `hcl::edit::Span` already supplies the CST byte spans used by `structured_fix::hcl`
   for `set_value` and `remove_value`, and upgrading automatically brings the same 64/128 depth
   bounds to `structured_fix::hcl`.
@@ -80,35 +82,46 @@ upstream behaviors that must be handled in `alint-core`:
    | Labeled blocks (`b "nN" { a = 1 }`) | 1 MiB | 162.2 ms | **7.97 s** |
    | Labeled blocks (`b "nN" { a = 1 }`) | 4 MiB | ~650 ms | **233.3 s (3.9 min)** |
 
-   **Mitigation in `alint-core`:** `crates/alint-core/src/structured_format/hcl.rs` parses with
-   `hcl::parse(text)` and converts `hcl::Body` directly into `serde_json::Value` using a
-   `BTreeMap`-backed `JsonNode` merge (`O(N log N)`), deserializing leaf attribute expressions with
-   `Value::deserialize(attr.expr)`. Output matches `hcl::from_str::<Value>` identically (verified
-   by parity tests) while eliminating the `O(N^2)` body/block blowup completely (411x faster at
-   1 MiB attributes, ~2,100x faster at 4 MiB).
+   **Mitigation in `alint-core`:** `crates/alint-core/src/structured_format/hcl.rs` parses once
+   with `hcl::edit::parser::parse_body(text)` and converts `hcl::edit::structure::Body` directly
+   into `serde_json::Value` using a `BTreeMap`-backed `JsonNode` merge (`O(N log N)`), skipping
+   both `hcl::Body` and `hcl::expr::Object`'s `VecMap::insert` pass and delegating only leaf
+   unevaluated expressions to `hcl::Expression`'s serde `Deserializer`. Output matches
+   `hcl::from_str::<Value>` identically (verified by parity tests) while eliminating the `O(N^2)`
+   body/block blowup completely (411x faster at 1 MiB attributes, ~2,100x faster at 4 MiB).
 
-2. **Unbounded block-label recursion in `IntoJsonSpec`:** `hcl-edit` parses block labels
-   iteratively into a `Vec`, but `hcl-rs`'s `IntoJsonSpec` recurses once per label when nesting
-   `JsonNode::Map`, so a crafted `b "a" "a" ... {}` with thousands of labels overflows the stack.
-   **Mitigation in `alint-core`:** `body_to_value` enforces `MAX_HCL_BLOCK_LABELS = 64` (matching
-   `MAX_NESTING_DEPTH = 64`) before building nested maps.
+2. **Unbounded cumulative block-and-label recursion:** `hcl-edit` parses block labels iteratively
+   into a `Vec`, and `hcl-edit`'s `MAX_NESTING_DEPTH = 64` counts blocks without counting labels,
+   so nested multi-label blocks (up to 64 nested blocks x 64 labels = 4,160+ JSON object levels)
+   can still overflow the stack during conversion or `serde_json::Value::drop`.
+   **Mitigation in `alint-core`:** both `parse_edit_body` (`check_edit_body_depth`) and
+   `body_to_value` enforce cumulative `MAX_HCL_BLOCK_DEPTH = 64` (`sum(1 + block.labels.len())`
+   along any root-to-leaf block path), keeping total `serde_json::Value` depth bounded for both
+   checks and `structured_fix::hcl`.
 
 3. **Lossless-CST RSS amplification and `hcl-edit::expr::Object` `VecMap` width:**
    - Dense 1 MiB / 4 MiB inputs (`array`, `traversal`) peaked at 103-127 MiB RSS (1 MiB) and
      394-485 MiB RSS (4 MiB) -- roughly 100-125x input size because `hcl-edit` retains a lossless CST
-     with per-token `Decor`/`Span` alongside `hcl::Body` and `serde_json::Value`.
+     with per-token `Decor`/`Span` alongside `serde_json::Value`.
    - `hcl-edit`'s `object_items` stores object-literal entries in a `VecMap` and runs
-     `object.contains_key(&key)` on every key (`O(N^2)`): a single 256 KiB object literal
-     `x = { k0=1, ... }` takes 3.6 s and a 512 KiB object literal exceeds 15 s.
+     `object.contains_key(&key)` + `object.insert(key, val)` on every key (`O(K^2 * L)`): a single
+     256 KiB object literal `x = { k0=1, ... }` takes 3.6 s and a 512 KiB object literal exceeds
+     15 s; sibling wide objects or long expression keys can likewise amplify `ObjectKey::eq`.
    - **Mitigations in `alint-core`:**
      - Raise `MAX_HCL_BYTES` 64x from 64 KiB to **4 MiB** (matching `MAX_DOTENV_BYTES = 4 MiB`,
        keeping worst-case peak RSS under ~500 MiB while comfortably admitting large real-world
        Terraform/Nomad/Packer files).
-     - Enforce `MAX_HCL_OBJECT_ITEMS = 4_096` per `{ ... }` brace scope via a small iterative,
-       zero-recursion scanner (`check_object_width`) applied uniformly to both `Format::Hcl.parse`
-       and `structured_fix::hcl` (`parse_hcl_edit_body`), keeping worst-case single-object parse
-       under ~100 ms while leaving top-level attributes, sibling blocks, and large heredoc bodies
-       (such as JSON IAM policies) unrestricted.
+     - Enforce `MAX_HCL_OBJECT_ITEMS = 1_024` per object expression and a file-wide quadratic work
+       budget `MAX_HCL_OBJECT_WORK = 64_000_000` (plus a 256-level scanner stack cap) via an
+       iterative, zero-recursion scanner (`check_object_width`) applied uniformly to both
+       `Format::Hcl.parse` and `structured_fix::hcl` (`parse_hcl_edit_body`). The scanner
+       distinguishes `BlockBrace` (`locals {}`, `resource "..." "..." {}`, parsed in `O(N)` by
+       `FnvHashSet`) from `ObjectBrace` (`{ k = v }`), tracks `Bracket`/`Paren` scopes so `:` in
+       `for` comprehensions and parenthesized ternaries never charges enclosing objects, and mirrors
+       `hcl-edit`'s exact lexical rules for 3-byte `$${`/`%%{` escapes, Unicode XID heredoc
+       delimiters, empty-heredoc line-1 fallback, and `%{if}`/`%{for}` directive bodies.
+     - Add single-parse batch `hcl_value_spans` / `hcl_removal_spans` in `structured_fix::hcl` so
+       multi-match HCL fixes parse a file once rather than once per matched path.
 
 ## 4. Recommendation on `asamarts/ahcl`
 
@@ -117,8 +130,8 @@ upstream behaviors that must be handled in `alint-core`:
 - Upstream `hcl-rs 0.20` / `hcl-edit 0.10` is actively maintained (recent releases in late 2026),
   MIT/Apache-2.0, MSRV 1.88 compatible, and now enforces native recursion and operator-depth
   bounds directly in the parser.
-- The three residual hazards (`IntoJsonSpec` `VecMap`, unbounded block labels, and single-object
-  `VecMap` + CST RSS amplification) are cleanly closed by ~220 lines in
+- The three residual hazards (`IntoJsonSpec` `VecMap`, unbounded cumulative block+label depth, and
+  object-literal `VecMap` + CST RSS amplification) are cleanly closed in
   `crates/alint-core/src/structured_format/hcl.rs` without spawning a 512 MiB thread or capping
   files at 64 KiB.
 - Re-implementing full HCL2 (blocks, expressions, precedence, `for` comprehensions, string
