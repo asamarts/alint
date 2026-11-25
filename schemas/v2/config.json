@@ -28,13 +28,13 @@
     },
     "ConstraintAssert": {
       "additionalProperties": false,
-      "description": "`assert:`: exactly one of its six keys.",
+      "description": "`assert:`: exactly one of its seven keys.",
       "maxProperties": 1,
       "minProperties": 1,
       "properties": {
         "compare": {
           "$ref": "#/$defs/ConstraintCompare",
-          "description": "Pairwise row comparison (`eq`, `ne`, `lt`, `le`, `gt`, `ge`) under exact, lexical, or numeric ordering (ADR-0050 D4)."
+          "description": "Pairwise row comparison (`eq`, `ne`, `lt`, `le`, `gt`, `ge`) under exact, lexical, numeric, or semver ordering (ADR-0050 D4, D5)."
         },
         "count": {
           "$ref": "#/$defs/ConstraintCount",
@@ -47,6 +47,10 @@
         "reference": {
           "$ref": "#/$defs/ConstraintReference",
           "description": "Every row's key field or composite key tuple resolves to a row in another relation (foreign key, ADR-0050 D1)."
+        },
+        "satisfies": {
+          "$ref": "#/$defs/ConstraintSatisfies",
+          "description": "Semantic version range satisfaction under `node`, `cargo`, or `pep440-basic` dialect semantics (ADR-0050 D5)."
         },
         "set": {
           "$ref": "#/$defs/ConstraintSet",
@@ -147,6 +151,29 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "order": {
+                "const": "semver"
+              }
+            },
+            "required": [
+              "order"
+            ]
+          },
+          "then": {
+            "properties": {
+              "to": {
+                "properties": {
+                  "value": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
         }
       ],
       "description": "`assert.compare` (ADR-0050 D4).",
@@ -161,7 +188,7 @@
         },
         "order": {
           "$ref": "#/$defs/ConstraintCompareOrder",
-          "description": "Ordering domain: `exact` (default; `eq`/`ne` only), `lexical`, or `numeric`."
+          "description": "Ordering domain: `exact` (default; `eq`/`ne` only), `lexical`, `numeric`, or `semver`."
         },
         "to": {
           "$ref": "#/$defs/ConstraintCompareTo",
@@ -192,7 +219,8 @@
       "enum": [
         "exact",
         "lexical",
-        "numeric"
+        "numeric",
+        "semver"
       ],
       "type": "string"
     },
@@ -219,7 +247,7 @@
         },
         "value": {
           "$ref": "#/$defs/ConstraintCompareValue",
-          "description": "A literal value (string/bool for `exact`, string for `lexical`, finite number for `numeric`)."
+          "description": "A literal value (string/bool for `exact`, string for `lexical`/`semver`, finite number for `numeric`)."
         }
       },
       "type": "object"
@@ -625,6 +653,104 @@
         "relation"
       ],
       "type": "object"
+    },
+    "ConstraintSatisfies": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "oneOf": [
+            {
+              "not": {
+                "required": [
+                  "version_literal"
+                ]
+              },
+              "required": [
+                "version"
+              ]
+            },
+            {
+              "not": {
+                "required": [
+                  "version"
+                ]
+              },
+              "required": [
+                "version_literal"
+              ]
+            }
+          ]
+        },
+        {
+          "oneOf": [
+            {
+              "not": {
+                "required": [
+                  "range_literal"
+                ]
+              },
+              "required": [
+                "range"
+              ]
+            },
+            {
+              "not": {
+                "required": [
+                  "range"
+                ]
+              },
+              "required": [
+                "range_literal"
+              ]
+            }
+          ]
+        },
+        {
+          "not": {
+            "required": [
+              "version_literal",
+              "range_literal"
+            ]
+          }
+        }
+      ],
+      "description": "`assert.satisfies` (ADR-0050 D5).",
+      "properties": {
+        "dialect": {
+          "$ref": "#/$defs/ConstraintSemverDialect",
+          "description": "Range syntax dialect: `node` (default), `cargo`, or `pep440-basic`."
+        },
+        "include_prerelease": {
+          "description": "Allow prerelease versions to satisfy ranges without an explicit matching prerelease comparator (default `false`).",
+          "type": "boolean"
+        },
+        "range": {
+          "$ref": "#/$defs/v2_name",
+          "description": "Input field holding a semantic version range expression."
+        },
+        "range_literal": {
+          "description": "Literal semantic version range expression (mutually exclusive with `range:` and `version_literal:`).",
+          "type": "string"
+        },
+        "version": {
+          "$ref": "#/$defs/v2_name",
+          "description": "Input field holding a concrete or partial semantic version string."
+        },
+        "version_literal": {
+          "description": "Literal semantic version string (mutually exclusive with `version:` and `range_literal:`).",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ConstraintSemverDialect": {
+      "description": "Range dialect for `assert.satisfies`.",
+      "enum": [
+        "node",
+        "cargo",
+        "pep440-basic"
+      ],
+      "type": "string"
     },
     "ConstraintSet": {
       "additionalProperties": false,
@@ -1513,6 +1639,20 @@
       ],
       "type": "object"
     },
+    "NoDuplicateKeysFormat": {
+      "description": "Explicit `format:` override values for `no_duplicate_keys`. XML is intentionally excluded: sibling elements legitimately repeat in XML and duplicate XML attributes are already parse errors in `roxmltree`.",
+      "enum": [
+        "json",
+        "yaml",
+        "yml",
+        "toml",
+        "dotenv",
+        "properties",
+        "ini",
+        "hcl"
+      ],
+      "type": "string"
+    },
     "Normalize": {
       "oneOf": [
         {
@@ -1926,8 +2066,17 @@
     },
     "extract_spec": {
       "additionalProperties": false,
-      "description": "Exactly one of: toml/json/yaml/xml/dotenv/properties/ini/hcl (RFC 9535 `JSONPath` string), lines (object; optional `comment` prefix, default `#`), regex (string; capture group 1 is the value), `whole_file` (object `{}`; the entire file content as one value, for byte-level `cross_file` comparison; the non-literal skip does not apply).",
-      "maxProperties": 1,
+      "description": "Exactly one of: toml/json/yaml/xml/dotenv/properties/ini/hcl (RFC 9535 `JSONPath` string), lines (object; optional `comment` prefix, default `#`), regex (string; capture group 1 is the value), `whole_file` (object `{}`; the entire file content as one value, for byte-level `cross_file` comparison; the non-literal skip does not apply). `json:` may additionally carry `strict: true` for RFC 8259 JSON parsing.",
+      "else": {
+        "maxProperties": 1,
+        "minProperties": 1
+      },
+      "if": {
+        "required": [
+          "strict"
+        ]
+      },
+      "maxProperties": 2,
       "minProperties": 1,
       "properties": {
         "dotenv": {
@@ -1982,6 +2131,14 @@
             "null"
           ]
         },
+        "strict": {
+          "default": null,
+          "description": "When `true` alongside `json:`, parse using strict RFC 8259 JSON (rejecting comments, trailing commas, leading UTF-8 BOM, and empty files). Rejected with any non-`json` extractor.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "toml": {
           "default": null,
           "type": [
@@ -2013,6 +2170,13 @@
             "null"
           ]
         }
+      },
+      "then": {
+        "maxProperties": 2,
+        "minProperties": 2,
+        "required": [
+          "json"
+        ]
       },
       "type": "object"
     },
@@ -3492,7 +3656,7 @@
       "properties": {
         "assert": {
           "$ref": "#/$defs/ConstraintAssert",
-          "description": "The assertion: exactly one of `equal`, `unique`, `set`, `reference`, `count`, and `compare`."
+          "description": "The assertion: exactly one of `equal`, `unique`, `set`, `reference`, `count`, `compare`, and `satisfies`."
         },
         "input": {
           "description": "The rows the assertion reads: a relation's name, bare or qualified by an `extends:` alias (`deps.ranges`), or an inline relation (a map, as a relation under `relations:` is written, whose values may not read the environment).",
@@ -6057,6 +6221,11 @@
         },
         "scope_filter": {
           "$ref": "#/$defs/scope_filter"
+        },
+        "strict": {
+          "default": false,
+          "description": "When true, enforce strict RFC 8259 JSON parsing (rejecting comments, trailing commas, leading UTF-8 BOM, and empty files; ADR-0050 D7).",
+          "type": "boolean"
         }
       },
       "required": [
@@ -6102,6 +6271,11 @@
         },
         "scope_filter": {
           "$ref": "#/$defs/scope_filter"
+        },
+        "strict": {
+          "default": false,
+          "description": "When true, enforce strict RFC 8259 JSON parsing (rejecting comments, trailing commas, leading UTF-8 BOM, and empty files; ADR-0050 D7).",
+          "type": "boolean"
         }
       },
       "required": [
@@ -6149,6 +6323,11 @@
         },
         "scope_filter": {
           "$ref": "#/$defs/scope_filter"
+        },
+        "strict": {
+          "default": false,
+          "description": "When true, enforce strict RFC 8259 JSON parsing (rejecting comments, trailing commas, leading UTF-8 BOM, and empty files; ADR-0050 D7).",
+          "type": "boolean"
         }
       },
       "required": [
@@ -6198,6 +6377,11 @@
         },
         "scope_filter": {
           "$ref": "#/$defs/scope_filter"
+        },
+        "strict": {
+          "default": false,
+          "description": "When `true`, enforce strict RFC 8259 JSON parsing on JSON targets (rejecting comments, trailing commas, leading UTF-8 BOM, and empty files; ADR-0050 D7). Rejected at build time when `format:` is explicitly non-JSON.",
+          "type": "boolean"
         }
       },
       "required": [
@@ -6275,6 +6459,11 @@
         "reference": {
           "description": "The authoritative key file.",
           "type": "string"
+        },
+        "strict": {
+          "default": false,
+          "description": "When `true` on JSON files, enforce strict RFC 8259 JSON parsing (rejecting comments, trailing commas, leading UTF-8 BOM, and empty files; ADR-0050 D7). Rejected at build time for non-JSON formats.",
+          "type": "boolean"
         },
         "strip_root": {
           "default": false,
@@ -6407,6 +6596,9 @@
         },
         {
           "$ref": "#/$defs/rule_json_schema_passes"
+        },
+        {
+          "$ref": "#/$defs/rule_no_duplicate_keys"
         },
         {
           "$ref": "#/$defs/rule_commented_out_code"
@@ -7138,6 +7330,54 @@
         },
         "scope_filter": {
           "$ref": "#/$defs/scope_filter"
+        }
+      },
+      "required": [
+        "paths"
+      ],
+      "type": "object"
+    },
+    "rule_no_duplicate_keys": {
+      "description": "Reject duplicate keys at any depth across YAML, JSON, dotenv, properties, INI, TOML, and HCL files.",
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "fix"
+            ]
+          }
+        ]
+      },
+      "properties": {
+        "expect_matches": {
+          "default": false,
+          "description": "Require the rule's effective file scope (`paths:` plus `scope_filter:`) to match at least one file. Checked after `when:` and against the full repository even under `--changed`. Unsupported for existence and selector rules, whose empty sets have kind-specific meaning.",
+          "type": "boolean"
+        },
+        "format": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NoDuplicateKeysFormat"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Override the auto-detected file format. When omitted, inferred per file from its extension (`.json`, `.yaml`/`.yml`, `.toml`, `.properties`, `.ini`/`.cfg`/`.editorconfig`, `.hcl`/`.tf`/`.tfvars`/`.nomad`, or `.env`/`.env.*`). Explicit `format: xml` is rejected at config load."
+        },
+        "kind": {
+          "const": "no_duplicate_keys"
+        },
+        "paths": {
+          "$ref": "#/$defs/paths_spec"
+        },
+        "scope_filter": {
+          "$ref": "#/$defs/scope_filter"
+        },
+        "strict": {
+          "default": false,
+          "description": "When `true`, enforce strict RFC 8259 JSON parsing on JSON files (rejecting comments, trailing commas, leading UTF-8 BOM, and empty files; ADR-0050 D7). Rejected at build time when `format:` is explicitly non-JSON.",
+          "type": "boolean"
         }
       },
       "required": [
@@ -8504,6 +8744,11 @@
     "v2_entries": {
       "additionalProperties": false,
       "description": "One row per member of each object `at` selects, read with the `entry.*` field sources.",
+      "if": {
+        "required": [
+          "strict"
+        ]
+      },
       "properties": {
         "at": {
           "description": "A JSONPath, or a non-empty list of them, selecting the objects whose members become rows, in list order. A path a file lacks yields no rows from it; one that selects an array or a scalar is an analysis failure.",
@@ -8532,12 +8777,24 @@
           "default": false,
           "description": "One row per leaf below each selected object (a key with no key below it; an array is a value) instead of one per member.",
           "type": "boolean"
+        },
+        "strict": {
+          "default": false,
+          "description": "Enforce strict RFC 8259 JSON parsing (valid only when `format: json`): reject comments, trailing commas, leading UTF-8 BOM, and empty files.",
+          "type": "boolean"
         }
       },
       "required": [
         "format",
         "at"
       ],
+      "then": {
+        "properties": {
+          "format": {
+            "const": "json"
+          }
+        }
+      },
       "type": "object"
     },
     "v2_extends_entry": {
@@ -9276,8 +9533,17 @@
     },
     "v2_read": {
       "additionalProperties": false,
-      "description": "Exactly one extract form, as `cross_file` reads it; the rows hold strings, read with the `value` field source. In this build a relation cannot read dotenv, properties, XML, INI or HCL.",
-      "maxProperties": 1,
+      "description": "Exactly one extract form, as `cross_file` reads it (plus optional `strict: true` for `json:`); the rows hold strings, read with the `value` field source. In this build a relation cannot read dotenv, properties, XML, INI or HCL.",
+      "else": {
+        "maxProperties": 1,
+        "minProperties": 1
+      },
+      "if": {
+        "required": [
+          "strict"
+        ]
+      },
+      "maxProperties": 2,
       "minProperties": 1,
       "properties": {
         "json": {
@@ -9299,6 +9565,11 @@
           "description": "A regex: one row per match, whose value is capture group 1.",
           "type": "string"
         },
+        "strict": {
+          "default": false,
+          "description": "Enforce strict RFC 8259 JSON parsing (valid only with `json:`): reject comments, trailing commas, leading UTF-8 BOM, and empty files.",
+          "type": "boolean"
+        },
         "toml": {
           "description": "A JSONPath read from TOML: one row per string it matches.",
           "type": "string"
@@ -9313,11 +9584,23 @@
           "type": "string"
         }
       },
+      "then": {
+        "maxProperties": 2,
+        "minProperties": 2,
+        "required": [
+          "json"
+        ]
+      },
       "type": "object"
     },
     "v2_records": {
       "additionalProperties": false,
       "description": "One row per object element `at` selects, read with `record: <JSONPath>` field sources.",
+      "if": {
+        "required": [
+          "strict"
+        ]
+      },
       "properties": {
         "at": {
           "description": "A JSONPath, or a non-empty list of them, selecting object elements (for example `$.spec.containers[*]`). A path a file lacks yields no rows; a matched non-object element is an analysis failure.",
@@ -9341,12 +9624,24 @@
             "yaml",
             "toml"
           ]
+        },
+        "strict": {
+          "default": false,
+          "description": "Enforce strict RFC 8259 JSON parsing (valid only when `format: json`): reject comments, trailing commas, leading UTF-8 BOM, and empty files.",
+          "type": "boolean"
         }
       },
       "required": [
         "format",
         "at"
       ],
+      "then": {
+        "properties": {
+          "format": {
+            "const": "json"
+          }
+        }
+      },
       "type": "object"
     },
     "v2_reference": {

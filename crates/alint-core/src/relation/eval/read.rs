@@ -192,7 +192,7 @@ impl Evaluator<'_> {
                 site,
                 relation,
                 part_fields,
-                (index, reader.format()),
+                (index, reader.format(), reader.strict_json()),
                 &resource,
             ) {
                 Ok(rows) => rows,
@@ -511,19 +511,26 @@ impl PartReader {
         limits: &Limits,
     ) -> Result<Self, String> {
         match reader {
-            Reader::Entries(Entries { format, at, leaves }) => {
-                EntryValuesAdapter::new(entries_format(*format), at, *leaves, bound)
+            Reader::Entries(Entries {
+                format,
+                at,
+                leaves,
+                strict,
+            }) => {
+                EntryValuesAdapter::new_strict(entries_format(*format), at, *leaves, *strict, bound)
                     .map(Self::Entries)
                     .map_err(|error| error.to_string())
             }
-            Reader::Records(Records { format, at }) => {
-                RecordsAdapter::new(entries_format(*format), at, rec_fields, bound)
+            Reader::Records(Records { format, at, strict }) => {
+                RecordsAdapter::new(entries_format(*format), at, rec_fields, bound, *strict)
                     .map(Self::Records)
                     .map_err(|error| error.to_string())
             }
             Reader::Read { read, optional } => {
                 let extract = match read {
-                    Read::Json(query) => Extract::structured(Format::Json, query)?,
+                    Read::Json { query, strict } => {
+                        Extract::structured_strict(Format::Json, query, *strict)?
+                    }
                     Read::Yaml(query) => Extract::structured(Format::Yaml, query)?,
                     Read::Toml(query) => Extract::structured(Format::Toml, query)?,
                     Read::Regex(pattern) => Extract::Regex(pattern.clone()),
@@ -532,10 +539,11 @@ impl PartReader {
                     }),
                     Read::WholeFile => Extract::WholeFile,
                 };
+                let strict_json = matches!(read, Read::Json { strict: true, .. });
                 let bound = match (read_format(read), bound.is_empty()) {
                     (_, true) => None,
                     (Some(format), false) => Some(
-                        EntryValuesAdapter::new(format, &[], false, bound)
+                        EntryValuesAdapter::new_strict(format, &[], false, strict_json, bound)
                             .map_err(|error| error.to_string())?,
                     ),
                     (None, false) => {
@@ -575,6 +583,14 @@ impl PartReader {
             Self::Read { read, .. } => read_format(read),
         }
     }
+
+    fn strict_json(&self) -> bool {
+        match self {
+            Self::Entries(adapter) => adapter.strict_json(),
+            Self::Records(adapter) => adapter.strict_json(),
+            Self::Read { read, .. } => matches!(read, Read::Json { strict: true, .. }),
+        }
+    }
 }
 
 const fn entries_format(format: EntriesFormat) -> Format {
@@ -587,7 +603,7 @@ const fn entries_format(format: EntriesFormat) -> Format {
 
 const fn read_format(read: &Read) -> Option<Format> {
     match read {
-        Read::Json(_) => Some(Format::Json),
+        Read::Json { .. } => Some(Format::Json),
         Read::Yaml(_) => Some(Format::Yaml),
         Read::Toml(_) => Some(Format::Toml),
         Read::Regex(_) | Read::Lines { .. } | Read::WholeFile => None,
@@ -597,7 +613,7 @@ const fn read_format(read: &Read) -> Option<Format> {
 /// A `read:` as a message names it: `read.json: $.name`.
 fn read_text(read: &Read) -> String {
     match read {
-        Read::Json(query) => format!("read.json: {query}"),
+        Read::Json { query, .. } => format!("read.json: {query}"),
         Read::Yaml(query) => format!("read.yaml: {query}"),
         Read::Toml(query) => format!("read.toml: {query}"),
         Read::Regex(pattern) => format!("read.regex: {pattern}"),
@@ -678,6 +694,8 @@ struct Rows<'r> {
     /// What the part reads its entries' spans as: an `entries:` part's
     /// format, or a structured `read:`'s, whose `bound:` paths are entries.
     format: Option<Format>,
+    /// Whether strict RFC 8259 JSON mode is active for this part (ADR-0050 D7).
+    strict_json: bool,
     resource: &'r Resource,
     /// The path tokens the relation's fields bind, by [`token_slot`]: built
     /// once for the resource and shared by its rows.
@@ -772,7 +790,7 @@ impl<'r> Rows<'r> {
         site: &Site,
         relation: &'r RelationDef,
         fields: &'r [(String, FieldDef)],
-        (part, format): (u32, Option<Format>),
+        (part, format, strict_json): (u32, Option<Format>, bool),
         resource: &'r Resource,
     ) -> Result<Self, LimitExceeded> {
         let mut tokens: [Option<Value>; 6] = Default::default();
@@ -798,6 +816,7 @@ impl<'r> Rows<'r> {
             fields,
             part,
             format,
+            strict_json,
             resource,
             tokens,
         })
@@ -1206,14 +1225,24 @@ impl<'r> Rows<'r> {
         let Some(Segment::Key(key)) = pointer.segments().last() else {
             return None;
         };
-        Some(Span::Bytes(BytesSpan::key(row.span?, self.format?, key)))
+        Some(Span::Bytes(BytesSpan::key(
+            row.span?,
+            self.format?,
+            self.strict_json,
+            key,
+        )))
     }
 
     /// Where an entry row's `value` is written: its value's span, or, for a
     /// YAML block scalar, which has none, its key's.
     fn value_span(&self, row: &Row, value: &Value) -> Option<Span> {
         let span = row.value_span.or(row.span)?;
-        Some(Span::Bytes(BytesSpan::value(span, self.format?, value)))
+        Some(Span::Bytes(BytesSpan::value(
+            span,
+            self.format?,
+            self.strict_json,
+            value,
+        )))
     }
 
     /// Like [`Self::value_span`], tagged as a `records:` subfield so TOML span
@@ -1223,6 +1252,7 @@ impl<'r> Rows<'r> {
         Some(Span::Bytes(BytesSpan::record_value(
             span,
             self.format?,
+            self.strict_json,
             value,
         )))
     }

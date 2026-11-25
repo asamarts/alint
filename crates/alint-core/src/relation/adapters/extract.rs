@@ -201,7 +201,14 @@ pub(crate) fn locate(
             }
         }
         Extract::Structured(structured) => {
-            held = members(structured.format, &structured.path, text, &mut rows, limits);
+            held = members(
+                structured.format,
+                structured.strict,
+                &structured.path,
+                text,
+                &mut rows,
+                limits,
+            );
         }
         Extract::WholeFile => {}
     }
@@ -263,6 +270,7 @@ pub(crate) fn walks() -> usize {
 /// it, or nowhere. The most it held at once.
 fn members(
     format: Format,
+    strict: bool,
     path: &serde_json_path::JsonPath,
     text: &str,
     rows: &mut Rows,
@@ -270,7 +278,7 @@ fn members(
 ) -> usize {
     // What the parse held besides the tree: a JSONC text's stripped copy,
     // TOML's tokens.
-    let Ok((tree, parsing)) = format.parse_held(text) else {
+    let Ok((tree, parsing)) = format.parse_held_with_strict_json(text, strict) else {
         return 0;
     };
     // The string rows asked for, as the adapter numbered them.
@@ -313,7 +321,7 @@ fn members(
     // alone, without the entries every member would make: the tree is read
     // without its guards, which the tree's parse passed.
     if format == Format::Json {
-        let Ok(syntax) = JsonSyntax::parsed(text) else {
+        let Ok(syntax) = JsonSyntax::parsed_with_strict(text, strict) else {
             return tree_bytes;
         };
         #[cfg(test)]
@@ -455,7 +463,14 @@ pub(crate) fn table_bytes(entries: &EntryTable) -> usize {
 fn spec_id(extract: &Extract) -> String {
     match extract {
         Extract::Structured(extract) => {
-            format!("extract:structured:{:?}:{}", extract.format, extract.query)
+            if extract.strict && extract.format == Format::Json {
+                format!(
+                    "extract:structured:{:?}:strict:{}",
+                    extract.format, extract.query
+                )
+            } else {
+                format!("extract:structured:{:?}:{}", extract.format, extract.query)
+            }
         }
         Extract::Lines(options) => format!("extract:lines:{}", options.comment),
         Extract::Regex(pattern) => format!("extract:regex:{pattern}"),

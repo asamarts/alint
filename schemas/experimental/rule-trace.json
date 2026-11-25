@@ -828,7 +828,8 @@
                             "set",
                             "reference",
                             "count",
-                            "compare"
+                            "compare",
+                            "satisfies"
                           ]
                         },
                         "text": {
@@ -926,6 +927,9 @@
                                 ]
                               },
                               "leaves": {
+                                "type": "boolean"
+                              },
+                              "strict": {
                                 "type": "boolean"
                               }
                             },
@@ -1186,7 +1190,16 @@
                         "oneOf": [
                           {
                             "additionalProperties": false,
-                            "maxProperties": 1,
+                            "else": {
+                              "maxProperties": 1,
+                              "minProperties": 1
+                            },
+                            "if": {
+                              "required": [
+                                "strict"
+                              ]
+                            },
+                            "maxProperties": 2,
                             "minProperties": 1,
                             "properties": {
                               "json": {
@@ -1205,6 +1218,9 @@
                               "regex": {
                                 "type": "string"
                               },
+                              "strict": {
+                                "type": "boolean"
+                              },
                               "toml": {
                                 "type": "string"
                               },
@@ -1217,6 +1233,13 @@
                               "yaml": {
                                 "type": "string"
                               }
+                            },
+                            "then": {
+                              "maxProperties": 2,
+                              "minProperties": 2,
+                              "required": [
+                                "json"
+                              ]
                             },
                             "type": "object"
                           },
@@ -1242,6 +1265,9 @@
                                   "yaml",
                                   "toml"
                                 ]
+                              },
+                              "strict": {
+                                "type": "boolean"
                               }
                             },
                             "required": [
@@ -1322,6 +1348,9 @@
                                       ]
                                     },
                                     "leaves": {
+                                      "type": "boolean"
+                                    },
+                                    "strict": {
                                       "type": "boolean"
                                     }
                                   },
@@ -1520,7 +1549,16 @@
                               "oneOf": [
                                 {
                                   "additionalProperties": false,
-                                  "maxProperties": 1,
+                                  "else": {
+                                    "maxProperties": 1,
+                                    "minProperties": 1
+                                  },
+                                  "if": {
+                                    "required": [
+                                      "strict"
+                                    ]
+                                  },
+                                  "maxProperties": 2,
                                   "minProperties": 1,
                                   "properties": {
                                     "json": {
@@ -1539,6 +1577,9 @@
                                     "regex": {
                                       "type": "string"
                                     },
+                                    "strict": {
+                                      "type": "boolean"
+                                    },
                                     "toml": {
                                       "type": "string"
                                     },
@@ -1551,6 +1592,13 @@
                                     "yaml": {
                                       "type": "string"
                                     }
+                                  },
+                                  "then": {
+                                    "maxProperties": 2,
+                                    "minProperties": 2,
+                                    "required": [
+                                      "json"
+                                    ]
                                   },
                                   "type": "object"
                                 },
@@ -1576,6 +1624,9 @@
                                         "yaml",
                                         "toml"
                                       ]
+                                    },
+                                    "strict": {
+                                      "type": "boolean"
                                     }
                                   },
                                   "required": [

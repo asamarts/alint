@@ -33,24 +33,27 @@ use crate::structured_format::{Format, SharedValue, SharedValueInner, estimate_v
 /// What a cached parse stores: the shared tree or the deterministic parse error.
 type ParseOutcome = Result<SharedValue, String>;
 
-/// Content-addressed cache key for `(repo-relative path, Format, text digest)`.
+/// Content-addressed cache key for `(repo-relative path, Format, strict_json, text digest)`.
 ///
-/// Including `(text_len, sha256)` guarantees that calling the public
-/// [`crate::Context::parse_structured`] with transformed/companion text or a
-/// modified file can never silently return a stale tree from different bytes.
+/// Including `(strict_json, text_len, sha256)` guarantees that calling
+/// [`crate::Context::parse_structured`] or [`crate::Context::parse_structured_strict`]
+/// with different modes or text can never return a cached parse from the wrong
+/// dialect or bytes (ADR-0050 D7).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct CacheKey {
     path: PathBuf,
     format: Format,
+    strict_json: bool,
     text_len: usize,
     text_sha256: [u8; 32],
 }
 
 impl CacheKey {
-    fn new(path: &Path, format: Format, text: &str) -> Self {
+    fn new(path: &Path, format: Format, strict_json: bool, text: &str) -> Self {
         Self {
             path: normalize_key_path(path),
             format,
+            strict_json: strict_json && format == Format::Json,
             text_len: text.len(),
             text_sha256: Sha256::digest(text.as_bytes()).into(),
         }
@@ -205,16 +208,28 @@ impl StructuredCache {
     }
 
     /// Look up an already-cached entry without parsing on a miss.
+    #[cfg(test)]
     pub(crate) fn get_cached(
         &self,
         path: &Path,
         format: Format,
         text: &str,
     ) -> Option<ParseOutcome> {
+        self.get_cached_with_options(path, format, false, text)
+    }
+
+    /// Look up an already-cached entry with explicit strict-JSON mode.
+    pub(crate) fn get_cached_with_options(
+        &self,
+        path: &Path,
+        format: Format,
+        strict_json: bool,
+        text: &str,
+    ) -> Option<ParseOutcome> {
         if !self.is_populated() {
             return None;
         }
-        let key = CacheKey::new(path, format, text);
+        let key = CacheKey::new(path, format, strict_json, text);
         let mut state = self.state.lock();
         if let Some(outcome) = state.touch(&key) {
             self.hits.fetch_add(1, Ordering::Relaxed);
@@ -233,12 +248,27 @@ impl StructuredCache {
     /// Return the cached tree for `(path, format, text)`, parsing at most once
     /// across concurrent callers and retaining non-alias-leased results under
     /// the byte budget.
+    #[cfg(test)]
     pub(crate) fn get_or_parse(&self, path: &Path, format: Format, text: &str) -> ParseOutcome {
+        self.get_or_parse_with_options(path, format, false, text)
+    }
+
+    /// Return the cached tree for `(path, format, strict_json, text)`,
+    /// isolating strict RFC 8259 JSON parses from tolerant JSONC parses under
+    /// distinct cache keys (ADR-0050 D7).
+    pub(crate) fn get_or_parse_with_options(
+        &self,
+        path: &Path,
+        format: Format,
+        strict_json: bool,
+        text: &str,
+    ) -> ParseOutcome {
+        let strict_json = strict_json && format == Format::Json;
         if self.budget_bytes == 0 {
             self.parses.fetch_add(1, Ordering::Relaxed);
-            return format.parse_shared(text);
+            return format.parse_shared_with_strict_json(text, strict_json);
         }
-        let key = CacheKey::new(path, format, text);
+        let key = CacheKey::new(path, format, strict_json, text);
         let (slot, is_owner) = {
             let mut state = self.state.lock();
             if let Some(outcome) = state.touch(&key) {
@@ -267,7 +297,7 @@ impl StructuredCache {
                 .get_or_init(|| {
                     parsed_here = true;
                     self.parses.fetch_add(1, Ordering::Relaxed);
-                    format.parse_shared(text)
+                    format.parse_shared_with_strict_json(text, strict_json)
                 })
                 .clone();
             if parsed_here {
@@ -290,7 +320,7 @@ impl StructuredCache {
             .get_or_init(|| {
                 parsed_here = true;
                 self.parses.fetch_add(1, Ordering::Relaxed);
-                format.parse_shared(text)
+                format.parse_shared_with_strict_json(text, strict_json)
             })
             .clone();
 
@@ -411,19 +441,33 @@ impl<'a> FileStructuredCache<'a> {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn get_or_parse(&self, path: &Path, format: Format, text: &str) -> ParseOutcome {
-        let key = CacheKey::new(path, format, text);
+        self.get_or_parse_with_options(path, format, false, text)
+    }
+
+    pub(crate) fn get_or_parse_with_options(
+        &self,
+        path: &Path,
+        format: Format,
+        strict_json: bool,
+        text: &str,
+    ) -> ParseOutcome {
+        let strict_json = strict_json && format == Format::Json;
+        let key = CacheKey::new(path, format, strict_json, text);
         {
             let slots = self.slots.lock();
             if let Some((_, outcome)) = slots.iter().find(|(k, _)| *k == key) {
                 return outcome.clone();
             }
         }
-        let outcome = if let Some(hit) = self.run.and_then(|run| run.get_cached(path, format, text))
+        let outcome = if let Some(hit) = self
+            .run
+            .and_then(|run| run.get_cached_with_options(path, format, strict_json, text))
         {
             hit
         } else {
-            format.parse_shared(text)
+            format.parse_shared_with_strict_json(text, strict_json)
         };
         // Never strongly pin an alias-leased tree across unrelated per-file
         // rules (e.g., `yaml_path_*` followed by `pinned_references`).
@@ -458,17 +502,24 @@ impl<'a> StructuredCacheRef<'a> {
         }
     }
 
-    pub(crate) fn get_or_parse(self, path: &Path, format: Format, text: &str) -> ParseOutcome {
+    pub(crate) fn get_or_parse_with_options(
+        self,
+        path: &Path,
+        format: Format,
+        strict_json: bool,
+        text: &str,
+    ) -> ParseOutcome {
+        let strict_json = strict_json && format == Format::Json;
         match self {
-            Self::Run(run) => run.get_or_parse(path, format, text),
+            Self::Run(run) => run.get_or_parse_with_options(path, format, strict_json, text),
             Self::RunReadOnly(run) => {
-                if let Some(hit) = run.get_cached(path, format, text) {
+                if let Some(hit) = run.get_cached_with_options(path, format, strict_json, text) {
                     hit
                 } else {
-                    format.parse_shared(text)
+                    format.parse_shared_with_strict_json(text, strict_json)
                 }
             }
-            Self::File(file) => file.get_or_parse(path, format, text),
+            Self::File(file) => file.get_or_parse_with_options(path, format, strict_json, text),
         }
     }
 }
@@ -670,5 +721,50 @@ mod tests {
         drop(first);
         drop(second);
         assert!(cache.get_cached(path, Format::Yaml, &text).is_none());
+    }
+
+    #[test]
+    fn strict_and_tolerant_json_cache_entries_are_isolated() {
+        let jsonc = "{\n  // comment\n  \"a\": 1,\n}\n";
+        let path_a = Path::new("tsconfig.json");
+        let path_b = Path::new("settings.json");
+
+        // Tolerant first, then strict on the same StructuredCache: strict must
+        // not reuse the tolerant JSONC tree.
+        let run_cache = StructuredCache::new(8 * 1024 * 1024);
+        let tolerant = run_cache
+            .get_or_parse_with_options(path_a, Format::Json, false, jsonc)
+            .expect("tolerant JSONC parses");
+        assert_eq!(tolerant["a"], 1);
+        let strict_err = run_cache
+            .get_or_parse_with_options(path_a, Format::Json, true, jsonc)
+            .expect_err("strict JSON must reject JSONC even after tolerant hit");
+        assert_ne!(strict_err, "");
+        assert_eq!(run_cache.parses(), 2);
+
+        // Strict first, then tolerant on another path: tolerant must succeed
+        // even after a strict parse failure on the same bytes.
+        assert!(
+            run_cache
+                .get_or_parse_with_options(path_b, Format::Json, true, jsonc)
+                .is_err()
+        );
+        let tolerant_b = run_cache
+            .get_or_parse_with_options(path_b, Format::Json, false, jsonc)
+            .expect("tolerant JSONC succeeds after strict miss");
+        assert_eq!(tolerant_b["a"], 1);
+
+        // FileStructuredCache must enforce the same isolation.
+        let file_cache = FileStructuredCache::new(None);
+        let f_tol = file_cache
+            .get_or_parse_with_options(path_a, Format::Json, false, jsonc)
+            .expect("file cache tolerant succeeds");
+        assert_eq!(f_tol["a"], 1);
+        assert!(
+            file_cache
+                .get_or_parse_with_options(path_a, Format::Json, true, jsonc)
+                .is_err(),
+            "file cache strict must not reuse tolerant entry"
+        );
     }
 }

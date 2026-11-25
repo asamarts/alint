@@ -86,9 +86,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   keys with `skip_missing:`), unified `count` (`min`, `max`, `exact`, `distinct: true` + `field:`,
   per-row emptiness findings for `max: 0` / `exact: 0`, and `groups:`), orthogonal multi-field
   `group_by: [...]` across `equal`, `set`, and `count`, per-group cross-relation `set` targets
-  (`to.group_by:`, `all_target_groups: true`), inline literal `set` targets (`values: [...]`), and
-  pairwise `compare` (`eq`, `ne`, `lt`, `le`, `gt`, `ge` under `exact`, `lexical`, or `numeric`
-  ordering, failing loud on `Null`/`Missing` operands; ADR-0050 D1-D4).
+  (`to.group_by:`, `all_target_groups: true`), inline literal `set` targets (`values: [...]`),
+  pairwise `compare` (`eq`, `ne`, `lt`, `le`, `gt`, `ge` under `exact`, `lexical`, `numeric`, or
+  `semver` ordering, failing loud on `Null`/`Missing` operands), and semantic version range
+  satisfaction `satisfies` (`version`/`version_literal`, `range`/`range_literal`, `dialect: node |
+  cargo | pep440-basic`, `include_prerelease: bool`, offline pure-Rust evaluator; ADR-0050 D1-D5).
+- New `no_duplicate_keys` rule kind (canonical kind #105, per-file in `version: 1` and `version: 2`
+  and on the LSP `didChange` hot path) detecting duplicate keys at any depth across YAML
+  (streaming `ayaml` events with YAML 1.2 Core Schema key equality, multi-document `---` reset,
+  scalar anchor resolution, and `<<: *base` merge handling), JSON/JSONC (with optional
+  `strict: true`), dotenv, Java `.properties`, INI (merging repeated `[section]` headers), TOML,
+  and HCL, reporting exact key spans with first-occurrence related locations (ADR-0050 D6).
+- Optional `strict: true` RFC 8259 JSON parse mode across `json_path_equals`, `json_path_matches`,
+  `json_path_absent`, `json_schema_passes`, `key_parity`, `no_duplicate_keys`, `extract: { json:
+  ..., strict: true }` (`cross_file`, `file_graph`, `registry_paths_resolve`, manifest
+  `scope_filter`), and `version: 2` `entries:`/`records:`/`read:` JSON readers, rejecting comments,
+  trailing commas, leading UTF-8 BOM, and empty/whitespace-only files as `resource_parse` analysis
+  failures with full cache isolation from tolerant JSONC reads of the same file (ADR-0050 D7).
 - `constraint` `set` missing-value findings against same-relation `{ group: ... }` targets grouped
   by a path token (`parent_name`, `dir`, `basename`, `stem`, `ext`) now anchor at the unique
   structural counterpart file in the target group whose non-token path components match the

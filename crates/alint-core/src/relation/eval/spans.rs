@@ -116,38 +116,47 @@ pub struct BytesSpan {
     held: u32,
     format: Format,
     holds: Holds,
+    strict: bool,
 }
 
 impl BytesSpan {
     /// The span of the key `key`, which `format` reads at `span`.
-    pub(super) fn key(span: ByteSpan, format: Format, key: &str) -> Self {
+    pub(super) fn key(span: ByteSpan, format: Format, strict: bool, key: &str) -> Self {
         Self {
             span,
             held: fingerprint_text(key),
             format,
             holds: Holds::Key,
+            strict: strict && format == Format::Json,
         }
     }
 
     /// The span of `value`, which `format` reads at `span`: the value's, or
     /// its entry's key's for a YAML block scalar, whose value has none.
-    pub(super) fn value(span: ByteSpan, format: Format, value: &Value) -> Self {
+    pub(super) fn value(span: ByteSpan, format: Format, strict: bool, value: &Value) -> Self {
         Self {
             span,
             held: fingerprint(value),
             format,
             holds: Holds::Value,
+            strict: strict && format == Format::Json,
         }
     }
 
     /// The span of a `records:` subfield `value`, which `format` reads at
     /// `span` (descending TOML arrays of tables / inline tables on verification).
-    pub(super) fn record_value(span: ByteSpan, format: Format, value: &Value) -> Self {
+    pub(super) fn record_value(
+        span: ByteSpan,
+        format: Format,
+        strict: bool,
+        value: &Value,
+    ) -> Self {
         Self {
             span,
             held: fingerprint(value),
             format,
             holds: Holds::RecordValue,
+            strict: strict && format == Format::Json,
         }
     }
 
@@ -318,9 +327,10 @@ fn still_held(
     let mut pending: Vec<(usize, &BytesSpan)> = entries.to_vec();
     while let Some(&(_, first)) = pending.first() {
         let format = first.format;
+        let strict = first.strict;
         let (these, rest): (Vec<_>, Vec<_>) = pending
             .into_iter()
-            .partition(|(_, span)| span.format == format);
+            .partition(|(_, span)| span.format == format && span.strict == strict);
         pending = rest;
         // Each span asked, by its bytes and what it held.
         let mut asked: HashMap<(usize, usize, Holds), Vec<(usize, u32)>> = HashMap::new();
@@ -346,7 +356,7 @@ fn still_held(
         if format == Format::Json {
             // A JSON document's members are read from its syntax tree,
             // without the entries every member would make.
-            if let Ok(syntax) = JsonSyntax::guarded(text) {
+            if let Ok(syntax) = JsonSyntax::guarded_with_strict(text, strict) {
                 walked = syntax.held();
                 syntax.members(&mut |member| {
                     check(member.key_span, Holds::Key, &|| {
@@ -448,7 +458,12 @@ mod tests {
         let bytes = b"{\"a\": \"x\",\n \"b\": \"y\"}\n";
         let spans = [
             Span::Read(ReadSpan::new(&json, 1, &text_of("y"))),
-            Span::Bytes(BytesSpan::key(ByteSpan::new(1, 4), Format::Json, "a")),
+            Span::Bytes(BytesSpan::key(
+                ByteSpan::new(1, 4),
+                Format::Json,
+                false,
+                "a",
+            )),
             Span::Read(ReadSpan::new(&lines, 1, &text_of("\"b\": \"y\"}"))),
             Span::Read(ReadSpan::new(&json, 0, &text_of("x"))),
         ];
@@ -574,7 +589,12 @@ mod tests {
             Span::Read(ReadSpan::new(&reading, 1, &text("x"))),
             Span::Read(ReadSpan::new(&reading, 1, &text("y")))
         );
-        let key = Span::Bytes(BytesSpan::key(ByteSpan::new(0, 1), Format::Json, "a"));
+        let key = Span::Bytes(BytesSpan::key(
+            ByteSpan::new(0, 1),
+            Format::Json,
+            false,
+            "a",
+        ));
         assert_ne!(read(json(), 1), key);
     }
 
@@ -595,13 +615,23 @@ mod tests {
 
     /// The span of key `key` of a document of `format` at `start..end`.
     fn key_at(format: Format, (start, end): (usize, usize), key: &str) -> Span {
-        Span::Bytes(BytesSpan::key(ByteSpan::new(start, end), format, key))
+        Span::Bytes(BytesSpan::key(
+            ByteSpan::new(start, end),
+            format,
+            false,
+            key,
+        ))
     }
 
     /// The span of value `value` of a document of `format` at
     /// `start..end`.
     fn value_at(format: Format, (start, end): (usize, usize), value: &Value) -> Span {
-        Span::Bytes(BytesSpan::value(ByteSpan::new(start, end), format, value))
+        Span::Bytes(BytesSpan::value(
+            ByteSpan::new(start, end),
+            format,
+            false,
+            value,
+        ))
     }
 
     /// The span at `start..end` of `bytes` (a key's, a value's or a block

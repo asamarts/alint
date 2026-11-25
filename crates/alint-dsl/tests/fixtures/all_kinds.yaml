@@ -589,6 +589,10 @@ rules:
     paths: "package.json"
     schema_path: "schemas/package.schema.json"
     level: error
+  - id: no-dup-config-keys
+    kind: no_duplicate_keys
+    paths: "**/*.{yml,yaml,json}"
+    level: error
 
   # ─── Markdown / commented-code / blame-age ─────────────────────
   - id: repository-editorconfig-policy

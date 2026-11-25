@@ -165,6 +165,7 @@ pub mod max_files_per_directory;
 pub mod no_bidi_controls;
 pub mod no_bom;
 pub mod no_case_conflicts;
+pub mod no_duplicate_keys;
 pub mod no_empty_files;
 pub mod no_illegal_windows_names;
 pub mod no_merge_conflict_markers;
@@ -336,7 +337,7 @@ pub fn rule_option_schemas() -> Vec<(&'static str, serde_json::Value)> {
         ("rule_executable_bit", executable_bit::options_schema()),
         (
             "rule_json_path_equals",
-            structured_path::equals_options_schema(),
+            structured_path::json_equals_options_schema(),
         ),
         (
             "rule_yaml_path_equals",
@@ -352,7 +353,7 @@ pub fn rule_option_schemas() -> Vec<(&'static str, serde_json::Value)> {
         ),
         (
             "rule_json_path_matches",
-            structured_path::matches_options_schema(),
+            structured_path::json_matches_options_schema(),
         ),
         (
             "rule_yaml_path_matches",
@@ -368,7 +369,7 @@ pub fn rule_option_schemas() -> Vec<(&'static str, serde_json::Value)> {
         ),
         (
             "rule_json_path_absent",
-            structured_path::absent_options_schema(),
+            structured_path::json_absent_options_schema(),
         ),
         (
             "rule_yaml_path_absent",
@@ -465,6 +466,10 @@ pub fn rule_option_schemas() -> Vec<(&'static str, serde_json::Value)> {
         (
             "rule_json_schema_passes",
             json_schema_passes::options_schema(),
+        ),
+        (
+            "rule_no_duplicate_keys",
+            no_duplicate_keys::options_schema(),
         ),
     ]
 }
@@ -650,6 +655,11 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
         "json_schema_passes",
         &json_schema_passes::META,
         json_schema_passes::build,
+    );
+    registry.register(
+        "no_duplicate_keys",
+        &no_duplicate_keys::META,
+        no_duplicate_keys::build,
     );
     registry.register(
         "markdown_links_resolve",
@@ -985,7 +995,7 @@ mod registry_tests {
             metadata, canonical,
             "every canonical builder must share its registration with one metadata record"
         );
-        assert_eq!(metadata.len(), 104, "the v0.23 inventory covers 104 kinds");
+        assert_eq!(metadata.len(), 105, "the v0.24 inventory covers 105 kinds");
 
         for (alias, canonical) in registry.aliases() {
             let alias_meta = registry.meta(alias).expect("registered alias has metadata");
@@ -1058,7 +1068,7 @@ mod registry_tests {
                 count(&|m| matches!(m.dispatch, DispatchClass::RuleMajorScoped)),
                 count(&|m| matches!(m.dispatch, DispatchClass::SingleShot)),
             ],
-            [56, 24, 14, 10],
+            [57, 24, 14, 10],
             "dispatch-class inventory drifted"
         );
         assert_eq!(
@@ -1067,7 +1077,7 @@ mod registry_tests {
                 count(&|m| m.paths == PathsSupport::Optional),
                 count(&|m| m.paths == PathsSupport::Forbidden),
             ],
-            [79, 0, 25],
+            [80, 0, 25],
             "paths support inventory drifted"
         );
         assert_eq!(
@@ -1076,7 +1086,7 @@ mod registry_tests {
                 count(&|m| matches!(m.scope_filter, ScopeFilterSupport::AncestorOnly)),
                 count(&|m| matches!(m.scope_filter, ScopeFilterSupport::Rejected { .. })),
             ],
-            [73, 1, 30],
+            [74, 1, 30],
             "scope-filter inventory drifted"
         );
         assert_eq!(
@@ -1085,7 +1095,7 @@ mod registry_tests {
                 count(&|m| m.git_tracked_only == GitTrackedSupport::FileOnly),
                 count(&|m| m.git_tracked_only == GitTrackedSupport::DirAware),
             ],
-            [100, 2, 2],
+            [101, 2, 2],
             "git-tracked support inventory drifted"
         );
         assert_eq!(
@@ -1094,10 +1104,10 @@ mod registry_tests {
                 count(&|m| m.since == SinceSupport::Optional),
                 count(&|m| m.since == SinceSupport::Required),
             ],
-            [95, 7, 2],
+            [96, 7, 2],
             "since support inventory drifted"
         );
-        assert_eq!(count(&|m| m.expect_matches), 75);
+        assert_eq!(count(&|m| m.expect_matches), 76);
         assert_eq!(count(&|m| m.nested_rules), 3);
         assert_eq!(
             [
@@ -1110,7 +1120,7 @@ mod registry_tests {
                 count(&|m| m.content == ContentAccess::Blame),
                 count(&|m| m.content == ContentAccess::Delegated),
             ],
-            [23, 5, 6, 1, 55, 7, 1, 6],
+            [23, 5, 6, 1, 56, 7, 1, 6],
             "content-access inventory drifted"
         );
 
@@ -1169,7 +1179,8 @@ mod registry_tests {
             kinds_where(&|m| m.formats.as_ref() == alint_core::Format::ALL),
             all_format_kinds
         );
-        let extract_format_kinds = BTreeSet::from(["constraint", "key_parity"]);
+        let extract_format_kinds =
+            BTreeSet::from(["constraint", "key_parity", "no_duplicate_keys"]);
         assert_eq!(
             registry.meta("key_parity").unwrap().formats.as_ref(),
             &[
@@ -1179,6 +1190,18 @@ mod registry_tests {
                 alint_core::Format::Dotenv,
                 alint_core::Format::Properties,
                 alint_core::Format::Ini,
+            ]
+        );
+        assert_eq!(
+            registry.meta("no_duplicate_keys").unwrap().formats.as_ref(),
+            &[
+                alint_core::Format::Json,
+                alint_core::Format::Yaml,
+                alint_core::Format::Toml,
+                alint_core::Format::Dotenv,
+                alint_core::Format::Properties,
+                alint_core::Format::Ini,
+                alint_core::Format::Hcl,
             ]
         );
         let mut structured_format_kinds = BTreeSet::new();
@@ -1809,6 +1832,7 @@ mod registry_tests {
             "xml_path_equals",
             "xml_path_matches",
             "json_schema_passes",
+            "no_duplicate_keys",
             "git_no_denied_paths",
             "git_commit_message",
             "git_commit_signed_off",

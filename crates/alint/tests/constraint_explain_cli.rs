@@ -1301,13 +1301,21 @@ relations:
   mixed:
     union:
       - from: { paths: "packages/*/package.json" }
-        entries: { format: json, at: "$.dependencies" }
+        entries: { format: json, at: "$.dependencies", strict: true }
         fields: { item: entry.key }
       - from: { paths: "k8s/*.yaml" }
         records: { format: yaml, at: "$.spec.containers[*]" }
         fields: { item: "record: $.name" }
     transform:
       item: [{ strip_suffix: [".dev", ".prod"] }, { prefix: "pkg-" }, { suffix: "-v1" }]
+  strict-records:
+    from: { paths: "packages/*/package.json" }
+    records: { format: json, at: "$.items[*]", strict: true }
+    fields: { name: "record: $.name" }
+  strict-read:
+    from: { paths: "packages/*/package.json" }
+    read: { json: "$.version", strict: true }
+    fields: { version: value }
 rules:
   - id: joined
     kind: constraint
@@ -1363,6 +1371,16 @@ rules:
     input: mixed
     assert: { compare: { field: item, op: ne, to: { value: "pkg-bad-v1" }, order: lexical } }
     level: error
+  - id: strict-satisfies
+    kind: constraint
+    input: strict-read
+    assert: { satisfies: { version: version, range_literal: "^1.0.0", dialect: node, include_prerelease: true } }
+    level: error
+  - id: strict-rec-count
+    kind: constraint
+    input: strict-records
+    assert: { count: { min: 0 } }
+    level: error
 "##;
 
 /// The `explain --trace --format json` document of each rule of
@@ -1396,6 +1414,8 @@ fn every_plan_shape() -> Vec<(&'static str, serde_json::Value)> {
         "ref-check",
         "hidden-rec-count",
         "mixed-compare",
+        "strict-satisfies",
+        "strict-rec-count",
     ]
     .into_iter()
     .map(|rule| {

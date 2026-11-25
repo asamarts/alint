@@ -14,8 +14,8 @@ use alint_core::{Error, Result};
 use super::options::{self, Plurals};
 use super::{
     Assertion, CompareAssertion, CompareLiteral, CompareOp, CompareOrder, CompareTarget,
-    CountAssertion, ReferenceAssertion, ResourceGroups, SetAssertion, SetMode, SetTarget,
-    relation_label,
+    CountAssertion, ReferenceAssertion, ResourceGroups, SatisfiesAssertion, SatisfiesRange,
+    SatisfiesVersion, SetAssertion, SetMode, SetTarget, relation_label,
 };
 
 /// Checks one rule's options against relation `input` of `plan`.
@@ -169,6 +169,7 @@ impl<'p> Checker<'p> {
             ("`reference`", assert.reference.is_some()),
             ("`count`", assert.count.is_some()),
             ("`compare`", assert.compare.is_some()),
+            ("`satisfies`", assert.satisfies.is_some()),
         ]
         .into_iter()
         .filter_map(|(key, on)| on.then_some(key))
@@ -182,8 +183,8 @@ impl<'p> Checker<'p> {
             return Err(self.fail(
                 "assert",
                 format!(
-                    "holds exactly one of `equal`, `unique`, `set`, `reference`, `count` and \
-                     `compare`; found {found}"
+                    "holds exactly one of `equal`, `unique`, `set`, `reference`, `count`, \
+                     `compare` and `satisfies`; found {found}"
                 ),
             ));
         }
@@ -199,6 +200,8 @@ impl<'p> Checker<'p> {
             self.count(count)
         } else if let Some(compare) = &assert.compare {
             self.compare(compare)
+        } else if let Some(satisfies) = &assert.satisfies {
+            self.satisfies(satisfies)
         } else {
             unreachable!("checked present.len() == 1")
         }
@@ -684,6 +687,7 @@ impl<'p> Checker<'p> {
             options::CompareOrder::Exact => CompareOrder::Exact,
             options::CompareOrder::Lexical => CompareOrder::Lexical,
             options::CompareOrder::Numeric => CompareOrder::Numeric,
+            options::CompareOrder::Semver => CompareOrder::Semver,
         };
         let op = match compare.op {
             options::CompareOp::Eq => CompareOp::Eq,
@@ -697,8 +701,8 @@ impl<'p> Checker<'p> {
             return Err(self.fail(
                 "assert.compare.op",
                 format!(
-                    "`op: {}` requires an ordered `order:` (`lexical` or `numeric`); `order: \
-                     exact` supports only `eq` and `ne`",
+                    "`op: {}` requires an ordered `order:` (`lexical`, `numeric`, or `semver`); \
+                     `order: exact` supports only `eq` and `ne`",
                     op.key()
                 ),
             ));
@@ -777,7 +781,106 @@ impl<'p> Checker<'p> {
                     .unwrap_or_else(|| num.to_string());
                 Ok(CompareLiteral::Number(raw))
             }
+            CompareOrder::Semver => match written.as_str() {
+                Some(s) => {
+                    alint_core::semver_eval::parse_version(s).map_err(|err| {
+                        self.fail(
+                            path,
+                            format!(
+                                "`order: semver` requires a valid semantic version literal in \
+                                 `to.value`: {err}"
+                            ),
+                        )
+                    })?;
+                    Ok(CompareLiteral::Scalar(Value::String(s.into())))
+                }
+                None => Err(self.fail(
+                    path,
+                    "`order: semver` requires a string literal in `to.value`",
+                )),
+            },
         }
+    }
+
+    fn satisfies(&self, satisfies: &options::Satisfies) -> Result<Assertion> {
+        let dialect = match satisfies.dialect.unwrap_or_default() {
+            options::SemverDialect::Node => alint_core::semver_eval::SemverDialect::Node,
+            options::SemverDialect::Cargo => alint_core::semver_eval::SemverDialect::Cargo,
+            options::SemverDialect::Pep440Basic => {
+                alint_core::semver_eval::SemverDialect::Pep440Basic
+            }
+        };
+        if satisfies.version.is_some() == satisfies.version_literal.is_some() {
+            return Err(self.fail(
+                "assert.satisfies",
+                "holds exactly one of `version:` and `version_literal:`",
+            ));
+        }
+        if satisfies.range.is_some() == satisfies.range_literal.is_some() {
+            return Err(self.fail(
+                "assert.satisfies",
+                "holds exactly one of `range:` and `range_literal:`",
+            ));
+        }
+        if satisfies.version_literal.is_some() && satisfies.range_literal.is_some() {
+            return Err(self.fail(
+                "assert.satisfies",
+                "at least one of `version:` and `range:` must name an input field; \
+                 `version_literal:` and `range_literal:` cannot both be set",
+            ));
+        }
+        if let (Some(ver), Some(rng)) = (&satisfies.version, &satisfies.range)
+            && ver == rng
+        {
+            return Err(self.fail(
+                "assert.satisfies.range",
+                format!("checks `{ver}` against itself; `version:` and `range:` must name different fields"),
+            ));
+        }
+        let version = match (&satisfies.version, &satisfies.version_literal) {
+            (Some(field), None) => {
+                self.field(field, "assert.satisfies.version")?;
+                SatisfiesVersion::Field(field.clone())
+            }
+            (None, Some(raw)) => {
+                let parsed = alint_core::semver_eval::parse_version(raw).map_err(|err| {
+                    self.fail(
+                        "assert.satisfies.version_literal",
+                        format!("invalid semantic version literal: {err}"),
+                    )
+                })?;
+                SatisfiesVersion::Literal {
+                    raw: raw.clone(),
+                    parsed,
+                }
+            }
+            _ => unreachable!("checked mutual exclusivity above"),
+        };
+        let range = match (&satisfies.range, &satisfies.range_literal) {
+            (Some(field), None) => {
+                self.field(field, "assert.satisfies.range")?;
+                SatisfiesRange::Field(field.clone())
+            }
+            (None, Some(raw)) => {
+                let parsed = alint_core::semver_eval::parse_range(raw, dialect).map_err(|err| {
+                    self.fail(
+                        "assert.satisfies.range_literal",
+                        format!("invalid semantic version range literal: {err}"),
+                    )
+                })?;
+                SatisfiesRange::Literal {
+                    raw: raw.clone(),
+                    parsed,
+                }
+            }
+            _ => unreachable!("checked mutual exclusivity above"),
+        };
+        Ok(Assertion::Satisfies(Box::new(SatisfiesAssertion {
+            version,
+            range,
+            dialect,
+            include_prerelease: satisfies.include_prerelease.unwrap_or(false),
+        })))
     }
 
     /// Validate a group key literal (scalar for 1-field `group_by`, k-array

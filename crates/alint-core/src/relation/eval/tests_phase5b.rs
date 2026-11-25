@@ -17,6 +17,7 @@ fn records_part(paths: &str, format: EntriesFormat, at: &[&str]) -> Part {
         reader: Reader::Records(Records {
             format,
             at: at.iter().map(|s| (*s).to_string()).collect(),
+            strict: false,
         }),
         fields: None,
     }
@@ -406,6 +407,7 @@ fn mixed_reader_union_per_part_fields_align_columns_and_track_keys_sensitive() {
                         format: EntriesFormat::Json,
                         at: vec!["$.commands".into()],
                         leaves: false,
+                        strict: false,
                     }),
                     fields: Some(vec![
                         ("name".into(), field_def(FieldSource::EntryKey, false)),
@@ -418,7 +420,10 @@ fn mixed_reader_union_per_part_fields_align_columns_and_track_keys_sensitive() {
                 Part {
                     from: from("b.json"),
                     reader: Reader::Read {
-                        read: Read::Json("$.aliases[*]".into()),
+                        read: Read::Json {
+                            query: "$.aliases[*]".into(),
+                            strict: false,
+                        },
                         optional: false,
                     },
                     fields: Some(vec![
@@ -434,6 +439,7 @@ fn mixed_reader_union_per_part_fields_align_columns_and_track_keys_sensitive() {
                     reader: Reader::Records(Records {
                         format: EntriesFormat::Yaml,
                         at: vec!["$.items[*]".into()],
+                        strict: false,
                     }),
                     fields: Some(vec![
                         (
@@ -661,6 +667,7 @@ fn records_exact_spans_verify_through_find_spans_and_toml_entries_stay_isolated(
                 format: EntriesFormat::Toml,
                 at: vec!["$.deps".into()],
                 leaves: false,
+                strict: false,
             }),
             fields: None,
         }),
@@ -690,6 +697,7 @@ fn per_part_union_stub_rows_respect_transforms_and_where_with_differing_path_tok
                         format: EntriesFormat::Yaml,
                         at: vec!["$".into()],
                         leaves: true,
+                        strict: false,
                     }),
                     fields: Some(vec![
                         ("locale".into(), field_def(FieldSource::EntryRoot, false)),
@@ -706,6 +714,7 @@ fn per_part_union_stub_rows_respect_transforms_and_where_with_differing_path_tok
                         format: EntriesFormat::Yaml,
                         at: vec!["$".into()],
                         leaves: true,
+                        strict: false,
                     }),
                     fields: Some(vec![
                         ("locale".into(), field_def(FieldSource::EntryRoot, false)),
@@ -771,6 +780,7 @@ fn split_clears_cell_path_and_handles_extreme_parts_and_bytes_budget() {
                 format: EntriesFormat::Json,
                 at: vec!["$".into()],
                 leaves: true,
+                strict: false,
             }),
             fields: None,
         }),

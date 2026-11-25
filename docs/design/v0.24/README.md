@@ -1,6 +1,6 @@
 # v0.24: saphyr exit, Phase 3 completion, owned walker, LSP rewrite, and backlog drain
 
-Status: accepted (2026-11-22, ADR-0048); in progress (Phase 0, Phase 1 [19/19], Phase 2 [8/8], Phase 3 [5/5], Phase 4 [2/2 + audit], Phase 5 design/ADR-0050, Batch 5a [5/5 + audit], and Batch 5b [#592 + D1-D4] complete; Batch 5c next).
+Status: accepted (2026-11-22, ADR-0048); in progress (Phase 0, Phase 1 [19/19], Phase 2 [8/8], Phase 3 [5/5], Phase 4 [2/2 + audit], Phase 5 design/ADR-0050, Batch 5a [5/5 + audit], Batch 5b [#592 + D1-D4 + audit], and Batch 5c [D5-D7] complete; Batch 5d next).
 Decisions: [ADR-0048](../../adr/0048-v024-owner-decisions.md) (owner decisions and scope for v0.24);
 [ADR-0049](../../adr/0049-baseline-preferred-paths-for-repeated-fingerprints.md) (baseline preferred visible paths for repeated fingerprints);
 [ADR-0050](../../adr/0050-v024-phase-3-completion-design.md) (accepted: Phase 3 completion design decisions D1 to D11);
@@ -392,5 +392,15 @@ and owner ADR approval ([ADR-0050](../../adr/0050-v024-phase-3-completion-design
   `set` (`to.group_by`, `all_target_groups`), and inline literal `values:` targets (D3); added
   unified `compare` assertions (`eq`/`ne`/`lt`/`le`/`gt`/`ge` under `exact`/`lexical`/`numeric`,
   fail-loud on `Null`/`Missing`, D4); and updated `schemas/v2/config.json`, `inspect_plan`,
-  `schemas/experimental/rule-trace.json`, and `docs/rules.md`. Next: Batch 5c (D5 `semver_eval.rs` /
-  `satisfies:` / `compare: { order: semver }`, D6 `no_duplicate_keys`, D7 `strict: true` JSON).
+  `schemas/experimental/rule-trace.json`, and `docs/rules.md`. Post-Batch-5b audit (#664) closed
+  remaining edge cases in `records:` bounds/spans, per-part union sensitivity closure, `compare`
+  formatting, and test coverage.
+- 2026-11-25: Phase 5 Batch 5c complete (ADR-0050 D5, D6, and D7): added zero-dependency
+  `semver_eval.rs` (`node`, `cargo`, `pep440-basic`) powering `assert.satisfies` and
+  `compare: { order: semver }` (D5, Gap C4); added `no_duplicate_keys` per-file rule kind
+  (canonical kind #105) across YAML/JSON/dotenv/properties/INI/TOML/HCL with exact spans and
+  first-occurrence related locations (D6, Gap B1); and added cache-isolated `strict: true` RFC 8259
+  JSON parse mode across v1 (`json_path_*`, `json_schema_passes`, `key_parity`,
+  `no_duplicate_keys`, `extract: { json: ... }`) and v2 (`entries:`, `records:`, `read:`) readers
+  (D7). Next: Batch 5c audit -> Batch 5d (D10 bundled `version: 2` ruleset support +
+  `js/workspace-deps@v2`, D11 `RELEASE = "v0.24.0"` + 20-repo stratum re-score).

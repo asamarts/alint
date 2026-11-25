@@ -8,7 +8,7 @@ use dir_test::{Fixture, dir_test};
 
 use crate::support;
 
-const EXPECTED_GENERAL_SCENARIOS: usize = 586;
+const EXPECTED_GENERAL_SCENARIOS: usize = 588;
 const EXPECTED_BUNDLED_SCENARIOS: usize = 97;
 
 #[test]

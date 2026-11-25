@@ -95,6 +95,12 @@ struct Options {
     /// for the `.env` family.
     #[serde(default)]
     format: Option<TargetFormat>,
+    /// When `true`, enforce strict RFC 8259 JSON parsing on JSON targets
+    /// (rejecting comments, trailing commas, leading UTF-8 BOM, and empty
+    /// files; ADR-0050 D7). Rejected at build time when `format:` is explicitly
+    /// non-JSON.
+    #[serde(default)]
+    strict: bool,
 }
 
 crate::options_schema_for!(Options);
@@ -114,6 +120,8 @@ pub struct JsonSchemaPassesRule {
     /// `None`, the format is detected per-file from the
     /// extension.
     format_override: Option<Format>,
+    /// Enforce strict RFC 8259 JSON parsing on JSON target files.
+    strict: bool,
     /// Schema is loaded + compiled at most once per `Rule`
     /// instance. The `Result` lets us cache load failures so a
     /// missing or malformed schema produces a single
@@ -234,7 +242,12 @@ impl Rule for JsonSchemaPassesRule {
                 continue;
             };
 
-            let parsed = match ctx.parse_structured(&entry.path, format, &text) {
+            let parsed = match ctx.parse_structured_strict(
+                &entry.path,
+                format,
+                &text,
+                self.strict && format == Format::Json,
+            ) {
                 Ok(v) => v,
                 Err(err) => {
                     violations.push(
@@ -343,6 +356,12 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
 
     let format_override = opts.format.map(TargetFormat::to_format);
+    if opts.strict && format_override.is_some_and(|f| f != Format::Json) {
+        return Err(Error::rule_config(
+            &spec.id,
+            "`strict: true` applies only to JSON targets; remove `strict` or set `format: json`",
+        ));
+    }
 
     if spec.fix.is_some() {
         return Err(Error::rule_config(
@@ -361,6 +380,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         schema_path: opts.schema_path,
         allow_out_of_root: false,
         format_override,
+        strict: opts.strict,
         compiled: OnceLock::new(),
     }))
 }
@@ -401,6 +421,7 @@ mod tests {
             schema_path: "/etc/hostname".into(),
             allow_out_of_root: false,
             format_override: None,
+            strict: false,
             compiled: OnceLock::new(),
         };
         let (tmp, idx) = tempdir_with_files(&[("data.json", b"{}")]);
@@ -431,6 +452,7 @@ mod tests {
             schema_path: schema.clone(),
             allow_out_of_root: true,
             format_override: None,
+            strict: false,
             compiled: OnceLock::new(),
         };
         let (tmp, idx) = tempdir_with_files(&[("data.json", b"{}")]);

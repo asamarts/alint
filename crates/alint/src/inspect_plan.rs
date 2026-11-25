@@ -91,7 +91,7 @@ pub(super) struct PlanView {
 
 #[derive(Debug, Serialize)]
 struct AssertionView {
-    /// `equal`, `unique`, `set`, `reference`, `count`, or `compare`.
+    /// `equal`, `unique`, `set`, `reference`, `count`, `compare`, or `satisfies`.
     family: String,
     text: String,
 }
@@ -156,12 +156,16 @@ struct EntriesView {
     format: &'static str,
     at: Vec<String>,
     leaves: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    strict: bool,
 }
 
 #[derive(Debug, Serialize)]
 struct RecordsView {
     format: &'static str,
     at: Vec<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    strict: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -497,6 +501,24 @@ pub(super) fn redact_option(
             {
                 hide(val);
             }
+            let satisfies_version = value
+                .pointer("/satisfies/version")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string);
+            if satisfies_version.as_deref().is_some_and(sensitive)
+                && let Some(val) = value.pointer_mut("/satisfies/range_literal")
+            {
+                hide(val);
+            }
+            let satisfies_range = value
+                .pointer("/satisfies/range")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string);
+            if satisfies_range.as_deref().is_some_and(sensitive)
+                && let Some(val) = value.pointer_mut("/satisfies/version_literal")
+            {
+                hide(val);
+            }
             let set_field = value
                 .pointer("/set/field")
                 .and_then(serde_json::Value::as_str)
@@ -818,6 +840,47 @@ fn assertion(
             text,
         };
     }
+    if let Some(satisfies) = assert.get("satisfies") {
+        let ver_field = satisfies.get("version").and_then(serde_json::Value::as_str);
+        let rng_field = satisfies.get("range").and_then(serde_json::Value::as_str);
+        let lhs = if let Some(field) = ver_field {
+            format!("field {field}")
+        } else if let Some(val) = satisfies.get("version_literal") {
+            if rng_field.is_some_and(sensitive) {
+                REDACTED.to_string()
+            } else {
+                literal_text(val)
+            }
+        } else {
+            String::new()
+        };
+        let rhs = if let Some(field) = rng_field {
+            format!("field {field}")
+        } else if let Some(val) = satisfies.get("range_literal") {
+            if ver_field.is_some_and(sensitive) {
+                REDACTED.to_string()
+            } else {
+                literal_text(val)
+            }
+        } else {
+            String::new()
+        };
+        let mut text = format!("satisfies: {lhs} in {rhs}");
+        if let Some(dialect) = satisfies.get("dialect").and_then(serde_json::Value::as_str) {
+            let _ = write!(text, ", dialect {dialect}");
+        }
+        if satisfies
+            .get("include_prerelease")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+        {
+            text.push_str(", include_prerelease");
+        }
+        return AssertionView {
+            family: "satisfies".into(),
+            text,
+        };
+    }
     let set = assert.get("set").unwrap_or(&serde_json::Value::Null);
     let field = text_of(set, "field");
     let group_by = field_name_or_list(set.get("group_by"));
@@ -1033,6 +1096,7 @@ impl Builder<'_> {
                     format: format_name(entries.format),
                     at: entries.at.clone(),
                     leaves: entries.leaves,
+                    strict: entries.strict,
                 })),
                 records: None,
                 read: None,
@@ -1045,6 +1109,7 @@ impl Builder<'_> {
                 records: Some(Shown::hidden_if(hidden, || RecordsView {
                     format: format_name(records.format),
                     at: records.at.clone(),
+                    strict: records.strict,
                 })),
                 read: None,
                 optional: None,
@@ -1230,7 +1295,14 @@ fn scope_view(
 /// A `read:` as the config writes it.
 fn read_json(read: &Read) -> serde_json::Value {
     match read {
-        Read::Json(query) => serde_json::json!({ "json": query }),
+        Read::Json {
+            query,
+            strict: true,
+        } => serde_json::json!({ "json": query, "strict": true }),
+        Read::Json {
+            query,
+            strict: false,
+        } => serde_json::json!({ "json": query }),
         Read::Yaml(query) => serde_json::json!({ "yaml": query }),
         Read::Toml(query) => serde_json::json!({ "toml": query }),
         Read::Regex(pattern) => serde_json::json!({ "regex": pattern }),
@@ -1614,6 +1686,9 @@ fn write_part(out: &mut impl Write, indent: &str, part: &PartView, labels: &[&st
                 if entries.leaves {
                     text.push_str(", leaves");
                 }
+                if entries.strict {
+                    text.push_str(", strict");
+                }
                 text
             }
             Shown::Redacted(marker) => (*marker).to_string(),
@@ -1622,7 +1697,13 @@ fn write_part(out: &mut impl Write, indent: &str, part: &PartView, labels: &[&st
     }
     if let Some(records) = &part.records {
         let records = match records {
-            Shown::Value(records) => format!("{} at {}", records.format, records.at.join(", ")),
+            Shown::Value(records) => {
+                let mut text = format!("{} at {}", records.format, records.at.join(", "));
+                if records.strict {
+                    text.push_str(", strict");
+                }
+                text
+            }
             Shown::Redacted(marker) => (*marker).to_string(),
         };
         writeln!(out, "{indent}{dim}records:{dim:#} {}", term(&records))?;
@@ -1671,12 +1752,15 @@ fn write_part(out: &mut impl Write, indent: &str, part: &PartView, labels: &[&st
     Ok(())
 }
 
-/// A `read:` in readable form: `json $.name`, `regex "^v(.+)$"`, `lines`.
+/// A `read:` in readable form: `json $.name`, `json $.name, strict`, `regex "^v(.+)$"`, `lines`.
 fn read_text(read: &serde_json::Value) -> String {
-    let Some((form, argument)) = read.as_object().and_then(|read| read.iter().next()) else {
+    let Some(map) = read.as_object() else {
         return String::new();
     };
-    match argument {
+    let Some((form, argument)) = map.iter().find(|(k, _)| k.as_str() != "strict") else {
+        return String::new();
+    };
+    let mut text = match argument {
         serde_json::Value::String(text) if form == "regex" => {
             format!("regex {}", serde_json::Value::from(text.as_str()))
         }
@@ -1686,7 +1770,11 @@ fn read_text(read: &serde_json::Value) -> String {
             None => form.clone(),
         },
         _ => form.clone(),
+    };
+    if map.get("strict").and_then(serde_json::Value::as_bool) == Some(true) {
+        text.push_str(", strict");
     }
+    text
 }
 
 /// A selector: its name (or `inline selector`) and source on this line,

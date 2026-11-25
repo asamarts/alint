@@ -199,6 +199,66 @@ fn insert_dup_aware(scope: &mut Map<String, Value>, key: String, value: String) 
     }
 }
 
+/// One spanned INI key-value entry yielded by [`for_each_entry`].
+pub(crate) struct IniEntry<'a> {
+    /// Section name (`None` for global pre-section keys).
+    pub(crate) section: Option<&'a str>,
+    pub(crate) key: &'a str,
+    pub(crate) key_span: crate::extract::ByteSpan,
+}
+
+/// Validate `text` with [`parse`] and visit every INI assignment in source
+/// order with its exact byte span in `text` (honoring leading UTF-8 BOMs,
+/// LF/CRLF/CR physical lines, comments, repeated `[section]` headers, and
+/// indentation-continued multi-line values).
+pub(crate) fn for_each_entry(
+    text: &str,
+    mut visit: impl FnMut(IniEntry<'_>),
+) -> Result<(), String> {
+    crate::structured_format::Format::Ini.parse(text)?;
+    let stripped = text.trim_start_matches('\u{feff}');
+    let base = text.len() - stripped.len();
+    let mut section: Option<&str> = None;
+    let mut has_cur_key = false;
+    let mut cur_indent = 0usize;
+    for (line_start, raw) in crate::physical_lines(stripped) {
+        let indent = raw
+            .bytes()
+            .take_while(|b| matches!(b, b' ' | b'\t'))
+            .count();
+        let trimmed = raw.trim();
+        if trimmed.is_empty() || trimmed.starts_with(';') || trimmed.starts_with('#') {
+            continue;
+        }
+        if has_cur_key && indent > cur_indent {
+            continue;
+        }
+        let trim_start = raw.len() - raw.trim_start().len();
+        if let Some(rest) = trimmed.strip_prefix('[') {
+            let name = rest
+                .strip_suffix(']')
+                .expect("validated INI section")
+                .trim();
+            section = Some(name);
+            has_cur_key = false;
+            continue;
+        }
+        let sep = trimmed.find(['=', ':']).expect("validated INI assignment");
+        let before = &trimmed[..sep];
+        let key_lead = before.len() - before.trim_start().len();
+        let key = before.trim();
+        let key_start = base + line_start + trim_start + key_lead;
+        visit(IniEntry {
+            section,
+            key,
+            key_span: crate::extract::ByteSpan::new(key_start, key_start + key.len()),
+        });
+        has_cur_key = true;
+        cur_indent = indent;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

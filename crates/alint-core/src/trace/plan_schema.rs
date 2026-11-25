@@ -96,14 +96,18 @@ fn selector() -> Value {
     )
 }
 
-/// A `read:` as the config writes it: one form.
+/// A `read:` as the config writes it: one form (with optional `strict: true`
+/// on `json:`).
 fn read() -> Value {
     let query = json!({ "type": "string" });
     json!({
         "type": "object",
         "additionalProperties": false,
         "minProperties": 1,
-        "maxProperties": 1,
+        "maxProperties": 2,
+        "if": { "required": ["strict"] },
+        "then": { "required": ["json"], "minProperties": 2, "maxProperties": 2 },
+        "else": { "minProperties": 1, "maxProperties": 1 },
         "properties": {
             "json": query,
             "yaml": query,
@@ -111,6 +115,7 @@ fn read() -> Value {
             "regex": query,
             "lines": closed(json!({ "comment": { "type": "string" } }), &[]),
             "whole_file": closed(json!({}), &[]),
+            "strict": { "type": "boolean" },
         },
     })
 }
@@ -125,6 +130,7 @@ fn part_properties() -> Value {
                 "format": { "enum": ["json", "yaml", "toml"] },
                 "at": strings(),
                 "leaves": { "type": "boolean" },
+                "strict": { "type": "boolean" },
             }),
             &["format", "at", "leaves"],
         )),
@@ -132,6 +138,7 @@ fn part_properties() -> Value {
             json!({
                 "format": { "enum": ["json", "yaml", "toml"] },
                 "at": strings(),
+                "strict": { "type": "boolean" },
             }),
             &["format", "at"],
         )),
@@ -284,7 +291,7 @@ pub(super) fn plan() -> Value {
             "assertion": or_redacted(closed(
                 json!({
                     "family": {
-                        "enum": ["equal", "unique", "set", "reference", "count", "compare"]
+                        "enum": ["equal", "unique", "set", "reference", "count", "compare", "satisfies"]
                     },
                     "text": { "type": "string" },
                 }),

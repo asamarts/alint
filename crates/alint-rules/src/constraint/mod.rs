@@ -97,9 +97,11 @@ enum Assertion {
     Reference(Box<ReferenceAssertion>),
     /// `count`: row or distinct-value count bounds (ADR-0050 D2).
     Count(Box<CountAssertion>),
-    /// `compare`: pairwise comparison under exact, lexical, or numeric
-    /// ordering (ADR-0050 D4).
+    /// `compare`: pairwise comparison under exact, lexical, numeric, or semver
+    /// ordering (ADR-0050 D4, D5).
     Compare(Box<CompareAssertion>),
+    /// `satisfies`: semantic version range satisfaction (ADR-0050 D5).
+    Satisfies(Box<SatisfiesAssertion>),
 }
 
 /// A `set` assertion: each group's set of `field`'s values against `target`.
@@ -226,6 +228,34 @@ enum CompareOrder {
     Exact,
     Lexical,
     Numeric,
+    Semver,
+}
+
+/// A `satisfies` assertion (ADR-0050 D5).
+#[derive(Debug, Clone)]
+struct SatisfiesAssertion {
+    version: SatisfiesVersion,
+    range: SatisfiesRange,
+    dialect: alint_core::semver_eval::SemverDialect,
+    include_prerelease: bool,
+}
+
+#[derive(Debug, Clone)]
+enum SatisfiesVersion {
+    Field(String),
+    Literal {
+        raw: String,
+        parsed: alint_core::semver_eval::SemverVersion,
+    },
+}
+
+#[derive(Debug, Clone)]
+enum SatisfiesRange {
+    Field(String),
+    Literal {
+        raw: String,
+        parsed: alint_core::semver_eval::SemverRange,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -622,6 +652,7 @@ impl Rule for ConstraintRule {
                 run.count(count, kept.as_deref());
             }
             Assertion::Compare(compare) => run.compare(compare),
+            Assertion::Satisfies(satisfies) => run.satisfies(satisfies),
         }
         reported.extend(run.finish(skipped));
         Ok(reported)

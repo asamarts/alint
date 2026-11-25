@@ -863,7 +863,12 @@ const fn join_side(side: JoinSide) -> plan::JoinSide {
 
 fn reader(reader: &Reader) -> plan::Reader {
     match reader {
-        Reader::Entries(Entries { format, at, leaves }) => plan::Reader::Entries(plan::Entries {
+        Reader::Entries(Entries {
+            format,
+            at,
+            leaves,
+            strict,
+        }) => plan::Reader::Entries(plan::Entries {
             format: match format {
                 EntriesFormat::Json => plan::EntriesFormat::Json,
                 EntriesFormat::Yaml => plan::EntriesFormat::Yaml,
@@ -871,18 +876,23 @@ fn reader(reader: &Reader) -> plan::Reader {
             },
             at: at.clone(),
             leaves: *leaves,
+            strict: *strict,
         }),
-        Reader::Records(Records { format, at }) => plan::Reader::Records(plan::Records {
+        Reader::Records(Records { format, at, strict }) => plan::Reader::Records(plan::Records {
             format: match format {
                 EntriesFormat::Json => plan::EntriesFormat::Json,
                 EntriesFormat::Yaml => plan::EntriesFormat::Yaml,
                 EntriesFormat::Toml => plan::EntriesFormat::Toml,
             },
             at: at.clone(),
+            strict: *strict,
         }),
         Reader::Read { read, optional } => plan::Reader::Read {
             read: match read {
-                Read::Json(query) => plan::Read::Json(query.clone()),
+                Read::Json { query, strict } => plan::Read::Json {
+                    query: query.clone(),
+                    strict: *strict,
+                },
                 Read::Yaml(query) => plan::Read::Yaml(query.clone()),
                 Read::Toml(query) => plan::Read::Toml(query.clone()),
                 Read::Regex(pattern) => plan::Read::Regex(pattern.clone()),
@@ -1695,6 +1705,14 @@ impl Resolved<'_> {
                 {
                     push_pair(input.relation.id, field, input.relation.id, other);
                 }
+            }
+            if let Some(satisfies) = rule
+                .get("assert")
+                .and_then(|assert| assert.get("satisfies"))
+                && let Some(version) = satisfies.get("version").and_then(ayaml::Value::as_str)
+                && let Some(range) = satisfies.get("range").and_then(ayaml::Value::as_str)
+            {
+                push_pair(input.relation.id, version, input.relation.id, range);
             }
         }
         if !references.is_empty() {

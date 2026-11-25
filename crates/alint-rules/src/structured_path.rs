@@ -116,7 +116,7 @@ pub enum Op {
 // Options — deserialized from the rule spec's `extra` map.
 // ---------------------------------------------------------------
 
-/// Options shared by every `*_path_equals` rule kind.
+/// Options shared by non-JSON `*_path_equals` rule kinds.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct EqualsOptions {
@@ -132,7 +132,27 @@ struct EqualsOptions {
     if_present: bool,
 }
 
-/// Options shared by every `*_path_matches` rule kind.
+/// Options for `json_path_equals` (adds strict RFC 8259 JSON parsing).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct JsonEqualsOptions {
+    /// `JSONPath` expression rooted at `$`. Supports dot-access (`$.foo.bar`),
+    /// array index (`$.deps[0]`), wildcards (`$.deps[*]`), filters, and every
+    /// other RFC 9535 construct.
+    path: String,
+    /// Expected value. Any JSON type (string, number, boolean, null, array, object).
+    equals: Value,
+    /// When true, a query returning zero matches is silently OK - only real
+    /// matches that fail the op produce violations.
+    #[serde(default)]
+    if_present: bool,
+    /// When true, enforce strict RFC 8259 JSON parsing (rejecting comments,
+    /// trailing commas, leading UTF-8 BOM, and empty files; ADR-0050 D7).
+    #[serde(default)]
+    strict: bool,
+}
+
+/// Options shared by non-JSON `*_path_matches` rule kinds.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct MatchesOptions {
@@ -146,7 +166,25 @@ struct MatchesOptions {
     if_present: bool,
 }
 
-/// schemars-derived options schema for the eight `*_path_equals` kinds; composed
+/// Options for `json_path_matches` (adds strict RFC 8259 JSON parsing).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct JsonMatchesOptions {
+    /// `JSONPath` expression rooted at `$`.
+    path: String,
+    /// Rust-regex pattern to match against the value at `path`.
+    matches: String,
+    /// When true, a query returning zero matches is silently OK - only real
+    /// matches that fail the op produce violations.
+    #[serde(default)]
+    if_present: bool,
+    /// When true, enforce strict RFC 8259 JSON parsing (rejecting comments,
+    /// trailing commas, leading UTF-8 BOM, and empty files; ADR-0050 D7).
+    #[serde(default)]
+    strict: bool,
+}
+
+/// schemars-derived options schema for the non-JSON `*_path_equals` kinds; composed
 /// into their `$defs` branches by `xtask gen-schema`. See
 /// [`crate::rule_option_schemas`].
 #[must_use]
@@ -155,14 +193,28 @@ pub fn equals_options_schema() -> serde_json::Value {
         .expect("EqualsOptions JSON schema serializes")
 }
 
-/// schemars-derived options schema for the eight `*_path_matches` kinds.
+/// schemars-derived options schema for `json_path_equals`.
+#[must_use]
+pub fn json_equals_options_schema() -> serde_json::Value {
+    serde_json::to_value(schemars::schema_for!(JsonEqualsOptions))
+        .expect("JsonEqualsOptions JSON schema serializes")
+}
+
+/// schemars-derived options schema for the non-JSON `*_path_matches` kinds.
 #[must_use]
 pub fn matches_options_schema() -> serde_json::Value {
     serde_json::to_value(schemars::schema_for!(MatchesOptions))
         .expect("MatchesOptions JSON schema serializes")
 }
 
-/// Options for the `*_path_absent` kinds. Existence-only: there is no value to
+/// schemars-derived options schema for `json_path_matches`.
+#[must_use]
+pub fn json_matches_options_schema() -> serde_json::Value {
+    serde_json::to_value(schemars::schema_for!(JsonMatchesOptions))
+        .expect("JsonMatchesOptions JSON schema serializes")
+}
+
+/// Options for the non-JSON `*_path_absent` kinds. Existence-only: there is no value to
 /// compare and no `if_present` (the rule *is* a presence check).
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -172,11 +224,31 @@ struct AbsentOptions {
     path: String,
 }
 
-/// schemars-derived options schema for the `*_path_absent` kinds.
+/// Options for `json_path_absent` (adds strict RFC 8259 JSON parsing).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct JsonAbsentOptions {
+    /// `JSONPath` expression rooted at `$`. The rule fires one violation per
+    /// file if the query matches any node (the path must be absent).
+    path: String,
+    /// When true, enforce strict RFC 8259 JSON parsing (rejecting comments,
+    /// trailing commas, leading UTF-8 BOM, and empty files; ADR-0050 D7).
+    #[serde(default)]
+    strict: bool,
+}
+
+/// schemars-derived options schema for the non-JSON `*_path_absent` kinds.
 #[must_use]
 pub fn absent_options_schema() -> serde_json::Value {
     serde_json::to_value(schemars::schema_for!(AbsentOptions))
         .expect("AbsentOptions JSON schema serializes")
+}
+
+/// schemars-derived options schema for `json_path_absent`.
+#[must_use]
+pub fn json_absent_options_schema() -> serde_json::Value {
+    serde_json::to_value(schemars::schema_for!(JsonAbsentOptions))
+        .expect("JsonAbsentOptions JSON schema serializes")
 }
 
 // ---------------------------------------------------------------
@@ -203,6 +275,9 @@ pub struct StructuredPathRule {
     /// the fast path this is the dominant 1M-scale bottleneck.
     literal_paths: Option<Vec<PathBuf>>,
     format: Format,
+    /// When `true` (only valid for `Format::Json`), enforce strict RFC 8259
+    /// JSON parsing (ADR-0050 D7).
+    strict: bool,
     path_expr: JsonPath,
     path_src: String,
     op: Op,
@@ -392,7 +467,7 @@ impl StructuredPathRule {
         // mis-globbed textual file there yields a junk tree (the query just finds no
         // match), not a parse error -- keep the glob narrow for those formats.
         let text = String::from_utf8_lossy(bytes);
-        let root_value = match ctx.parse_structured(path, self.format, &text) {
+        let root_value = match ctx.parse_structured_strict(path, self.format, &text, self.strict) {
             Ok(v) => v,
             Err(err) => {
                 if TRACE {
@@ -1258,13 +1333,21 @@ fn build_absent(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Box
     let paths = spec.paths.as_ref().ok_or_else(|| {
         Error::rule_config(&spec.id, format!("{kind_label} requires a `paths` field"))
     })?;
-    let opts: AbsentOptions = spec
-        .deserialize_options()
-        .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
-    let path_expr = JsonPath::parse(&opts.path).map_err(|e| {
+    let (path, strict) = if format == Format::Json {
+        let opts: JsonAbsentOptions = spec
+            .deserialize_options()
+            .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
+        (opts.path, opts.strict)
+    } else {
+        let opts: AbsentOptions = spec
+            .deserialize_options()
+            .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
+        (opts.path, false)
+    };
+    let path_expr = JsonPath::parse(&path).map_err(|e| {
         Error::rule_config(
             &spec.id,
-            alint_core::jsonpath_diagnostics::format_parse_error(&opts.path, e),
+            alint_core::jsonpath_diagnostics::format_parse_error(&path, e),
         )
     })?;
     // Only `remove_value` is compatible with a `*_path_absent` kind (it deletes
@@ -1274,7 +1357,7 @@ fn build_absent(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Box
         Some(FixSpec::RemoveValue { remove_value }) => Some(StructuredFixer::remove(
             format,
             path_expr.clone(),
-            opts.path.clone(),
+            path.clone(),
             remove_value.applicability.unwrap_or(Applicability::Unsafe),
         )),
         Some(other) => {
@@ -1296,8 +1379,9 @@ fn build_absent(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Box
         scope: Scope::from_spec(spec)?,
         literal_paths: extract_literal_paths(paths),
         format,
+        strict,
         path_expr,
-        path_src: opts.path,
+        path_src: path,
         op: Op::Absent,
         if_present: false,
         fixer,
@@ -1308,13 +1392,21 @@ fn build_equals(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Box
     let paths = spec.paths.as_ref().ok_or_else(|| {
         Error::rule_config(&spec.id, format!("{kind_label} requires a `paths` field"))
     })?;
-    let opts: EqualsOptions = spec
-        .deserialize_options()
-        .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
-    let path_expr = JsonPath::parse(&opts.path).map_err(|e| {
+    let (path, equals, if_present, strict) = if format == Format::Json {
+        let opts: JsonEqualsOptions = spec
+            .deserialize_options()
+            .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
+        (opts.path, opts.equals, opts.if_present, opts.strict)
+    } else {
+        let opts: EqualsOptions = spec
+            .deserialize_options()
+            .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
+        (opts.path, opts.equals, opts.if_present, false)
+    };
+    let path_expr = JsonPath::parse(&path).map_err(|e| {
         Error::rule_config(
             &spec.id,
-            alint_core::jsonpath_diagnostics::format_parse_error(&opts.path, e),
+            alint_core::jsonpath_diagnostics::format_parse_error(&path, e),
         )
     })?;
     // Only `set_value` is compatible with a `*_path_equals` kind (it overwrites
@@ -1325,8 +1417,8 @@ fn build_equals(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Box
         Some(FixSpec::SetValue { set_value }) => Some(StructuredFixer::set(
             format,
             path_expr.clone(),
-            opts.path.clone(),
-            opts.equals.clone(),
+            path.clone(),
+            equals.clone(),
             set_value.applicability.unwrap_or(Applicability::Safe),
         )),
         Some(other) => {
@@ -1348,10 +1440,11 @@ fn build_equals(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Box
         scope: Scope::from_spec(spec)?,
         literal_paths: extract_literal_paths(paths),
         format,
+        strict,
         path_expr,
-        path_src: opts.path,
-        op: Op::Equals(opts.equals),
-        if_present: opts.if_present,
+        path_src: path,
+        op: Op::Equals(equals),
+        if_present,
         fixer,
     }))
 }
@@ -1360,18 +1453,25 @@ fn build_matches(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Bo
     let paths = spec.paths.as_ref().ok_or_else(|| {
         Error::rule_config(&spec.id, format!("{kind_label} requires a `paths` field"))
     })?;
-    let opts: MatchesOptions = spec
-        .deserialize_options()
-        .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
-    let path_expr = JsonPath::parse(&opts.path).map_err(|e| {
+    let (path, matches, if_present, strict) = if format == Format::Json {
+        let opts: JsonMatchesOptions = spec
+            .deserialize_options()
+            .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
+        (opts.path, opts.matches, opts.if_present, opts.strict)
+    } else {
+        let opts: MatchesOptions = spec
+            .deserialize_options()
+            .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
+        (opts.path, opts.matches, opts.if_present, false)
+    };
+    let path_expr = JsonPath::parse(&path).map_err(|e| {
         Error::rule_config(
             &spec.id,
-            alint_core::jsonpath_diagnostics::format_parse_error(&opts.path, e),
+            alint_core::jsonpath_diagnostics::format_parse_error(&path, e),
         )
     })?;
-    let re = Regex::new(&opts.matches).map_err(|e| {
-        Error::rule_config(&spec.id, format!("invalid regex {:?}: {e}", opts.matches))
-    })?;
+    let re = Regex::new(&matches)
+        .map_err(|e| Error::rule_config(&spec.id, format!("invalid regex {matches:?}: {e}")))?;
     // `*_path_matches` accepts ONLY the `replace` op: the value at `path` is
     // rewritten (by the fix's OWN `pattern:` -> `replacement:`) so it satisfies the
     // rule's `matches:` -- which stays the check + re-verify target. Any other op is
@@ -1397,10 +1497,10 @@ fn build_matches(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Bo
             Some(StructuredFixer::replace(
                 format,
                 path_expr.clone(),
-                opts.path.clone(),
+                path.clone(),
                 search,
                 replace.replacement.clone(),
-                opts.matches.clone(),
+                matches.clone(),
                 replace.applicability.unwrap_or(Applicability::Unsafe),
             ))
         }
@@ -1423,10 +1523,11 @@ fn build_matches(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Bo
         scope: Scope::from_spec(spec)?,
         literal_paths: extract_literal_paths(paths),
         format,
+        strict,
         path_expr,
-        path_src: opts.path,
+        path_src: path,
         op: Op::Matches(re),
-        if_present: opts.if_present,
+        if_present,
         fixer,
     }))
 }

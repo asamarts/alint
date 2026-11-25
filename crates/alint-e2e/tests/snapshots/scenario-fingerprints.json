@@ -1746,6 +1746,18 @@
     "fingerprint": "dae978921cdca413bd0665b1207139db47fa7c16fa7cf015b4133a91f3f60d4b"
   },
   {
+    "scenario": "check/structured/no_duplicate_keys_fail.yml",
+    "rule_id": "no-dup-keys",
+    "path": ".github/workflows/ci.yml",
+    "fingerprint": "6a41887f40bdd464e4a05ee7cd7018ed335851d9128cda9c0932c2728a990645"
+  },
+  {
+    "scenario": "check/structured/no_duplicate_keys_fail.yml",
+    "rule_id": "no-dup-keys",
+    "path": "config.json",
+    "fingerprint": "5ad7bd4afa0e1f38e8a6138a54f7d615d81b63e6250bea9c78bd8ea412a8862b"
+  },
+  {
     "scenario": "check/structured/properties_path_absent_flags_debug_enabled.yml",
     "rule_id": "no-debug",
     "path": "application.properties",

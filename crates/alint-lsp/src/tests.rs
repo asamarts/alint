@@ -1802,3 +1802,61 @@ fn build_session_rejects_a_missing_baseline() {
     let err = build_session(dir.path()).expect_err("missing baseline is a config error");
     assert!(err.contains("baseline"), "{err}");
 }
+
+#[test]
+fn no_duplicate_keys_runs_on_per_file_did_change_hot_path_with_related_location() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().to_path_buf();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nrules:\n  - id: no-dup-keys\n    kind: no_duplicate_keys\n    \
+         paths: \"**/*.yml\"\n    level: error\n",
+    )
+    .unwrap();
+    let file_path = root.join("ci.yml");
+    std::fs::write(&file_path, "jobs:\n  build:\n    runs-on: ubuntu\n").unwrap();
+    let session = build_session(&root).unwrap().unwrap();
+    let (backend, _rx) = test_server();
+    let uri = Url::from_file_path(&file_path).unwrap();
+    {
+        let mut st = backend.state.lock();
+        install_session(&mut st, &root, &uri, session);
+        st.open.insert(uri.clone());
+    }
+
+    // Unsaved buffer introduces a duplicate top-level `jobs:` key on line 4.
+    let dup_text = "jobs:\n  build:\n    runs-on: ubuntu\njobs:\n  test:\n    runs-on: ubuntu\n";
+    backend.state.lock().versions.insert(uri.clone(), 1);
+    backend.reeval_file(uri.clone(), dup_text.to_string(), 1);
+    {
+        let st = backend.state.lock();
+        let findings = st.diagnostics.get(&uri).expect("diagnostics published");
+        assert_eq!(findings.len(), 1, "{findings:#?}");
+        let f = &findings[0];
+        assert_eq!(f.rule_id, "no-dup-keys");
+        assert!(
+            f.per_file,
+            "no_duplicate_keys must run on the per-file hot path"
+        );
+        assert_eq!(f.range.start, Position::new(3, 0));
+        assert_eq!(f.range.end, Position::new(3, 4));
+        assert_eq!(f.related_information.len(), 1);
+        assert_eq!(
+            f.related_information[0].location.range.start,
+            Position::new(0, 0)
+        );
+    }
+
+    // Fixing the duplicate in the buffer clears diagnostics immediately.
+    let clean_text = "jobs:\n  build:\n    runs-on: ubuntu\n";
+    backend.state.lock().versions.insert(uri.clone(), 2);
+    backend.reeval_file(uri.clone(), clean_text.to_string(), 2);
+    {
+        let st = backend.state.lock();
+        let findings = st.diagnostics.get(&uri).map_or(&[][..], Vec::as_slice);
+        assert!(
+            findings.is_empty(),
+            "expected clean diagnostics: {findings:#?}"
+        );
+    }
+}

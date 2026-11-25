@@ -1044,10 +1044,28 @@ impl Context<'_> {
         format: crate::Format,
         text: &str,
     ) -> std::result::Result<crate::SharedValue, String> {
+        self.parse_structured_strict(path, format, text, false)
+    }
+
+    /// Like [`Context::parse_structured`], enforcing strict RFC 8259 JSON
+    /// parsing when `format == Format::Json && strict_json` and isolating
+    /// strict vs. tolerant entries in the structured cache (ADR-0050 D7).
+    ///
+    /// # Errors
+    ///
+    /// Returns the same format-specific parse or limit error as
+    /// [`crate::Format::parse_with_strict_json`].
+    pub fn parse_structured_strict(
+        &self,
+        path: &Path,
+        format: crate::Format,
+        text: &str,
+        strict_json: bool,
+    ) -> std::result::Result<crate::SharedValue, String> {
         if let Some(cache) = self.structured_cache {
-            cache.get_or_parse(path, format, text)
+            cache.get_or_parse_with_options(path, format, strict_json, text)
         } else {
-            format.parse_shared(text)
+            format.parse_shared_with_strict_json(text, strict_json)
         }
     }
     /// True if `rel_path` is in git's index. Returns `false` when no tracked set

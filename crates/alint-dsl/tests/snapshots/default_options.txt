@@ -103,6 +103,7 @@ CrossFileRule {
         Structured(
             Yaml,
             "$.catalog.*",
+            false,
         ),
     ),
     targets: Some(
@@ -112,6 +113,7 @@ CrossFileRule {
                 Structured(
                     Json,
                     "$.dependencies.*",
+                    false,
                 ),
             ),
             matches: None,
@@ -203,6 +205,7 @@ CrossFileRule {
         Structured(
             Toml,
             "$.workspace.package.version",
+            false,
         ),
     ),
     targets: Some(
@@ -212,6 +215,7 @@ CrossFileRule {
                 Structured(
                     Toml,
                     "$.package.version",
+                    false,
                 ),
             ),
             matches: None,
@@ -303,6 +307,7 @@ StructuredPathRule {
         ],
     ),
     format: Dotenv,
+    strict: false,
     path_expr: JsonPath(
         Query {
             kind: Root,
@@ -335,6 +340,7 @@ StructuredPathRule {
         ],
     ),
     format: Dotenv,
+    strict: false,
     path_expr: JsonPath(
         Query {
             kind: Root,
@@ -369,6 +375,7 @@ StructuredPathRule {
         ],
     ),
     format: Dotenv,
+    strict: false,
     path_expr: JsonPath(
         Query {
             kind: Root,
@@ -1193,6 +1200,7 @@ StructuredPathRule {
         ],
     ),
     format: Hcl,
+    strict: false,
     path_expr: JsonPath(
         Query {
             kind: Root,
@@ -1237,6 +1245,7 @@ StructuredPathRule {
         ],
     ),
     format: Hcl,
+    strict: false,
     path_expr: JsonPath(
         Query {
             kind: Root,
@@ -1289,6 +1298,7 @@ StructuredPathRule {
         ],
     ),
     format: Hcl,
+    strict: false,
     path_expr: JsonPath(
         Query {
             kind: Root,
@@ -1383,6 +1393,7 @@ StructuredPathRule {
         ],
     ),
     format: Ini,
+    strict: false,
     path_expr: JsonPath(
         Query {
             kind: Root,
@@ -1433,6 +1444,7 @@ StructuredPathRule {
         ],
     ),
     format: Ini,
+    strict: false,
     path_expr: JsonPath(
         Query {
             kind: Root,
@@ -1485,6 +1497,7 @@ StructuredPathRule {
         ],
     ),
     format: Ini,
+    strict: false,
     path_expr: JsonPath(
         Query {
             kind: Root,
@@ -1548,6 +1561,7 @@ StructuredPathRule {
         ],
     ),
     format: Json,
+    strict: false,
     path_expr: JsonPath(
         Query {
             kind: Root,
@@ -1586,6 +1600,7 @@ StructuredPathRule {
         ],
     ),
     format: Json,
+    strict: false,
     path_expr: JsonPath(
         Query {
             kind: Root,
@@ -1620,6 +1635,7 @@ StructuredPathRule {
         ],
     ),
     format: Json,
+    strict: false,
     path_expr: JsonPath(
         Query {
             kind: Root,
@@ -1653,6 +1669,7 @@ JsonSchemaPassesRule {
     schema_path: "schemas/package.schema.json",
     allow_out_of_root: false,
     format_override: None,
+    strict: false,
     compiled: OnceLock(
         <uninit>,
     ),
@@ -1679,6 +1696,7 @@ KeyParityRule {
     strip_root: false,
     ignore: [],
     allow_missing_peers: false,
+    strict: false,
 }
 
 === kind: line_endings | id: line-endings-lf ===
@@ -1882,6 +1900,18 @@ NoCaseConflictsRule {
     scope: Scope { ... },
 }
 
+=== kind: no_duplicate_keys | id: no-dup-config-keys ===
+NoDuplicateKeysRule {
+    id: "no-dup-config-keys",
+    level: Error,
+    policy_url: None,
+    message: None,
+    scope: Scope { ... },
+    format_override: None,
+    strict: false,
+    explicit_sensitive: false,
+}
+
 === kind: no_empty_files | id: no-empty-files ===
 NoEmptyFilesRule {
     id: "no-empty-files",
@@ -2038,6 +2068,7 @@ StructuredPathRule {
         ],
     ),
     format: Properties,
+    strict: false,
     path_expr: JsonPath(
         Query {
             kind: Root,
@@ -2076,6 +2107,7 @@ StructuredPathRule {
         ],
     ),
     format: Properties,
+    strict: false,
     path_expr: JsonPath(
         Query {
             kind: Root,
@@ -2116,6 +2148,7 @@ StructuredPathRule {
         ],
     ),
     format: Properties,
+    strict: false,
     path_expr: JsonPath(
         Query {
             kind: Root,
@@ -2156,6 +2189,7 @@ RegistryPathsResolveRule {
     extract: Structured(
         Toml,
         "$.workspace.members[*]",
+        false,
     ),
     base: RegistryDir,
     entries_are_globs: false,
@@ -2167,6 +2201,7 @@ RegistryPathsResolveRule {
         Structured(
             Toml,
             "$.workspace.exclude[*]",
+            false,
         ),
     ),
     orphans: Some(
@@ -2222,6 +2257,7 @@ StructuredPathRule {
         ],
     ),
     format: Toml,
+    strict: false,
     path_expr: JsonPath(
         Query {
             kind: Root,
@@ -2254,6 +2290,7 @@ StructuredPathRule {
         ],
     ),
     format: Toml,
+    strict: false,
     path_expr: JsonPath(
         Query {
             kind: Root,
@@ -2294,6 +2331,7 @@ StructuredPathRule {
         ],
     ),
     format: Toml,
+    strict: false,
     path_expr: JsonPath(
         Query {
             kind: Root,
@@ -2354,6 +2392,7 @@ StructuredPathRule {
     scope: Scope { ... },
     literal_paths: None,
     format: Xml,
+    strict: false,
     path_expr: JsonPath(
         Query {
             kind: Root,
@@ -2394,6 +2433,7 @@ StructuredPathRule {
     scope: Scope { ... },
     literal_paths: None,
     format: Xml,
+    strict: false,
     path_expr: JsonPath(
         Query {
             kind: Root,
@@ -2436,6 +2476,7 @@ StructuredPathRule {
     scope: Scope { ... },
     literal_paths: None,
     format: Xml,
+    strict: false,
     path_expr: JsonPath(
         Query {
             kind: Root,
@@ -2500,6 +2541,7 @@ StructuredPathRule {
     scope: Scope { ... },
     literal_paths: None,
     format: Yaml,
+    strict: false,
     path_expr: JsonPath(
         Query {
             kind: Root,
@@ -2573,6 +2615,7 @@ StructuredPathRule {
     scope: Scope { ... },
     literal_paths: None,
     format: Yaml,
+    strict: false,
     path_expr: JsonPath(
         Query {
             kind: Root,
@@ -2635,6 +2678,7 @@ StructuredPathRule {
     scope: Scope { ... },
     literal_paths: None,
     format: Yaml,
+    strict: false,
     path_expr: JsonPath(
         Query {
             kind: Root,

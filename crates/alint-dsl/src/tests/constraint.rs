@@ -691,13 +691,13 @@ fn the_assertion_is_one_family_of_one_shape() {
     };
     refused(
         "    assert: {}\n",
-        "`assert`: holds exactly one of `equal`, `unique`, `set`, `reference`, `count` and \
-         `compare`; found none",
+        "`assert`: holds exactly one of `equal`, `unique`, `set`, `reference`, `count`, \
+         `compare` and `satisfies`; found none",
     );
     refused(
         "    assert: { unique: { key: [dependency] }, equal: { field: range } }\n",
-        "`assert`: holds exactly one of `equal`, `unique`, `set`, `reference`, `count` and \
-         `compare`; found `equal` and `unique`",
+        "`assert`: holds exactly one of `equal`, `unique`, `set`, `reference`, `count`, \
+         `compare` and `satisfies`; found `equal` and `unique`",
     );
     refused(
         "    assert: { unique: { key: [] } }\n",

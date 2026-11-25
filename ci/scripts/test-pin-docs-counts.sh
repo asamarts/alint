@@ -31,6 +31,7 @@ for kind in [
     "pinned_references",
     "key_parity",
     "constraint",
+    "no_duplicate_keys",
 ]:
     facts["rule_kinds"].remove(kind)
     facts["rule_categories"].pop(kind)

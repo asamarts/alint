@@ -584,12 +584,14 @@ impl CrossFileValueFixer {
         let query = extract.query.as_str();
         let path_expr = &extract.path;
         let target_text = String::from_utf8_lossy(target_bytes);
-        let parsed = format.parse(&target_text).map_err(|error| {
-            format!(
-                "could not parse {} as {format:?} for `{query}`: {error}",
-                target_rel.display()
-            )
-        })?;
+        let parsed = format
+            .parse_with_strict_json(&target_text, extract.strict)
+            .map_err(|error| {
+                format!(
+                    "could not parse {} as {format:?} for `{query}`: {error}",
+                    target_rel.display()
+                )
+            })?;
         let source_norm = apply_normalize(&self.normalize, source_value);
         let queried = path_expr.query(&parsed);
         if queried.len() == 1

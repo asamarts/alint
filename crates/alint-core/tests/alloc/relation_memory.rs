@@ -74,6 +74,7 @@ fn relation(at: &str) -> Arc<Plan> {
                         format: EntriesFormat::Json,
                         at: vec![at.into()],
                         leaves: false,
+                        strict: false,
                     }),
                     fields: None,
                 }),
