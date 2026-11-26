@@ -210,14 +210,11 @@ mod tests {
         for (name, rev) in catalog() {
             let spec = format!("{name}@{rev}");
             let body = resolve(&spec).unwrap();
-            if rev == "v1" {
-                let parsed: Result<alint_core::Config, _> = alint_core::yaml::from_str(body);
-                assert!(
-                    parsed.is_ok(),
-                    "bundled ruleset '{spec}' failed to parse as v1: {}",
-                    parsed.unwrap_err()
-                );
-            } else {
+            let doc: ayaml::Value = alint_core::yaml::from_str(body).unwrap_or_else(|e| {
+                panic!("bundled ruleset '{spec}' failed to parse as YAML: {e}")
+            });
+            let declared_v2 = doc.get("version").and_then(ayaml::Value::as_u64) == Some(2);
+            if declared_v2 {
                 let dir = tempfile::tempdir().unwrap();
                 let cfg_path = dir.path().join(".alint.yml");
                 std::fs::write(
@@ -244,6 +241,13 @@ mod tests {
                         )
                     });
                 }
+            } else {
+                let parsed: Result<alint_core::Config, _> = alint_core::yaml::from_str(body);
+                assert!(
+                    parsed.is_ok(),
+                    "bundled ruleset '{spec}' failed to parse as v1: {}",
+                    parsed.unwrap_err()
+                );
             }
         }
     }
@@ -282,12 +286,13 @@ mod tests {
                 .filter_map(|r| r.get("id").and_then(ayaml::Value::as_str))
                 .map(str::to_string)
                 .collect();
-            if rev == "v1" {
+            let declared_v2 = doc.get("version").and_then(ayaml::Value::as_u64) == Some(2);
+            if declared_v2 {
+                v2_ids.push((spec, ids));
+            } else {
                 for id in ids {
                     v1_ids.insert(id, spec.clone());
                 }
-            } else {
-                v2_ids.push((spec, ids));
             }
         }
         assert!(

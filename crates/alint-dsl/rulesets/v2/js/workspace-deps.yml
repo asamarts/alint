@@ -1,11 +1,12 @@
 # alint://bundled/js/workspace-deps@v2
 #
 # Dependency version consistency for JavaScript and TypeScript monorepo
-# workspaces. Checks that every external package pinned across `package.json`
-# manifests (`dependencies`, `devDependencies`, and `optionalDependencies`)
-# agrees on one version range, ignoring workspace-local packages and protocol
-# specifiers (`workspace:`, `catalog:`, `npm:`, `file:`, `link:`, `portal:`,
-# `patch:`).
+# workspaces. Checks that every external package pinned across the root
+# `package.json` and one-level `packages/*/package.json` and
+# `apps/*/package.json` manifests (`dependencies`, `devDependencies`, and
+# `optionalDependencies`) agrees on one version range, ignoring workspace-local
+# packages and protocol specifiers (`workspace:`, `catalog:`, `npm:`, `file:`,
+# `link:`, `portal:`, `patch:`, `exec:`, matched case-insensitively).
 #
 # Requires `version: 2` in your `.alint.yml`. Adopt with:
 #
@@ -25,11 +26,6 @@ selectors:
       - "package.json"
       - "packages/*/package.json"
       - "apps/*/package.json"
-      - "!**/node_modules/**"
-      - "!**/dist/**"
-      - "!**/build/**"
-      - "!**/fixtures/**"
-      - "!**/__fixtures__/**"
 
 relations:
   workspace-names:
@@ -52,7 +48,7 @@ relations:
     transform:
       range: [trim]
     where:
-      range: { not_matches: "^(workspace|catalog|npm|file|link|portal|patch):" }
+      range: { not_matches: "(?i)^(workspace|catalog|npm|file|link|portal|patch|exec):" }
       dependency: { not_in: [{ relation: workspace-names, field: name }] }
 
 rules:

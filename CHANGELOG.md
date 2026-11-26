@@ -21,10 +21,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Library users (`alint-core`): `baseline::BaselineEntry` gains `pub paths: Vec<String>` and
   `baseline::FingerprintedViolation` gains `pub path_free_identity: bool` (ADR-0049; prefer
   `FingerprintedViolation::from_violation` when constructing violations, #601).
-- `key_parity` and `constraint` now cap emitted findings at `10,000` per rule by default
-  (`limits.findings_per_rule`), emitting one non-baselinable analysis failure naming the cap when
-  reached instead of allocating unbounded findings. Raise `limits.findings_per_rule` in your
-  top-level `.alint.yml` (up to `1,000,000`) if a repository legitimately exceeds the default
+- `key_parity`, `constraint`, and `no_duplicate_keys` now cap emitted findings at `10,000` per rule
+  by default (`limits.findings_per_rule`), emitting one non-baselinable analysis failure naming the
+  cap when reached instead of allocating unbounded findings. Raise `limits.findings_per_rule` in
+  your top-level `.alint.yml` (up to `1,000,000`) if a repository legitimately exceeds the default
   (#596).
 - Duplicate keys inside top-level `vars:` (for example `vars: {a: 1, b: 2, a: 3}`) are now
   rejected as config errors instead of silently keeping the last value, matching every other
@@ -75,8 +75,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `message:` templates for missing, extra, shared, and unresolved values with single-pass expansion
   (never re-expanding substituted values), 64-character truncation, invisible-character escaping,
   and `<redacted>` redaction for sensitive fields, environment-derived relations/literals, and
-  `sensitive: true` rules, rejecting `{{value}}` at load time on `equal`, `unique`, `count`, and
-  `compare` assertions while leaving non-alint `{{...}}` tokens literal (#594).
+  `sensitive: true` rules, rejecting `{{value}}` at load time on `equal`, `unique`, `count`,
+  `compare`, and `satisfies` assertions while leaving non-alint `{{...}}` tokens literal (#594).
 - `version: 2` relations now support `records:` array-of-objects extraction (`format: json | yaml |
   toml`, `at:` JSONPath or list) with `record: <JSONPath>` (and optional `optional: true`) field
   sources preserving source spans and numeric lexemes, parameterized string transforms (`split`

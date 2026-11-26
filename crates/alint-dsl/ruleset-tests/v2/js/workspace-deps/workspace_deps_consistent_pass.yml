@@ -31,10 +31,21 @@ given:
               "@acme/core": "workspace:*",
               "zod": "^3.23.0",
               "shared-catalog": "catalog:",
-              "local-helper": "file:../helper"
+              "local-helper": "file:../helper",
+              "codegen-tool": "exec:./gen.js"
             },
             "devDependencies": {
               "typescript": "~5.6.0"
+            }
+          }
+      build:
+        package.json: |
+          {
+            "name": "@acme/build",
+            "version": "1.0.0",
+            "dependencies": {
+              "@acme/core": "Workspace:*",
+              "zod": "^3.23.0"
             }
           }
     apps:

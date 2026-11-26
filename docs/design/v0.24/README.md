@@ -211,8 +211,12 @@ and owner ADR approval ([ADR-0050](../../adr/0050-v024-phase-3-completion-design
     baseline fingerprint golden gate from #579).
 - Documentation and CHANGELOG ("Upgrading from 0.23" prominently calling out Windows baseline
   regeneration for #579, `java-no-tracked-build` for #546, the 10k per-rule finding cap for #596,
-  parent ignore-file warning for #568, and v2 additions), tag `v0.24.0`, verify all release and
-  post-publish smoke channels, review `bench-record`, and sync `alint.org`.
+  parent ignore-file warning for #568, and v2 additions), release-cut doc updates gated on the
+  `v0.23.0` overlay until tag time (`docs/rules.md` lines 972, 974, 1046, 1054 updating pre-v0.24
+  `constraint` prose for the 7 assertion families, v0.25 stability timeline, and `reference`
+  triggers/redaction; `docs/site/concepts/composition/bundled-rulesets.md` updating `24` -> `25`
+  bundled rulesets and the `alint://bundled/<name>@<rev>` note), tag `v0.24.0`, verify all release
+  and post-publish smoke channels, review `bench-record`, and sync `alint.org`.
 
 ## 2. Out of scope (deferred deliberately)
 
@@ -402,5 +406,19 @@ and owner ADR approval ([ADR-0050](../../adr/0050-v024-phase-3-completion-design
   first-occurrence related locations (D6, Gap B1); and added cache-isolated `strict: true` RFC 8259
   JSON parse mode across v1 (`json_path_*`, `json_schema_passes`, `key_parity`,
   `no_duplicate_keys`, `extract: { json: ... }`) and v2 (`entries:`, `records:`, `read:`) readers
-  (D7). Next: Batch 5c audit -> Batch 5d (D10 bundled `version: 2` ruleset support +
-  `js/workspace-deps@v2`, D11 `RELEASE = "v0.24.0"` + 20-repo stratum re-score).
+  (D7). Post-Batch-5c adversarial audit (#666) closed semver edge cases (partial ranges, tilde,
+  caret, PEP 440, negative zero, whitespace), `no_duplicate_keys` bounds and YAML/INI/HCL/JSON
+  edge cases, and strict-JSON cache/path parity.
+- 2026-11-25: Phase 5 Batch 5d complete (#667, ADR-0050 D10 and D11): enabled bundled
+  `version: 2` rulesets (`alint://bundled/...` from `version: 2` configs with `as:` aliases,
+  ADR-0022 direction check as user config error, `SourceLocator::Bundled`, zero
+  `Config::config_files` pollution), shipped `alint://bundled/js/workspace-deps@v2` with passing
+  and firing policy tests, bumped `schemas/v2/config.json` `$id` to `RELEASE = "v0.24.0"`, and
+  re-scored the 20-repository corpus stratum. Post-Batch-5d adversarial audit closed diamond
+  env-redaction order dependence and alias-correlation in `list`/`export-agents-md`, hardened
+  `decode_bundled` validation parity and drop-in remediation hints, tightened
+  `js/workspace-deps@v2` globs and protocol matching, extended remaining `rulesets/` audits,
+  `docs-export` v2 sections/slugs, `facts.json` collision checks, and `version_two_schema` to v2
+  bundled rulesets, and tightened the 20-repo stratum re-score to Scenario 2 (demoting
+  `immich-52` and `nextcloud-b02` to `B->C`, keeping `fluentui-08` in C, and binary-verifying
+  all corrected stratum shapes). Next: Phase 6 release qualification.

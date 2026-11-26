@@ -1020,16 +1020,55 @@ fn bundled_ruleset_decodes_v1_and_v2_and_rejects_invalid_bodies_as_internal() {
             "alint://bundled/x@v1: `extends[0].as` needs `version: 2`; this config is version 1",
         ),
         ("version: 2\nrules:\n  - {id: a, id: b}\n", "duplicate"),
+        (
+            "version: 2\nrequires:\n  alint: '{{env.MIN_VER}}'\nrules: []\n",
+            "requires.alint",
+        ),
+        (
+            "version: 2\nselectors:\n  docs: { paths: '{{env.SECRET}}' }\nrules: []\n",
+            "references environment variables",
+        ),
+        (
+            "version: 1\nrules:\n  - id: r\n    kind: file_exists\n    paths: '{{env.SECRET}}'\n    level: error\n",
+            "references environment variables",
+        ),
+        (
+            "version: 1\nrules:\n  - id: r\n    kind: git_commit_message\n    since: '${SECRET}'\n    pattern: '.*'\n    level: error\n",
+            "a bundled ruleset",
+        ),
+        (
+            "version: 2\nrules:\n  - id: r\n    kind: git_commit_message\n    since: '${SECRET}'\n    pattern: '.*'\n    level: error\n",
+            "a bundled ruleset",
+        ),
     ] {
         let error = decode_bundled(body, "x@v1", "alint://bundled/x@v1", &mut state).unwrap_err();
         assert!(matches!(error, Error::Internal(_)), "{error:?}");
         assert!(error.to_string().contains(expected), "{error}");
     }
+
+    // Internal parse errors use `display` (e.g. `<redacted>`), never raw `spec`.
+    let redacted_err = decode_bundled(
+        "version: [unterminated",
+        "secret/name@v1",
+        alint_core::CONFIGURATION_MASK,
+        &mut state,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(redacted_err, Error::Internal(_)),
+        "{redacted_err:?}"
+    );
+    let redacted_msg = redacted_err.to_string();
+    assert!(
+        redacted_msg.contains(alint_core::CONFIGURATION_MASK)
+            && !redacted_msg.contains("secret/name@v1"),
+        "expected redacted display in internal error: {redacted_msg}"
+    );
 }
 
-/// Every ruleset this build ships matches its declared config surface: `@v1`
-/// rulesets are plainly version 1 (no dispatch parse needed) and `@v2`
-/// rulesets decode cleanly on the version 2 surface.
+/// Every ruleset this build ships matches its declared config surface:
+/// `version: 1` rulesets are plainly version 1 (no dispatch parse needed) and
+/// `version: 2` rulesets decode cleanly on the version 2 surface.
 #[test]
 fn every_bundled_ruleset_dispatches_to_its_declared_surface() {
     let mut state = LoadState::default();
@@ -1038,23 +1077,25 @@ fn every_bundled_ruleset_dispatches_to_its_declared_surface() {
         let body = crate::bundled::resolve(&spec).unwrap();
         let display = format!("alint://bundled/{spec}");
         let origin = crate::v2::Origin::new(ConfigSourceClass::Bundled, &display);
-        if rev == "v1" {
-            let config = deserialize_raw_config(body, &display).unwrap();
-            assert!(crate::v2::plainly_v1(&config, &origin), "{spec}");
+        let doc: ayaml::Value = decode_text(body).unwrap();
+        let declared_v2 = doc.get("version").and_then(ayaml::Value::as_u64) == Some(2);
+        if declared_v2 {
             assert_eq!(
-                crate::v2::dispatch(decode_text(body).ok().as_ref(), body, &origin).unwrap(),
-                crate::v2::Surface::V1,
-                "{spec}"
-            );
-        } else {
-            assert_eq!(
-                crate::v2::dispatch(decode_text(body).ok().as_ref(), body, &origin).unwrap(),
+                crate::v2::dispatch(Some(&doc), body, &origin).unwrap(),
                 crate::v2::Surface::V2,
                 "{spec}"
             );
             let decoded = decode_bundled(body, &spec, &display, &mut state)
                 .unwrap_or_else(|e| panic!("v2 bundled ruleset {spec} failed to decode: {e}"));
             assert_eq!(decoded.surface, crate::v2::Surface::V2, "{spec}");
+        } else {
+            let config = deserialize_raw_config(body, &display).unwrap();
+            assert!(crate::v2::plainly_v1(&config, &origin), "{spec}");
+            assert_eq!(
+                crate::v2::dispatch(Some(&doc), body, &origin).unwrap(),
+                crate::v2::Surface::V1,
+                "{spec}"
+            );
         }
     }
 }

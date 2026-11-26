@@ -346,7 +346,7 @@ rules:
     message: "no private-key / secret-shaped file may be committed to the repository"
 
   # --- Bundled ruleset shape ---------------------------------------------
-  # Each YAML under crates/alint-dsl/rulesets/v1/ is the source of truth for
+  # Each YAML under crates/alint-dsl/rulesets/<rev>/ is the source of truth for
   # one bundled ruleset AND the source of truth for that ruleset's docs page
   # (xtask docs-export parses the leading comment block as the page's
   # overview, then embeds the YAML verbatim under "## Source"). The format
@@ -356,7 +356,7 @@ rules:
   #     #
   #     # <prose description>
   #     ...
-  #     version: 1
+  #     version: 1   # or version: 2 for v2 rulesets
   #
   # Without the URI tag on line 1 the page renders with a missing or wrong
   # title; without the `#`-blank-then-prose pattern the overview is empty

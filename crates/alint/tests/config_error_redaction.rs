@@ -947,6 +947,52 @@ fn a_v2_source_path_read_from_the_environment_stays_out_of_listings() {
     );
 }
 
+/// A diamond `extends:` reaching the same bundled v2 ruleset both literally
+/// (`as: pub_ws`) and via `{{env.SECRET_RULESET}}` (`as: env_ws`) must produce
+/// order-independent `<redacted>` provenance and never fuse `env_ws` onto
+/// `pub_ws`'s alias list in `list`, `list --format json`, or `export-agents-md`.
+#[test]
+fn diamond_literal_and_env_v2_extends_redacts_order_independently_without_alias_oracle() {
+    let env = [("SECRET_RULESET", "alint://bundled/js/workspace-deps@v2")];
+    for (label, config) in [
+        (
+            "literal-first",
+            "version: 2\nextends:\n  - url: alint://bundled/js/workspace-deps@v2\n    as: pub_ws\n  \
+             - url: '{{env.SECRET_RULESET}}'\n    as: env_ws\nrules: []\n",
+        ),
+        (
+            "env-first",
+            "version: 2\nextends:\n  - url: '{{env.SECRET_RULESET}}'\n    as: env_ws\n  \
+             - url: alint://bundled/js/workspace-deps@v2\n    as: pub_ws\nrules: []\n",
+        ),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), ".alint.yml", config);
+        for args in [
+            &["list"][..],
+            &["list", "--format", "json"][..],
+            &["export-agents-md"][..],
+        ] {
+            let output = run(root.path(), args, &env);
+            assert!(
+                output.status.success(),
+                "{label} {args:?}\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_left_out(
+                &format!("{label} {args:?}"),
+                &output,
+                &["workspace-deps@v2"],
+            );
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                !stdout.contains("env_ws"),
+                "{label} {args:?} leaked alias correlation with env_ws:\n{stdout}"
+            );
+        }
+    }
+}
+
 /// A source an `extends:` entry read from the environment loads tells where
 /// the environment points, and so does every source it extends in turn:
 /// `p.yml`'s own `extends: ./q.yml` was listed, and named in errors, as

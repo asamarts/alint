@@ -125,8 +125,8 @@ pub(crate) struct Merger {
     environment_values: Unique<String>,
     /// Each of `merged.compatibility`.
     compatibility: HashSet<CompatibilityKey>,
-    /// The locator of each of `merged.v2.sources`.
-    v2_locators: HashSet<SourceLocator>,
+    /// The index of each locator in `merged.v2.sources`.
+    v2_locators: HashMap<SourceLocator, usize>,
     /// The selectors and relations of `merged.v2.sources`.
     v2_objects: usize,
     /// The keys a merge looks up in every rule and template.
@@ -218,7 +218,8 @@ impl Merger {
             .v2
             .sources
             .iter()
-            .map(|objects| objects.source.locator.clone())
+            .enumerate()
+            .map(|(index, objects)| (objects.source.locator.clone(), index))
             .collect();
         self.v2_objects = first.v2.object_count();
         #[cfg(test)]
@@ -332,16 +333,30 @@ impl Merger {
                 .map(Cow::into_owned)
                 .collect();
         }
-        // A source an `extends:` diamond reaches twice declares its objects once.
-        for objects in entries!(&mut source, v2.sources) {
-            if !self.v2_locators.contains(&objects.source.locator) {
-                self.v2_locators.insert(objects.source.locator.clone());
+        self.add_v2_sources(&mut source);
+        self.add_reduced(&mut source, repeated);
+        self.check_size()
+    }
+
+    /// Merge `source`'s version 2 sources once per locator. If either branch of
+    /// an `extends:` diamond reached the same locator via the environment
+    /// (`<redacted>`), preserve the redacted display regardless of `extends:`
+    /// order so literal-first diamonds cannot leak an env-chosen target.
+    fn add_v2_sources(&mut self, source: &mut Cow<'_, RawConfig>) {
+        for objects in entries!(source, v2.sources) {
+            if let Some(&existing) = self.v2_locators.get(&objects.source.locator) {
+                if objects.source.display == alint_core::CONFIGURATION_MASK {
+                    alint_core::CONFIGURATION_MASK
+                        .clone_into(&mut self.merged.v2.sources[existing].source.display);
+                }
+            } else {
+                let index = self.merged.v2.sources.len();
+                self.v2_locators
+                    .insert(objects.source.locator.clone(), index);
                 self.v2_objects += objects.object_count();
                 self.merged.v2.sources.push(objects.into_owned());
             }
         }
-        self.add_reduced(&mut source, repeated);
-        self.check_size()
     }
 
     /// Add the entries of `source`'s lists that keep each entry once.

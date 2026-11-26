@@ -300,8 +300,9 @@ fn a_value_from_the_environment_is_a_boolean_where_the_field_takes_one() {
 
 /// What a 2 the loader did not read as version 2 is refused with.
 const TWO_AS_WRITTEN: &str = "unsupported config version 2 as written: only a literal \
-                              `version: 2` in a local config file selects the experimental \
-                              version 2 (a version read from the environment is version 1)";
+                              `version: 2` in a local config file or bundled ruleset selects the \
+                              experimental version 2 (a version read from the environment is \
+                              version 1)";
 
 /// An unsupported version said "this build supports 1 through 1", which
 /// left version 2 out, and so did a 2 read from the environment (in a root,
@@ -1157,5 +1158,78 @@ fn bundled_version_two_ruleset_direction_rule_and_env_redaction() {
     assert_eq!(
         env_plan.sources[1].aliases[0].url,
         alint_core::CONFIGURATION_MASK
+    );
+}
+
+#[test]
+fn bundled_version_two_diamond_dropin_and_case_normalization() {
+    #[derive(Debug)]
+    struct BundledEnv;
+    impl crate::EnvironmentProvider for BundledEnv {
+        fn get(&self, name: &str) -> Option<String> {
+            (name == "BUNDLED_V2").then(|| "alint://bundled/js/workspace-deps@v2".to_string())
+        }
+    }
+
+    let tmp = tempfile::tempdir().unwrap();
+    let registry = alint_rules::builtin_registry();
+    let options = LoadOptions::with_catalog(registry.catalog());
+    let mut env_opts = LoadOptions::with_catalog(registry.catalog());
+    env_opts.environment = std::sync::Arc::new(BundledEnv);
+
+    // Diamond extends (both literal-first and env-first) monotonically redact
+    // `PlanSource::display` so `extends:` order cannot leak an env-chosen target.
+    for (dir, body) in [
+        (
+            "diamond-lit-first",
+            "version: 2\nextends:\n  - url: alint://bundled/js/workspace-deps@v2\n    as: pub_ws\n  \
+             - url: '{{env.BUNDLED_V2}}'\n    as: env_ws\nrules: []\n",
+        ),
+        (
+            "diamond-env-first",
+            "version: 2\nextends:\n  - url: '{{env.BUNDLED_V2}}'\n    as: env_ws\n  \
+             - url: alint://bundled/js/workspace-deps@v2\n    as: pub_ws\nrules: []\n",
+        ),
+    ] {
+        let path = write(tmp.path(), &format!("{dir}/.alint.yml"), body);
+        let cfg = load_with(&path, &env_opts).expect("diamond bundled v2 loads");
+        let plan = cfg.relation_plan.as_deref().unwrap();
+        assert_eq!(
+            plan.sources[0].display,
+            alint_core::CONFIGURATION_MASK,
+            "{dir}: diamond must redact PlanSource::display regardless of extends order"
+        );
+    }
+
+    // 5. A `.alint.d/*.yml` drop-in under a `version: 1` root extending a
+    // bundled v2 ruleset advises upgrading the root config (not the drop-in).
+    let dropin_root = write(tmp.path(), "dropin/.alint.yml", "version: 1\nrules: []\n");
+    write(
+        tmp.path(),
+        "dropin/.alint.d/10-v2.yml",
+        "extends:\n  - alint://bundled/js/workspace-deps@v2\nrules: []\n",
+    );
+    let err = load_with(&dropin_root, &options).unwrap_err();
+    assert!(
+        matches!(err, alint_core::Error::Other(_)),
+        "expected Error::Other for v1 drop-in -> bundled v2, got {err:?}"
+    );
+    let dropin_msg = err.to_string();
+    assert!(
+        dropin_msg.contains("give the root config `version: 2`"),
+        "drop-in refusal should advise upgrading the root config: {dropin_msg}"
+    );
+
+    // 6. Mixed-case `ALINT://BUNDLED/...` normalizes its canonical display.
+    let mixed_case = write(
+        tmp.path(),
+        "mixed-case/.alint.yml",
+        "version: 2\nextends:\n  - url: ALINT://BUNDLED/js/workspace-deps@v2\n    as: ws\nrules: []\n",
+    );
+    let cfg = load_with(&mixed_case, &options).expect("mixed-case bundled URI loads");
+    let plan = cfg.relation_plan.as_deref().unwrap();
+    assert_eq!(
+        plan.sources[0].display,
+        "alint://bundled/js/workspace-deps@v2"
     );
 }

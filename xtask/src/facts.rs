@@ -455,9 +455,10 @@ fn families(root: &Path) -> Result<Vec<String>> {
 
 /// `.yml` files (recursive) under `rulesets/<rev>/`, as sorted
 /// extension-stripped relative identifiers (`apache/governance`, `go`,
-/// `js/workspace-deps`).
+/// `js/workspace-deps`). Fails loudly if two revision directories share the
+/// same bare ruleset name so `facts.json` never silently drops a revision.
 fn bundled_rulesets(root: &Path) -> Result<Vec<String>> {
-    fn walk(base: &Path, dir: &Path, out: &mut BTreeSet<String>) -> Result<()> {
+    fn walk(base: &Path, dir: &Path, out: &mut BTreeMap<String, PathBuf>) -> Result<()> {
         for entry in fs::read_dir(dir).with_context(|| format!("read_dir {}", dir.display()))? {
             let path = entry?.path();
             if path.is_dir() {
@@ -470,15 +471,21 @@ fn bundled_rulesets(root: &Path) -> Result<Vec<String>> {
                     .to_string_lossy()
                     .replace('\\', "/");
                 let name = rel.split_once('/').map_or(rel.as_str(), |(_, rest)| rest);
-                out.insert(name.to_string());
+                if let Some(prev) = out.insert(name.to_string(), path.clone()) {
+                    bail!(
+                        "bundled ruleset bare name collision `{name}` across revisions: {} and {}",
+                        prev.display(),
+                        path.display()
+                    );
+                }
             }
         }
         Ok(())
     }
     let dir = root.join("crates/alint-dsl/rulesets");
-    let mut set = BTreeSet::new();
-    walk(&dir, &dir, &mut set)?;
-    Ok(set.into_iter().collect())
+    let mut map = BTreeMap::new();
+    walk(&dir, &dir, &mut map)?;
+    Ok(map.into_keys().collect())
 }
 
 /// Number of **directly-declared** rules in each bundled ruleset (its top-level
@@ -515,7 +522,12 @@ fn bundled_ruleset_sizes(root: &Path) -> Result<BTreeMap<String, usize>> {
                     .get("rules")
                     .and_then(ayaml::Value::as_sequence)
                     .map_or(0, Vec::len);
-                out.insert(name.to_string(), count);
+                if out.insert(name.to_string(), count).is_some() {
+                    bail!(
+                        "bundled ruleset bare name collision `{name}` across revisions (at {})",
+                        path.display()
+                    );
+                }
             }
         }
         Ok(())

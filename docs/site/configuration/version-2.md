@@ -348,9 +348,9 @@ aliases. Names, aliases and references are literal: `{{...}}` in one is an error
 name the same thing in every environment. Other values interpolate `{{env.X}}` as in version 1,
 except that a value substituted in a selector or relation stays text: with `NODE_MAJOR=18`,
 `in: ["{{env.NODE_MAJOR}}"]` compares with the text `18`, where a rule's value re-types as a
-number. Only the fields that take a boolean (`optional:`, `leaves:`, `strict:`, `required:` and a field's
-`sensitive:`)
-read a substituted `true` or `false` as one; in an `in:` list it is the text `true`, which does
+number. Only the fields that take a boolean (`optional:`, `leaves:`, `strict:`, `required:` and a
+field's `sensitive:`) read a substituted `true` or `false` as one, and `split.part` reads a
+substituted integer as one; in an `in:` list a substituted `true` is the text `true`, which does
 not match the boolean. An error that could quote a value read from the
 environment is redacted to the selector or relation it is about, as a version 1 rule's is.
 
@@ -430,8 +430,8 @@ turn, is named `<redacted>`, here and in errors found in it, however short its n
 
 `alint explain <rule>` on a `constraint` rule shows its resolved plan after its options: the
 assertion, then every relation the rule reads in the order a run evaluates them (its input, both
-sides of each join, the relations its `in:` and `not_in:` lists probe, and a `set`'s other
-relation), each named as the config writes each reference that reaches it (with the file that
+sides of each join, the relations its `in:` and `not_in:` lists probe, and a `set` or `reference`'s
+other relation), each named as the config writes each reference that reaches it (with the file that
 declares it when two relations would read alike, so a reference names one), with its source, reader,
 fields, transforms, `where:` and the file that declares it; then the selectors that run the rule
 under `--changed`. For example, for a rule whose `input:` joins two relations:
@@ -471,7 +471,8 @@ With `respect_gitignore: false` or `--no-gitignore`, the walk reads no ignore fi
 (`union[0]:`), as a message that names a part names it.
 
 `--format json` gives the same as a `plan` object, where each relation has an `id` (its place in the
-list) by which a join's sides, an `in:` list, the trigger, `input` and `set_target` name it. The
+list) by which a join's sides, an `in:` list, the trigger, `input`, `set_target`, and
+`reference_target` name it. The
 plan is configuration and shows no value read from a file, except the paths a manifest-derived
 `scope_filter:` resolves to, as for any rule (ADR-0010). What the environment wrote shows as
 `<redacted>`, as do a sensitive field's `where:` literals, patterns and transforms and the literals
@@ -502,8 +503,8 @@ distinct-value limit, which is never truncation.
 
 - Only the `constraint` kind reads a relation, and a rule's `paths:` cannot name a selector.
 - A `set`'s `plurals: cldr` takes an `entry.path` field and a `{ group: }` target only, and a
-  `set` against another relation's field names it (bare or qualified), never inline. That
-  relation may hold at most 100,000 distinct values of the field.
+  `set` or `reference` against another relation's field(s) names it (bare or qualified), never
+  inline. That target relation may hold at most 100,000 distinct values or key tuples.
 - Local files and compiled-in bundled rulesets may be version 2; remote (`https://...`), nested
   (`nested_configs:`), and inline (`alint_dsl::parse`) configs remain version 1 only (see
   [the version boundary](#the-version-boundary)).
@@ -535,7 +536,7 @@ distinct-value limit, which is never truncation.
     (`findings_per_rule`, configurable under top-level `limits:` from 1 to 1,000,000);
   - 1,000,000 rows into each side of a join (`join_inputs`), and 1,000,000 out of it
     (`join_outputs`);
-  - 100,000 distinct values of the field a `set` compares against in another relation
+  - 100,000 distinct values or key tuples in the target relation of a `set` or `reference`
     (`distinct_values`).
 - Placing a `constraint` rule's findings reads each file they sit in again, one at a time. Each
   file must fit in what the run's relations left of `bytes_per_run`, the limit less what their
@@ -570,6 +571,30 @@ do. Bundled rulesets are compiled into the binary (offline, never interpolated a
 environment), carry `extended_source` protection so rules cannot self-edit config files, and never
 pollute `Config::config_files`. A reference reaches only the same source or a source it extends,
 never a source that extends it.
+
+## Constraint assertions
+
+A `constraint` rule's `assert:` block holds exactly one of seven assertion families (see
+[`constraint`](/docs/rules/cross-file/constraint/) for full field details, findings, and baseline
+identities):
+
+- **`equal`**: all rows share one value of `field:` (optionally per `group_by:` field or tuple),
+  match a named `to: { row: ... }` anchor, or agree across two fields of each row (`to: { field: }`).
+- **`unique`**: no two rows share a `key: [...]`, or rows sharing `key:` agree on `determines: [...]`.
+- **`set`**: compares a group's value set (single or multi-field `group_by:`) against a reference
+  group (`{ group: }`, with optional `plurals: cldr`), another relation's values
+  (`{ relation:, field:, group_by?:, all_target_groups?: }`), or an inline literal list
+  (`{ values: [...] }`) under `equal_to`, `subset_of`, or `disjoint_from`.
+- **`reference`**: single-key (`field:`) or composite-key (`fields: [...]`) foreign-key check against
+  another relation (`to: { relation:, field: | fields: [...] }`, optional `skip_missing: true`).
+- **`count`**: bounds row counts or `distinct: true` non-null values of `field:` (`min`, `max`, or
+  `exact`, optional `group_by:` and `groups:`). Emptiness checks (`max: 0` / `exact: 0`) emit one
+  finding per offending row; positive bounds emit one aggregate finding per failing group.
+- **`compare`**: pairwise comparison (`eq`, `ne`, `lt`, `le`, `gt`, `ge`) against `to: { field: |
+  value: | row: }` under `exact`, `lexical`, `numeric`, or `semver` ordering.
+- **`satisfies`**: offline semantic version range satisfaction (`version` / `version_literal`
+  against `range` / `range_literal`, `dialect: node | cargo | pep440-basic`, optional
+  `include_prerelease: true`).
 
 ## The three policies
 
@@ -769,12 +794,15 @@ exclude others (one family in a `constraint` rule's `assert:`, one target in its
 check:
 
 - what needs every file loaded: names and aliases that resolve, re-exports, cycles, and the plan
-  checks above (fields that exist, union parts that bind every field, transforms that apply, the
-  literals in `in` and `not_in`);
+  checks above (fields that exist, union parts that bind every field with matching names and
+  `sensitive` flags, transforms that apply, and the literals in `in` and `not_in`);
 - in a `constraint` rule's `assert:`, what needs its relation or compares two of its values: a
-  field the relation has, a literal of the field's type, a `group_by:` or `to: { field: }` that
-  names the compared field, a `determines:` field that is part of the key, a `groups:` entry that
-  names the reference group, and an `entry.path` field under `plurals: cldr`;
+  field the relation has, a literal of the field's type (or valid semver / range literal for
+  `compare` and `satisfies`), a `group_by:` or `to: { field: }` that names the compared field, a
+  `determines:` field that is part of the key, matching key arities in `reference` and per-group
+  `set`, a `groups:` entry that names the reference group or exceeds `group_by:` arity, `count`
+  `min > max` or `groups:` without `min > 0` / `exact > 0`, `{{value}}` on unsupported families,
+  and an `entry.path` field under `plurals: cldr`;
 - a name declared twice across selectors, relations and aliases;
 - regexes, a `read:` regex's capture group and JSONPaths;
 - which files may be version 2, and that a version 1 config does not extend a version 2 one;
