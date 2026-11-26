@@ -768,8 +768,7 @@ fn merge_lookups_are_bounded_without_the_guard() {
     document.merge_work.set(Some(MAX_MERGE_WORK / 32));
     let exhausted = within(std::time::Duration::from_secs(1), move || {
         let rule = github_rule();
-        let line_index = LineIndex::new(&chain);
-        let mut collector = Collector::new(&rule, Path::new("ci.yml"), &document, &line_index);
+        let mut collector = Collector::new(&rule, Path::new("ci.yml"), &document, &chain);
         collect_github_actions(&mut collector);
         document.merge_work.get().is_none()
     });
@@ -806,8 +805,7 @@ proptest::proptest! {
             };
             document.merge_work.set(Some(BUDGET));
             let rule = github_rule();
-            let line_index = LineIndex::new(&text);
-            let mut collector = Collector::new(&rule, Path::new("ci.yml"), &document, &line_index);
+            let mut collector = Collector::new(&rule, Path::new("ci.yml"), &document, &text);
             collect_github_actions(&mut collector);
             Some((document.merge_work.get(), collector.findings.len()))
         });

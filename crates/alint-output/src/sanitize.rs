@@ -52,6 +52,7 @@ pub fn sanitize_terminal_multiline(s: &str) -> Cow<'_, str> {
 /// Leaves C0 control characters untouched so the XML encoder can strip
 /// XML-1.0-illegal C0 bytes (including `ESC`) and normalize `\t`/`\n`/`\r`
 /// according to element vs attribute rules.
+#[cfg(test)]
 #[must_use]
 pub(crate) fn sanitize_xml_display(s: &str) -> Cow<'_, str> {
     if s.bytes().all(|b| b < 0x7f) {

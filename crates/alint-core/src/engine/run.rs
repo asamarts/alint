@@ -608,12 +608,13 @@ impl Engine {
             });
         }
 
-        // Create a run-scoped structured-tree cache whenever cross-file rules
-        // or structured facts can share parsed documents with other rules,
-        // manifest predicates, or multi-query passes (#548). Per-file-only
-        // runs without structured facts share trees per file inside
-        // `dispatch_per_file` with zero cross-worker contention or retained
-        // memory across files.
+        // Create a run-scoped structured-tree cache whenever multiple rules,
+        // structured facts, manifest scope predicates, or composite/relation
+        // rules can share parsed documents across passes (#548). Single
+        // standalone rules (such as a lone `json_schema_passes`) and
+        // per-file-only runs without structured facts/manifests bypass the
+        // run-scoped LRU completely; multi-rule per-file runs still share
+        // trees per file inside `dispatch_per_file` with zero contention.
         let has_cross_file = self
             .entries
             .iter()
@@ -626,7 +627,31 @@ impl Engine {
                 } if file_content_matches.extract.is_some()
             )
         });
-        let run_structured_cache = (has_cross_file || has_structured_fact).then(|| {
+        let has_manifest_scope = self.entries.iter().any(|entry| {
+            entry
+                .rule
+                .path_scope()
+                .or_else(|| entry.rule.as_per_file().map(PerFileRule::path_scope))
+                .and_then(crate::Scope::scope_filter)
+                .is_some_and(|filter| !filter.manifest_predicates().is_empty())
+        });
+        let has_internal_structured_reuse = self.entries.iter().any(|entry| {
+            entry.rule.uses_relations()
+                || entry.spec.as_deref().is_some_and(|spec| {
+                    matches!(
+                        self.registry.canonical_kind(&spec.kind),
+                        "for_each_dir"
+                            | "for_each_file"
+                            | "every_matching_has"
+                            | "cross_file"
+                            | "constraint"
+                    )
+                })
+        });
+        let need_run_structured_cache = has_structured_fact
+            || has_manifest_scope
+            || (has_cross_file && (self.entries.len() >= 2 || has_internal_structured_reuse));
+        let run_structured_cache = need_run_structured_cache.then(|| {
             crate::structured_cache::StructuredCache::new(
                 crate::yaml_budget::YAML_PARSE_BUDGET_BYTES,
             )
@@ -1252,62 +1277,76 @@ impl Engine {
             self.collect_live_per_file_entries(&ctx, &gate_inputs, &pass, None);
 
         // Dispatch each in-scope rule against the supplied bytes, sharing the
-        // parsed structured tree across matching per-file rules (#548).
-        let matching: Vec<(usize, &dyn PerFileRule)> = live
-            .iter()
-            .filter_map(|(idx, entry)| {
+        // parsed structured tree across matching per-file rules (#548). Avoid
+        // intermediate allocations on the single-rule hot path.
+        let cap = self.findings_per_rule_limit();
+        let mut bucket: HashMap<usize, Vec<Violation>> = HashMap::new();
+        let mut eval_one = |eval_ctx: &Context<'_>, idx: usize, pf: &dyn PerFileRule| match pf
+            .evaluate_file(eval_ctx, file_path, bytes)
+        {
+            Ok(vs) => {
+                if !vs.is_empty() {
+                    if pf.enforces_findings_per_rule() {
+                        let dest = bucket.entry(idx).or_default();
+                        let mut emitted = 0usize;
+                        let mut suppressed = 0usize;
+                        for v in vs {
+                            if v.disposition == crate::rule::FindingDisposition::Violation {
+                                if emitted < cap {
+                                    emitted += 1;
+                                    dest.push(v);
+                                } else {
+                                    suppressed = suppressed.saturating_add(1);
+                                }
+                            } else {
+                                dest.push(v);
+                            }
+                        }
+                        if suppressed > 0 {
+                            dest.push(crate::rule::findings_per_rule_truncation_failure(
+                                cap, emitted, suppressed, false,
+                            ));
+                        }
+                    } else {
+                        bucket.entry(idx).or_default().extend(vs);
+                    }
+                }
+            }
+            Err(e) => bucket.entry(idx).or_default().push(
+                Violation::new(format!("rule evaluation failed: {e}"))
+                    .with_path(file_path)
+                    .as_analysis_failure(AnalysisFailureKind::Evaluation),
+            ),
+        };
+        if live.len() <= 1 {
+            if let Some(&(idx, entry)) = live.first() {
                 let pf = entry
                     .rule
                     .as_per_file()
                     .expect("live entries are per-file rules by construction");
-                pf.path_scope()
-                    .matches(file_path, index)
-                    .then_some((*idx, pf))
-            })
-            .collect();
-        let file_cache =
-            (matching.len() >= 2).then(|| crate::structured_cache::FileStructuredCache::new(None));
-        let file_ctx = file_cache
-            .as_ref()
-            .map(|cache| ctx.with_file_structured_cache(cache));
-        let eval_ctx = file_ctx.as_ref().unwrap_or(&ctx);
-        let cap = self.findings_per_rule_limit();
-        let mut bucket: HashMap<usize, Vec<Violation>> = HashMap::new();
-        for (idx, pf) in matching {
-            match pf.evaluate_file(eval_ctx, file_path, bytes) {
-                Ok(vs) => {
-                    if !vs.is_empty() {
-                        if pf.enforces_findings_per_rule() {
-                            let dest = bucket.entry(idx).or_default();
-                            let mut emitted = 0usize;
-                            let mut suppressed = 0usize;
-                            for v in vs {
-                                if v.disposition == crate::rule::FindingDisposition::Violation {
-                                    if emitted < cap {
-                                        emitted += 1;
-                                        dest.push(v);
-                                    } else {
-                                        suppressed = suppressed.saturating_add(1);
-                                    }
-                                } else {
-                                    dest.push(v);
-                                }
-                            }
-                            if suppressed > 0 {
-                                dest.push(crate::rule::findings_per_rule_truncation_failure(
-                                    cap, emitted, suppressed, false,
-                                ));
-                            }
-                        } else {
-                            bucket.entry(idx).or_default().extend(vs);
-                        }
-                    }
+                if pf.path_scope().matches(file_path, index) {
+                    eval_one(&ctx, idx, pf);
                 }
-                Err(e) => bucket.entry(idx).or_default().push(
-                    Violation::new(format!("rule evaluation failed: {e}"))
-                        .with_path(file_path)
-                        .as_analysis_failure(AnalysisFailureKind::Evaluation),
-                ),
+            }
+        } else {
+            let mut matching: Vec<(usize, &dyn PerFileRule)> = Vec::with_capacity(live.len());
+            for &(idx, entry) in &live {
+                let pf = entry
+                    .rule
+                    .as_per_file()
+                    .expect("live entries are per-file rules by construction");
+                if pf.path_scope().matches(file_path, index) {
+                    matching.push((idx, pf));
+                }
+            }
+            let file_cache = (matching.len() >= 2)
+                .then(|| crate::structured_cache::FileStructuredCache::new(None));
+            let file_ctx = file_cache
+                .as_ref()
+                .map(|cache| ctx.with_file_structured_cache(cache));
+            let eval_ctx = file_ctx.as_ref().unwrap_or(&ctx);
+            for (idx, pf) in matching {
+                eval_one(eval_ctx, idx, pf);
             }
         }
 

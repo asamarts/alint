@@ -25,9 +25,23 @@ use alint_core::{FixReport, ProposedEdit, Report, Violation};
 /// the platform separator is rewritten -- on Unix `\` is a legal file-name
 /// character and is kept.
 pub(crate) fn slash_path(path: &std::path::Path) -> String {
-    normalize_separators(&path.to_string_lossy(), std::path::MAIN_SEPARATOR)
+    slash_path_cow(path).into_owned()
 }
 
+/// Borrowed variant of [`slash_path`] avoiding allocation on `/` platforms for
+/// valid UTF-8 paths.
+pub(crate) fn slash_path_cow(path: &std::path::Path) -> std::borrow::Cow<'_, str> {
+    let raw = path.to_string_lossy();
+    if std::path::MAIN_SEPARATOR == '/' {
+        raw
+    } else if raw.contains(std::path::MAIN_SEPARATOR) {
+        std::borrow::Cow::Owned(raw.replace(std::path::MAIN_SEPARATOR, "/"))
+    } else {
+        raw
+    }
+}
+
+#[cfg(test)]
 fn normalize_separators(s: &str, separator: char) -> String {
     if separator == '/' {
         s.to_string()

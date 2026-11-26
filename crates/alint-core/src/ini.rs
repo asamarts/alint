@@ -214,9 +214,9 @@ pub(crate) struct IniEntry<'a> {
 ///
 /// Mirrors [`parse`] + [`crate::structured_format::Format::Ini`] empty-file
 /// handling in a single streaming pass without materializing a JSON tree.
-pub(crate) fn for_each_entry(
-    text: &str,
-    mut visit: impl FnMut(IniEntry<'_>),
+pub(crate) fn for_each_entry<'a>(
+    text: &'a str,
+    mut visit: impl FnMut(IniEntry<'a>),
 ) -> Result<(), String> {
     use std::collections::HashSet;
 

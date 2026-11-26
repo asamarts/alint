@@ -111,15 +111,15 @@ pub(crate) fn parse_config_interpolated_with_environment(
     origin: &crate::v2::Origin<'_>,
 ) -> Result<RawConfig> {
     let shown_source = if origin.display == alint_core::CONFIGURATION_MASK {
-        origin.display.to_owned()
+        std::borrow::Cow::Borrowed(origin.display)
     } else {
-        display_path(source)
+        std::borrow::Cow::Owned(display_path(source))
     };
     let contents = crate::config_text(contents, &shown_source)?;
     // Name the file in a YAML/typed error: in an `extends:` chain or a
     // `.alint.d/` drop-in, a bare "at line 2 column 1" reads as if the
     // top-level config were at fault.
-    parse_config_interpolated_inner_with_environment(contents, source, environment, origin).map_err(
+    parse_config_interpolated_shown(contents, source, &shown_source, environment, origin).map_err(
         |e| match e {
             Error::Yaml(e) => Error::Other(format!("{shown_source}: YAML parse error: {e}")),
             other => other,
@@ -652,6 +652,7 @@ fn decode_from_text(
     Continue(Some(TextDecode::AsV1(decoded)))
 }
 
+#[cfg(test)]
 fn parse_config_interpolated_inner_with_environment(
     contents: &str,
     source: &Path,
@@ -659,12 +660,22 @@ fn parse_config_interpolated_inner_with_environment(
     origin: &crate::v2::Origin<'_>,
 ) -> Result<RawConfig> {
     let shown_source = if origin.display == alint_core::CONFIGURATION_MASK {
-        origin.display.to_owned()
+        std::borrow::Cow::Borrowed(origin.display)
     } else {
-        display_path(source)
+        std::borrow::Cow::Owned(display_path(source))
     };
-    let expanded = reject_yaml_bombs(contents, &shown_source)?;
-    parse_guarded(contents, source, environment, origin).map(|config| RawConfig {
+    parse_config_interpolated_shown(contents, source, &shown_source, environment, origin)
+}
+
+fn parse_config_interpolated_shown(
+    contents: &str,
+    source: &Path,
+    shown_source: &str,
+    environment: &dyn crate::EnvironmentProvider,
+    origin: &crate::v2::Origin<'_>,
+) -> Result<RawConfig> {
+    let expanded = reject_yaml_bombs(contents, shown_source)?;
+    parse_guarded(contents, source, shown_source, environment, origin).map(|config| RawConfig {
         source_size: source_size(contents, expanded),
         ..config
     })
@@ -673,17 +684,12 @@ fn parse_config_interpolated_inner_with_environment(
 /// [`parse_config_interpolated_inner_with_environment`] past the YAML guards.
 fn parse_guarded(
     contents: &str,
-    source: &Path,
+    source_path: &Path,
+    source: &str,
     environment: &dyn crate::EnvironmentProvider,
     origin: &crate::v2::Origin<'_>,
 ) -> Result<RawConfig> {
-    let source_path = source;
-    let source = if origin.display == alint_core::CONFIGURATION_MASK {
-        origin.display.to_owned()
-    } else {
-        display_path(source)
-    };
-    let text_decode = match decode_from_text(contents, &source, origin) {
+    let text_decode = match decode_from_text(contents, source, origin) {
         std::ops::ControlFlow::Break(settled) => return settled,
         std::ops::ControlFlow::Continue(text_decode) => text_decode,
     };
@@ -701,8 +707,8 @@ fn parse_guarded(
     }
     let v2_environment = v2_environment_of(surface, contents, document.as_ref());
     let (mut config, v2_keys, masked) = if let Some(decoded) = text_decode {
-        let (config, v2_keys) = decoded.read_as(surface, contents, &source)?;
-        crate::reject_ambiguous_yaml_in(&config, &source)?;
+        let (config, v2_keys) = decoded.read_as(surface, contents, source)?;
+        crate::reject_ambiguous_yaml_in(&config, source)?;
         (config, v2_keys, None)
     } else {
         let mut value: ayaml::Value = match document {
@@ -710,7 +716,7 @@ fn parse_guarded(
             None => decode_text(contents)?,
         };
         let has_sensitive_interpolation = value_reads_environment(&value);
-        reject_nonliteral_requirement_in_value(contents, &source, &value)?;
+        reject_nonliteral_requirement_in_value(contents, source, &value)?;
         // Which vars take their value from the environment, read off the RAW
         // text before interpolation erases the difference.
         let env_vars = env_derived_vars(value.get("vars"));
@@ -750,11 +756,11 @@ fn parse_guarded(
             }
         }
         let (mut config, v2_keys) = decode_value(value, surface).map_err(|error| {
-            reproduce_or_redact(error, masked.as_ref(), environment, surface, &source)
+            reproduce_or_redact(error, masked.as_ref(), environment, surface, source)
         })?;
         // Reject user-authored private markers before adding the loader's own
         // env-provenance marker below.
-        crate::reject_ambiguous_yaml_in(&config, &source)?;
+        crate::reject_ambiguous_yaml_in(&config, source)?;
         config.env_vars = env_vars;
         config.environment_values = environment_values;
         config.extends_environment = extends_environment;

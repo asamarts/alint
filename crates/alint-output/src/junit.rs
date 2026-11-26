@@ -19,9 +19,11 @@
 //! NUL or `\x01` in a violation message doesn't produce
 //! consumer-rejected XML.
 
+use std::borrow::Cow;
+use std::fmt::Write as _;
 use std::io::Write;
 
-use alint_core::{AnalysisFailure, Level, Report, RuleResult, Violation};
+use alint_core::{AnalysisFailure, Level, Report, Violation};
 
 pub fn write_junit(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
     // `Level::Off` suppresses policy violations and passing cases, but an
@@ -57,26 +59,47 @@ pub fn write_junit(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
     // testcases themselves so determinism here matters for
     // report-diff workflows.
     for result in &report.results {
+        let needs_rule_attr = result.level != Level::Off || !result.analysis_failures.is_empty();
+        if !needs_rule_attr {
+            continue;
+        }
+        let safe_rule = xml_attr_sanitized(&result.rule_id);
         if result.level != Level::Off {
             if result.passed() {
                 // Passing rule → one self-closed testcase. Provides
                 // a "tests run" denominator for consumers that show
                 // pass-rate metrics.
-                let safe_rule = crate::sanitize::sanitize_xml_display(&result.rule_id);
                 writeln!(
                     w,
-                    r#"    <testcase classname="alint.{}" name="{}" time="0"/>"#,
-                    xml_attr(&safe_rule),
-                    xml_attr(&safe_rule),
+                    r#"    <testcase classname="alint.{safe_rule}" name="{safe_rule}" time="0"/>"#,
                 )?;
             } else {
+                let level_attr = match result.level {
+                    Level::Error => "error",
+                    Level::Warning => "warning",
+                    Level::Info => "info",
+                    // `Off` rules never reach this path — they're filtered
+                    // out above. Match arm exists for exhaustiveness only.
+                    Level::Off => "off",
+                };
+                let safe_policy_url = result
+                    .policy_url
+                    .as_deref()
+                    .filter(|url| !url.is_empty())
+                    .map(xml_text_sanitized);
                 for violation in &result.violations {
-                    write_failure_case(w, result, violation)?;
+                    write_failure_case(
+                        w,
+                        &safe_rule,
+                        level_attr,
+                        safe_policy_url.as_deref(),
+                        violation,
+                    )?;
                 }
             }
         }
         for failure in &result.analysis_failures {
-            write_error_case(w, result, failure)?;
+            write_error_case(w, &safe_rule, failure)?;
         }
     }
 
@@ -85,7 +108,7 @@ pub fn write_junit(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
         writeln!(
             w,
             "    <system-out>{}</system-out>",
-            xml_text(&crate::note_summary(note_count))
+            xml_text_sanitized(&crate::note_summary(note_count))
         )?;
     }
 
@@ -96,168 +119,152 @@ pub fn write_junit(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
 
 fn write_failure_case(
     w: &mut dyn Write,
-    result: &RuleResult,
+    safe_rule: &str,
+    level_attr: &str,
+    safe_policy_url: Option<&str>,
     violation: &Violation,
 ) -> std::io::Result<()> {
-    let case_name = match violation.report_path() {
-        Some(p) => crate::slash_path(p),
-        None => "(repository)".to_string(),
-    };
-    let level_attr = match result.level {
-        Level::Error => "error",
-        Level::Warning => "warning",
-        Level::Info => "info",
-        // `Off` rules never reach this path — they're filtered
-        // out at the top of `write_junit`. Match arm exists for
-        // exhaustiveness only.
-        Level::Off => "off",
-    };
+    let report_path = violation.report_path().map(crate::slash_path_cow);
+    let case_name = report_path.as_deref().unwrap_or("(repository)");
 
     writeln!(
         w,
-        r#"    <testcase classname="alint.{rule}" name="{name}" time="0">"#,
-        rule = xml_attr(&crate::sanitize::sanitize_xml_display(&result.rule_id)),
-        name = xml_attr(&crate::sanitize::sanitize_xml_display(&case_name)),
+        r#"    <testcase classname="alint.{safe_rule}" name="{name}" time="0">"#,
+        name = xml_attr_sanitized(case_name),
     )?;
-    writeln!(
+    write!(
         w,
-        r#"      <failure message="{msg}" type="{level_attr}">{body}</failure>"#,
-        msg = xml_attr(&crate::sanitize::sanitize_xml_display(&violation.message)),
-        body = xml_text(&crate::sanitize::sanitize_xml_display(
-            &format_failure_body(result, violation)
-        )),
+        r#"      <failure message="{msg}" type="{level_attr}">"#,
+        msg = xml_attr_sanitized(&violation.message),
     )?;
-    writeln!(w, "    </testcase>")?;
+    if let Some(path_str) = report_path.as_deref() {
+        w.write_all(xml_text_sanitized(path_str).as_bytes())?;
+        if let Some(line) = violation.report_line() {
+            write!(w, ":{line}")?;
+            if let Some(col) = violation.report_column() {
+                write!(w, ":{col}")?;
+            }
+        }
+        w.write_all(b": ")?;
+    }
+    w.write_all(xml_text_sanitized(&violation.message).as_bytes())?;
+    if let Some(url) = safe_policy_url {
+        // Match single-buffer `\r\n` normalization when `violation.message`
+        // ended with a bare `\r` (which already emitted `\n` above).
+        if violation.message.ends_with('\r') {
+            w.write_all(b"Policy: ")?;
+        } else {
+            w.write_all(b"\nPolicy: ")?;
+        }
+        w.write_all(url.as_bytes())?;
+    }
+    w.write_all(b"</failure>\n    </testcase>\n")?;
     Ok(())
 }
 
 fn write_error_case(
     w: &mut dyn Write,
-    result: &RuleResult,
+    safe_rule: &str,
     failure: &AnalysisFailure,
 ) -> std::io::Result<()> {
-    let case_name = match failure.report_path() {
-        Some(path) => crate::slash_path(path),
-        None => "(repository)".to_string(),
-    };
-    let body = match (
-        failure.report_path(),
-        failure.report_line(),
-        failure.report_column(),
-    ) {
-        (Some(path), Some(line), Some(column)) => format!(
-            "{}:{line}:{column}: {}: {}",
-            crate::slash_path(path),
-            failure.kind.as_str(),
-            failure.message
-        ),
-        (Some(path), Some(line), None) => format!(
-            "{}:{line}: {}: {}",
-            crate::slash_path(path),
-            failure.kind.as_str(),
-            failure.message
-        ),
-        (Some(path), None, _) => format!(
-            "{}: {}: {}",
-            crate::slash_path(path),
-            failure.kind.as_str(),
-            failure.message
-        ),
-        (None, _, _) => format!("{}: {}", failure.kind.as_str(), failure.message),
-    };
+    let report_path = failure.report_path().map(crate::slash_path_cow);
+    let case_name = report_path.as_deref().unwrap_or("(repository)");
+
     writeln!(
         w,
-        r#"    <testcase classname="alint.{rule}" name="{name}" time="0">"#,
-        rule = xml_attr(&crate::sanitize::sanitize_xml_display(&result.rule_id)),
-        name = xml_attr(&crate::sanitize::sanitize_xml_display(&case_name)),
+        r#"    <testcase classname="alint.{safe_rule}" name="{name}" time="0">"#,
+        name = xml_attr_sanitized(case_name),
     )?;
-    writeln!(
+    write!(
         w,
-        r#"      <error message="{message}" type="analysis_failure">{body}</error>"#,
-        message = xml_attr(&crate::sanitize::sanitize_xml_display(&failure.message)),
-        body = xml_text(&crate::sanitize::sanitize_xml_display(&body)),
+        r#"      <error message="{message}" type="analysis_failure">"#,
+        message = xml_attr_sanitized(&failure.message),
     )?;
-    writeln!(w, "    </testcase>")?;
+    if let Some(path_str) = report_path.as_deref() {
+        w.write_all(xml_text_sanitized(path_str).as_bytes())?;
+        if let Some(line) = failure.report_line() {
+            write!(w, ":{line}")?;
+            if let Some(col) = failure.report_column() {
+                write!(w, ":{col}")?;
+            }
+        }
+        w.write_all(b": ")?;
+    }
+    write!(
+        w,
+        "{}: {}</error>\n    </testcase>\n",
+        failure.kind.as_str(),
+        xml_text_sanitized(&failure.message),
+    )?;
     Ok(())
 }
 
-/// Body text that goes inside the `<failure>` element. Includes
-/// path:line:col and the policy URL when present, so consumers
-/// that show only the failure body (and not the message attr)
-/// still get the full picture.
-fn format_failure_body(result: &RuleResult, violation: &Violation) -> String {
-    let mut s = String::new();
-    if let Some(p) = violation.report_path() {
-        s.push_str(&crate::slash_path(p));
-        if let Some(line) = violation.report_line() {
-            s.push(':');
-            s.push_str(&line.to_string());
-            if let Some(col) = violation.report_column() {
-                s.push(':');
-                s.push_str(&col.to_string());
-            }
-        }
-        s.push_str(": ");
+/// Single-pass display sanitizer + XML element content encoder (`<elem>HERE</elem>`).
+/// Escapes DEL/C1 controls (`\xNN`) and display-deceptive Unicode characters
+/// (`\u{xxxx}`), strips XML 1.0-illegal C0 controls, normalizes `\r\n` and bare
+/// `\r` to `\n`, and escapes `& < >`. Returns borrowed input with zero
+/// allocation on clean ASCII.
+fn xml_text_sanitized(s: &str) -> Cow<'_, str> {
+    if s.bytes().all(|b| {
+        ((0x20..0x7f).contains(&b) || b == b'\n' || b == b'\t') && !matches!(b, b'&' | b'<' | b'>')
+    }) {
+        return Cow::Borrowed(s);
     }
-    s.push_str(&violation.message);
-    if let Some(url) = &result.policy_url
-        && !url.is_empty()
-    {
-        s.push_str("\nPolicy: ");
-        s.push_str(url);
-    }
-    s
-}
-
-/// Escape a string for XML element content (`<elem>HERE</elem>`).
-/// Strips XML 1.0-illegal control characters, normalizes `\r\n` and bare `\r`
-/// to `\n` (matching XML 1.0 §2.11 and preventing terminal line-overwrite
-/// spoofing), and replaces `& < >` with their entity references.
-fn xml_text(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
+    let mut out = String::with_capacity(s.len() + 8);
     let mut chars = s.chars().peekable();
     while let Some(ch) = chars.next() {
-        if is_xml_illegal_control(ch) {
-            continue;
-        }
-        match ch {
-            '\r' => {
-                let _ = chars.next_if_eq(&'\n');
-                out.push('\n');
+        let cp = ch as u32;
+        if (0x7f..=0x9f).contains(&cp) {
+            let _ = write!(out, "\\x{cp:02x}");
+        } else if alint_core::invisible::is_deceptive_on_display(ch) {
+            let _ = write!(out, "\\u{{{cp:04x}}}");
+        } else if !is_xml_illegal_control(ch) {
+            match ch {
+                '\r' => {
+                    let _ = chars.next_if_eq(&'\n');
+                    out.push('\n');
+                }
+                '&' => out.push_str("&amp;"),
+                '<' => out.push_str("&lt;"),
+                '>' => out.push_str("&gt;"),
+                _ => out.push(ch),
             }
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            _ => out.push(ch),
         }
     }
-    out
+    Cow::Owned(out)
 }
 
-/// Escape a string for an XML attribute value (`name="HERE"`).
-/// Same as element content, plus quotes and apostrophes —
-/// every XML attribute parser respects either, so we escape
-/// both rather than picking the right pair.
-fn xml_attr(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
+/// Single-pass display sanitizer + XML attribute encoder (`name="HERE"`).
+/// Escapes DEL/C1 controls (`\xNN`) and display-deceptive Unicode characters
+/// (`\u{xxxx}`), strips XML 1.0-illegal C0 controls, normalizes whitespace
+/// controls (`\t`/`\n`/`\r`) to space, and escapes `& < > " '`. Returns
+/// borrowed input with zero allocation on clean ASCII.
+fn xml_attr_sanitized(s: &str) -> Cow<'_, str> {
+    if s.bytes()
+        .all(|b| (0x20..0x7f).contains(&b) && !matches!(b, b'&' | b'<' | b'>' | b'"' | b'\''))
+    {
+        return Cow::Borrowed(s);
+    }
+    let mut out = String::with_capacity(s.len() + 8);
     for ch in s.chars() {
-        if is_xml_illegal_control(ch) {
-            continue;
-        }
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&apos;"),
-            // Tabs / newlines / CR survive in attribute values
-            // but normalize to space per XML attr-value rules.
-            // We pre-replace so the consumer sees a single line.
-            '\n' | '\r' | '\t' => out.push(' '),
-            _ => out.push(ch),
+        let cp = ch as u32;
+        if (0x7f..=0x9f).contains(&cp) {
+            let _ = write!(out, "\\x{cp:02x}");
+        } else if alint_core::invisible::is_deceptive_on_display(ch) {
+            let _ = write!(out, "\\u{{{cp:04x}}}");
+        } else if !is_xml_illegal_control(ch) {
+            match ch {
+                '&' => out.push_str("&amp;"),
+                '<' => out.push_str("&lt;"),
+                '>' => out.push_str("&gt;"),
+                '"' => out.push_str("&quot;"),
+                '\'' => out.push_str("&apos;"),
+                '\n' | '\r' | '\t' => out.push(' '),
+                _ => out.push(ch),
+            }
         }
     }
-    out
+    Cow::Owned(out)
 }
 
 /// XML 1.0 disallows most of the C0 control range. The only
@@ -533,6 +540,72 @@ mod tests {
         assert!(
             out.contains(r#"name="pass-\u{202e}\u{200b}ok""#),
             "passing testcase name must be sanitized: {out}"
+        );
+    }
+
+    #[test]
+    fn single_pass_xml_sanitizers_match_two_step_reference() {
+        let samples = [
+            "plain/ascii-123.rs",
+            "a&b<c>d\"e'f",
+            "ctrl\x00\x01\x07\x08\x09\x0a\x0b\x0c\x0d\x1b\x1f\x7fend",
+            "crlf\r\nline\rnext\r",
+            "unicode\u{0085}\u{009b}\u{202e}\u{200b}\u{180e}\u{feff}\u{e0069}caf\u{e9}",
+        ];
+        for sample in samples {
+            let ref_sanitized = crate::sanitize::sanitize_xml_display(sample);
+            let mut ref_attr = String::new();
+            for ch in ref_sanitized.chars() {
+                if is_xml_illegal_control(ch) {
+                    continue;
+                }
+                match ch {
+                    '&' => ref_attr.push_str("&amp;"),
+                    '<' => ref_attr.push_str("&lt;"),
+                    '>' => ref_attr.push_str("&gt;"),
+                    '"' => ref_attr.push_str("&quot;"),
+                    '\'' => ref_attr.push_str("&apos;"),
+                    '\n' | '\r' | '\t' => ref_attr.push(' '),
+                    _ => ref_attr.push(ch),
+                }
+            }
+            assert_eq!(xml_attr_sanitized(sample).as_ref(), ref_attr, "{sample:?}");
+
+            let mut ref_text = String::new();
+            let mut chars = ref_sanitized.chars().peekable();
+            while let Some(ch) = chars.next() {
+                if is_xml_illegal_control(ch) {
+                    continue;
+                }
+                match ch {
+                    '\r' => {
+                        let _ = chars.next_if_eq(&'\n');
+                        ref_text.push('\n');
+                    }
+                    '&' => ref_text.push_str("&amp;"),
+                    '<' => ref_text.push_str("&lt;"),
+                    '>' => ref_text.push_str("&gt;"),
+                    _ => ref_text.push(ch),
+                }
+            }
+            assert_eq!(xml_text_sanitized(sample).as_ref(), ref_text, "{sample:?}");
+        }
+        // Verify trailing `\r` + policy URL produces the exact single `\n` before `Policy:`.
+        let report = Report {
+            results: vec![RuleResult {
+                rule_id: "r".into(),
+                level: Level::Error,
+                policy_url: Some("https://example.com/p".into()),
+                violations: vec![Violation::new("msg\r").with_path(PathBuf::from("a.rs"))],
+                notes: Vec::new(),
+                is_fixable: false,
+                analysis_failures: Vec::new(),
+            }],
+        };
+        let out = render(&report);
+        assert!(
+            out.contains("a.rs: msg\nPolicy: https://example.com/p</failure>"),
+            "{out}"
         );
     }
 }

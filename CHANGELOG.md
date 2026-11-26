@@ -18,9 +18,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `settings.gradle.kts`, plus their `**/` monorepo companions) and excludes `**/src/**/build`, so
   pure-Maven repositories and Java/Groovy source packages named `build` are no longer reported
   (#546).
-- Library users (`alint-core`): `baseline::BaselineEntry` gains `pub paths: Vec<String>` and
-  `baseline::FingerprintedViolation` gains `pub path_free_identity: bool` (ADR-0049; prefer
-  `FingerprintedViolation::from_violation` when constructing violations, #601).
 - `key_parity`, `constraint`, and `no_duplicate_keys` now cap emitted findings at `10,000` per rule
   by default (`limits.findings_per_rule`), emitting one non-baselinable analysis failure naming the
   cap when reached instead of allocating unbounded findings. Raise `limits.findings_per_rule` in
@@ -35,6 +32,53 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`alint: warning: ...`) instead of failing the walk; inside the checked root, unreadable ignore
   files now fail strictly alongside non-regular and oversize ones, and the 32 MiB ignore-file size
   cap stays unchanged (#568).
+- HCL2 parsing (`hcl-rs 0.20` / `hcl-edit 0.10.0`) enforces stricter HCL2 conformance: invalid
+  `\b`/`\f`/`\/` string escapes, duplicate object keys, and documents nested past 64 levels are
+  now rejected as parse errors, and integers outside `i64`/`u64` fall back to lossy `f64` (#608).
+- `key_parity` with `strip_root: true` now fails loudly on top-level non-object files (`null`,
+  arrays, scalars) instead of treating them as empty locales; empty-object roots (`fr: {}`,
+  `{"fr": {}}`, TOML `[fr]` / `fr = {}`) remain valid empty locales (#597).
+- Library users (`alint-core`): `baseline::BaselineEntry` gains `pub paths: Vec<String>` and
+  `baseline::FingerprintedViolation` gains `pub path_free_identity: bool` (ADR-0049; prefer
+  `FingerprintedViolation::from_violation` when constructing violations, #601); `ExtractSpec`
+  gains `pub strict: bool` (ADR-0050 D7); `MAX_HCL_DEPTH` and `MAX_HCL_BYTES` are removed from
+  the public API (#608); and the pinned `ayaml` version advances from `=0.2.2` to `=0.2.3` (#614).
+
+### Security
+
+- Upgraded `roxmltree` from `0.20` to `0.21.2` (CVE-2026-92987); XML depth scanning (`xml_scan.rs`)
+  now also rejects duplicate default `xmlns` attributes on the same element to match `roxmltree`
+  0.21.2, and XML attribute value spans are computed directly from attribute byte ranges (#609).
+- Upgraded `url` to `2.5.9` (RUSTSEC-2026-0592, #626).
+- `--format junit` and `--format agent` now escape terminal controls, bidi overrides/isolates,
+  zero-width characters, and astral tag characters in JUnit `<testcase>` / `<failure>` text and
+  attributes (normalizing bare CR to LF) and in `--format agent` `human_message`,
+  `agent_instruction`, `policy_url`, and `analysis_failures[].human_message`, leaving raw machine
+  `file` paths intact (#600).
+- Environment-value redaction outside the loader now uses a set-backed Aho-Corasick matcher with
+  overlapping-match coalescing (preventing shorter earlier matches from hiding longer overlapping
+  secrets and removing quadratic `O(N^2)` recording/scrubbing loops) and structurally masks short
+  (`<4`-character) environment-derived paths across `extends:`, `baseline:`, rule filters,
+  `alint fix` refusals, and `alint lsp` errors (#585).
+- Nested rule token substitution (`for_each_dir`, `for_each_file`, `every_matching_has`) now
+  escapes `{path}`, `{dir}`, `{basename}`, `{stem}`, `{ext}`, and `{parent_name}` according to each
+  option's syntax: Rust regexes (including whitespace for `(?x)` patterns), RFC 9535 `JSONPath`
+  queries (including RFC 9485 I-Regexp arguments to `match()` and `search()`), `when_iter:` /
+  nested `when:` expressions (including leading `!` in `iter.has_file`), `key_parity.ignore_keys`,
+  keyword-bearing paths (`registry_paths_resolve.base`), `scope_filter` manifest extractors at all
+  nesting depths, and disables legacy `${VAR}` expansion on rendered nested
+  `git_commit_message.since` (#583).
+- Alias-amplified YAML documents parsed via `Format::parse_shared` / `Context::parse_structured`
+  now transition their parse reservation atomically into a `Send + Sync` `RetainedLease` held for
+  the lifetime of the live `SharedValue` (and are never pinned strongly in the idle LRU cache),
+  bounding concurrent live alias-expanded trees across parallel workers (#582).
+- Hardened HCL pre-scanning and `no_duplicate_keys` memory bounds: non-ASCII non-identifier
+  punctuation in HCL code tokens advances by full UTF-8 character width instead of panicking on a
+  continuation byte, HCL heredoc snapshots reclaim immediately on close and charge rescan/branch
+  budgets eagerly before queueing backtrack branches, INI duplicate-key scanning borrows keys and
+  sections directly from input with shared `Arc<str>` allocations, and aliased YAML duplicate keys
+  stream and cache a single bounded canonical token (`<= 128 B` or 71-byte `sha256:...`) once per
+  unique key.
 
 ### Added
 
@@ -96,7 +140,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (streaming `ayaml` events with YAML 1.2 Core Schema key equality, multi-document `---` reset,
   scalar anchor resolution, and `<<: *base` merge handling), JSON/JSONC (with optional
   `strict: true`), dotenv, Java `.properties`, INI (merging repeated `[section]` headers), TOML,
-  and HCL, reporting exact key spans with first-occurrence related locations (ADR-0050 D6).
+  and HCL (including template interpolations, directives, heredocs, and traversal index
+  expressions), reporting exact key spans with first-occurrence related locations (ADR-0050 D6).
 - Optional `strict: true` RFC 8259 JSON parse mode across `json_path_equals`, `json_path_matches`,
   `json_path_absent`, `json_schema_passes`, `key_parity`, `no_duplicate_keys`, `extract: { json:
   ..., strict: true }` (`cross_file`, `file_graph`, `registry_paths_resolve`, manifest
@@ -141,20 +186,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   default release builds (`saphyr` stays test-only behind `alint-core/yaml-reference`; enforced by
   `ci/scripts/yaml-reference-gate.sh` and verified by an `ayaml` vs `saphyr-parser` event-stream
   differential check, #614).
-- Structured-document rules (`*_path_*`, `json_schema_passes`, `file_graph`,
-  `registry_paths_resolve`, plus structured facts, manifest/selector filters, and relations) now
-  share parsed `Arc`-backed document trees (`SharedValue`) via `Context::parse_structured`:
-  multi-rule per-file dispatch and `Engine::run_for_file` share a stack-local per-file cache with
-  zero cross-worker contention, single-rule files bypass caching, and cross-file runs share a
-  content-addressed, memory-budgeted LRU cache bounded by `YAML_PARSE_BUDGET_BYTES` (#548).
-- Alias-amplified YAML documents parsed via `Format::parse_shared` / `Context::parse_structured`
-  now transition their parse reservation atomically into a `Send + Sync` `RetainedLease` held for
-  the lifetime of the live `SharedValue` (and are never pinned strongly in the idle LRU cache),
-  bounding concurrent live alias-expanded trees across parallel workers (#582).
-- Duplicate keys in `vars:` are now rejected, duplicate-entry and duplicate-field YAML config
-  errors now report the exact 1-based line and column of the repeated key rather than the mapping's
-  first key (#572), and unknown top-level keys in `version: 2` configs now report their 1-based
-  line and column (#566).
 - Migrated `alint-lsp` from unmaintained `tower-lsp 0.20` and `tokio` to synchronous `lsp-server`
   and `lsp-types` with a dedicated full-check thread, a 4-thread 8 MiB interactive worker pool,
   unbounded outbound relay, and `$/cancelRequest` support aligned with alint's `rayon` engine,
@@ -169,38 +200,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `BTreeMap`-backed `hcl::edit::structure::Body` to `serde_json::Value` converter (bypassing
   `hcl::from_str`'s quadratic `IntoJsonSpec` `VecMap` path), a cumulative 64-level block-and-label
   depth cap, a 1,024-entry object-literal width cap with a file-wide quadratic work budget, and
-  single-parse batch HCL span resolution in `structured_fix::hcl`. Upstream `hcl-edit 0.10` also
-  aligns HCL2 strictness: invalid `\b`/`\f`/`\/` string escapes and duplicate object keys are now
-  rejected as parse errors, integers beyond `i64`/`u64` fall back to lossy `f64`, and documents
-  exceeding 64 nesting levels are rejected (ADR-0048 decision 4c, #608; evaluation recorded in
-  `docs/design/v0.24/hcl-spike.md`).
-- Replaced `ignore::WalkBuilder`'s directory traversal with an owned parallel walker in
-  `alint-core` (`walker_parallel.rs`) built on `ignore::gitignore::Gitignore` and `rayon::scope`,
-  discovering ignore files directly from each directory's `read_dir` listing with open-then-`fstat`
-  bounded reads so bounding ignore files adds zero per-directory `stat` probes, retiring ADR-0045's
-  per-directory probe allowance from `ci/scripts/reference-perf-gate.sh` (ADR-0048 decision 5a,
-  #573).
+  single-parse batch HCL span resolution in `structured_fix::hcl` (ADR-0048 decision 4c, #608;
+  evaluation recorded in `docs/design/v0.24/hcl-spike.md`).
 - Skipped unreadable, non-regular, or oversize (> 32 MiB) ignore files in parent directories above
   the checked root with a visible stderr warning (`FileIndex::walk_warnings`), while keeping strict
   walk failure for bad ignore files inside the checked root and documenting the 32 MiB ignore-file
   cap (ADR-0048 decision 5b, #568).
-- Hoisted per-iteration nested-rule invariants in `for_each_dir` / `every_matching_has`
-  (pre-formatted synthesized rule IDs, single-pass borrowed `render_nested_extra` with empty
-  fast-path, hoisted builder resolution and `IterationScope`, zero-`Vec` single-pattern
-  `FileExistsRule`, skipped `unescape_token_values` on ordinary paths), cutting nested-rule
-  evaluation time by 41% to 59% (#620), and narrowed remaining whole-index scans across
-  `cross_file`, `file_graph`, `registry_paths_resolve`, `markdown_paths_resolve`,
-  `generated_file_fresh`, exact-directory `dir_contains` / `dir_only_contains`, `facts`,
-  `relation/eval`, and `engine` trace/active-iteration checks with a debug-only `FileIndex` scan
-  counter (#565, #584).
 - Remote `extends:` cache directory resolution (`alint-dsl`) now uses an internal platform helper
   (`XDG_CACHE_HOME` / `HOME` on Unix, `Library/Caches/org.asamarts.alint` on macOS,
   `LOCALAPPDATA` / `USERPROFILE` on Windows), removing `directories`, `dirs-sys`, `option-ext`,
   and the workspace's sole MPL-2.0 copyleft license exception from `deny.toml` and `about.toml`
   (#611).
 - Binary/text classification (`alint-rules`) now uses an internal SIMD NUL-byte, BOM, magic-header,
-  and 64-bit SWAR control-byte density heuristic, removing unmaintained `content_inspector 0.2.4`
-  from default release builds (it remains transitive dev-only via `trycmd`/`snapbox`, #612).
+  and 64-bit SWAR control-byte density heuristic (so control-byte-heavy files such as SOH-delimited
+  data fixtures are classified as binary without needing NUL bytes), removing unmaintained
+  `content_inspector 0.2.4` from default release builds (it remains transitive dev-only via
+  `trycmd`/`snapbox`, #612).
 - VS Code extension (`editors/vscode`): replaced `node-tar` (`tar`) with Node's built-in
   `node:zlib` (`gunzipSync` with a 256 MiB output cap) and an in-memory USTAR/PAX/GNU-LongName
   single-file extractor (`src/tar.ts`) that rejects symlinks, hardlinks, traversal/absolute paths,
@@ -216,50 +231,60 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   retaining entries ending with a trailing backslash at EOF, unifying entry-row extraction and
   unlocking safe structured fixes for multiline continuations, escaped keys/values, and
   whitespace-separated `.properties` lines (#610).
-- `roxmltree` upgraded from `0.20` to `0.21.2` (CVE-2026-92987); XML depth scanning (`xml_scan.rs`)
-  now also rejects duplicate default `xmlns` attributes on the same element to match `roxmltree`
-  0.21.2, and XML attribute value spans are computed directly from attribute byte ranges (#609).
 - Path tokens `{path}` and `{dir}` always render with `/` separators on every platform (matching
   Linux and macOS), and the cross-platform baseline fingerprint golden gate now runs on Windows and
   macOS in CI (#579).
+- Per-rule finding cap (`findings_per_rule`, default `10,000`) enforced across `key_parity`,
+  `no_duplicate_keys`, and all seven `constraint` assertion families (`equal`, `unique`, `set`,
+  `reference`, `count`, `compare`, `satisfies`), and per-decode key-path memory cap
+  (`key_path_bytes_per_decode`, default 32 MiB) enforced across JSON, YAML, TOML, dotenv, INI,
+  properties, Android strings XML, `.resx`, and version 2 `entries:` (`leaves: true`) (#596, #569).
+- Documented the finite IEEE-754 `f64` number-range limit (`1e400` fails parsing for the whole
+  JSON file) across all JSON-reading rule kinds and version 2 JSON readers (#564).
+
+### Performance
+
+- Replaced `ignore::WalkBuilder`'s directory traversal with an owned parallel walker in
+  `alint-core` (`walker_parallel.rs`) built on `ignore::gitignore::Gitignore` and `rayon::scope`,
+  discovering ignore files directly from each directory's `read_dir` listing with open-then-`fstat`
+  bounded reads so bounding ignore files adds zero per-directory `stat` probes, retiring ADR-0045's
+  per-directory probe allowance from `ci/scripts/reference-perf-gate.sh` (ADR-0048 decision 5a,
+  #573).
+- Structured-document rules (`*_path_*`, `json_schema_passes`, `file_graph`,
+  `registry_paths_resolve`, plus structured facts, manifest/selector filters, and relations) now
+  share parsed `Arc`-backed document trees (`SharedValue`) via `Context::parse_structured`:
+  multi-rule per-file dispatch and `Engine::run_for_file` share a stack-local per-file cache with
+  zero cross-worker contention, single-rule runs without cross-pass reuse bypass caching, and
+  multi-rule cross-file runs share a content-addressed, memory-budgeted LRU cache bounded by
+  `YAML_PARSE_BUDGET_BYTES` (#548).
+- Hoisted per-iteration nested-rule invariants in `for_each_dir` / `every_matching_has`
+  (pre-formatted synthesized rule IDs, single-pass borrowed `render_nested_extra` with empty
+  fast-path, hoisted builder resolution and `IterationScope`, zero-`Vec` single-pattern
+  `FileExistsRule`, skipped `unescape_token_values` on ordinary paths), cutting nested-rule
+  evaluation cost by 41% to 59% in `cross_file_rules` micro-benchmarks (46% to 50% instruction
+  reduction in `micro-det`, #620), and narrowed remaining whole-index scans across `cross_file`,
+  `file_graph`, `registry_paths_resolve`, `markdown_paths_resolve`, `generated_file_fresh`,
+  exact-directory `dir_contains` / `dir_only_contains`, `facts`, `relation/eval`, and `engine`
+  trace/active-iteration checks with a debug-only `FileIndex` scan counter (#565, #584).
+
+### Fixed
+
 - `alint://bundled/java@v1`'s `java-no-tracked-build` now gates on `facts.has_gradle` and excludes
-  `**/src/**/build` (#546).
-- Unknown `--format` values now list the valid output formats for the active subcommand (and
-  validate `--format` up front before loading config, walking, or running tests/snapshot updates,
-  with case-insensitive `--format JSON validate-config` fixed), and `key_parity` with
+  `**/src/**/build`, eliminating false positives on pure-Maven repositories and Java/Groovy source
+  packages named `build` (#546).
+- Duplicate keys in `vars:` are now rejected, duplicate-entry and duplicate-field YAML config
+  errors now report the exact 1-based line and column of the repeated key rather than the mapping's
+  first key (#572), and unknown top-level keys in `version: 2` configs now report their 1-based
+  line and column (#566).
+- Unknown `--format` values now list the valid output formats for the active subcommand and
+  validate `--format` up front before loading config, walking, or running tests/snapshot updates
+  (fixing case-insensitive `--format JSON validate-config`), and `key_parity` with
   `strip_root: true` names null and array roots explicitly (`but it is null` / `but it is an
   array`), rejects top-level non-object files (`null`, arrays, scalars), and treats empty-object
   roots (`fr: {}`, `{"fr": {}}`, TOML `[fr]` / `fr = {}`) as empty locales (#597).
-- Documented the finite IEEE-754 `f64` number-range limit (`1e400` fails parsing for the whole
-  JSON file) across all JSON-reading rule kinds and version 2 JSON readers (#564).
 - Interned `PROVENANCE_MARKER` source strings in `alint-dsl` into the load's `FieldSourceNames`
   table (resolved by `Provenance::read`), matching `FIELD_SOURCES_MARKER` so marker memory no
   longer scales with the length of extended source paths or URLs (#581).
-- Per-rule finding cap (`findings_per_rule`, default `10,000`) enforced across `key_parity` and all
-  `constraint` assertion families (`equal`, `unique`, `set`), and per-decode key-path memory cap
-  (`key_path_bytes_per_decode`, default 32 MiB) enforced across JSON, YAML, TOML, dotenv, INI,
-  properties, Android strings XML, `.resx`, and version 2 `entries:` (`leaves: true`) (#596, #569).
-- Nested rule token substitution (`for_each_dir`, `for_each_file`, `every_matching_has`) now
-  escapes `{path}`, `{dir}`, `{basename}`, `{stem}`, `{ext}`, and `{parent_name}` according to each
-  option's syntax: Rust regexes (including whitespace for `(?x)` patterns), RFC 9535 `JSONPath`
-  queries (including RFC 9485 I-Regexp arguments to `match()` and `search()`), `when_iter:` /
-  nested `when:` expressions (including leading `!` in `iter.has_file`), `key_parity.ignore_keys`,
-  keyword-bearing paths (`registry_paths_resolve.base`), `scope_filter` manifest extractors at all
-  nesting depths, and disables legacy `${VAR}` expansion on rendered nested
-  `git_commit_message.since` (#583).
-
-### Security
-
-- `--format junit` and `--format agent` now escape terminal controls, bidi overrides/isolates,
-  zero-width characters, and astral tag characters in JUnit `<testcase>` / `<failure>` text and
-  attributes (normalizing bare CR to LF) and in `--format agent` `human_message`,
-  `agent_instruction`, `policy_url`, and `analysis_failures[].human_message`, leaving raw machine
-  `file` paths intact (#600).
-- Environment-value redaction outside the loader now uses a set-backed Aho-Corasick matcher with
-  overlapping-match coalescing (preventing shorter earlier matches from hiding longer overlapping
-  secrets and removing quadratic `O(N^2)` recording/scrubbing loops) and structurally masks short
-  (`<4`-character) environment-derived paths across `extends:`, `baseline:`, rule filters,
-  `alint fix` refusals, and `alint lsp` errors (#585).
 
 ## [0.23.0] - 2026-11-22
 

@@ -176,16 +176,21 @@ untrusted input. The defensive posture is:
 - **Files read whole and parser work are bounded.** The walk reads an ignore
   file (`.gitignore`, `.ignore`, `info/exclude` and a linked worktree's `.git`
   file and `commondir` on the way to it, the global excludes file) only when
-  it is a regular file of at most 32 MiB, and stops with an error naming one
-  it will not read (a global excludes file that is not a regular file is
-  skipped instead): a symlink to `/dev/zero` or a FIFO is never read.
-  Configurations, local `extends:` sources, `.alint.d/` drop-ins, nested
-  configs and policy-test YAML files are regular files of at most 32 MiB;
-  `extends:` loading is capped at 64 MiB of sources and 4,194,304 entries,
-  template expansion at 64 MiB total (32 MiB per rendered string), YAML
-  nesting at 128 levels (structured YAML fixes walk parser events iteratively
-  without expanding aliases), and `pinned_references` merge-key and GitLab
-  `extends:` DAG resolution are memoized under a work budget. A baseline file
+  it is a regular file of at most 32 MiB: a symlink to `/dev/zero` or a FIFO is
+  never read. Inside the checked root, an unreadable, non-regular or oversize
+  ignore file stops the walk with an error naming it; in parent directories
+  above the checked root, such an ignore file is skipped with a visible warning
+  on stderr instead of aborting the run (and a non-regular or unreadable global
+  excludes file is skipped). Configurations, local `extends:` sources,
+  `.alint.d/` drop-ins, nested configs and policy-test YAML files are regular
+  files of at most 32 MiB; `extends:` loading is capped at 64 MiB of sources
+  and 4,194,304 entries, template expansion at 64 MiB total (32 MiB per
+  rendered string), YAML nesting at 128 levels (structured YAML fixes walk
+  parser events iteratively without expanding aliases), `pinned_references`
+  merge-key and GitLab `extends:` DAG resolution are memoized under a work
+  budget, and top-level `limits.findings_per_rule` (default `10,000`, cap
+  `1,000,000`) and `limits.key_path_bytes_per_decode` (default 32 MiB, cap
+  16 GiB) bound emitted findings and key-path decode memory. A baseline file
   is read only when it is a regular file of at most 256 MiB, `.git/HEAD` up
   to 64 KiB, and disk reads in `alint lsp` overlays, `alint init`, `alint
   suggest`, `alint export-agents-md --inline`, `alint fix` and `alint-testkit`
@@ -193,8 +198,9 @@ untrusted input. The defensive posture is:
 - **Output and editor links are sanitized.** User- or config-supplied
   `policy_url` links render as clickable links in LSP hover and
   `CodeDescription`, Markdown reports, terminal OSC 8 hyperlinks and
-  `export-agents-md` only when their scheme is `http` or `https`; terminal
-  output sanitizes control, bidi and zero-width characters; and findings whose
+  `export-agents-md` only when their scheme is `http` or `https`; terminal,
+  JUnit XML (`--format junit`) and `--format agent` human-facing fields
+  sanitize control, bidi and zero-width characters; and findings whose
   path is redacted omit paths, line/column numbers and related locations
   across all formats and LSP notes.
 - **Plugin trust gating.** The `command` rule kind shells out to external
@@ -252,8 +258,9 @@ untrusted input. The defensive posture is:
   `alint test` is the exception: it runs Git in the sandbox repositories it
   makes for a test's `given.git`, never in the repository it runs from.
 - **The language server waits for workspace trust.** Until the editor sends
-  the initialization option `{"trusted": true}` (VS Code sends its Workspace
-  Trust state), `alint lsp` skips spawning rules, rules that run Git and
+  the initialization option `{"trusted": true}` (VS Code and the JetBrains
+  plugin forward Workspace Trust / Trusted Projects state automatically),
+  `alint lsp` skips spawning rules, rules that run Git and
   `custom:` facts (a rule whose fix alone spawns lints without the fix),
   fetches no remote `extends:`, refuses `allow_out_of_root:` and reads no
   environment value; other rules lint as usual. `alint lsp --untrusted` takes

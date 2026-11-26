@@ -24,10 +24,11 @@
 //! version.
 
 use std::borrow::Cow;
+use std::fmt::Write as _;
 use std::io::Write;
 use std::path::Path;
 
-use alint_core::{Level, ProposedEdit, Report, RuleResult, Violation};
+use alint_core::{Level, ProposedEdit, Report};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -123,51 +124,78 @@ struct AgentAnalysisFailure<'a> {
     human_message: Cow<'a, str>,
 }
 
+#[allow(clippy::too_many_lines)]
 pub fn write_agent(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
-    let mut violations: Vec<AgentViolation<'_>> = Vec::new();
+    let total_violations: usize = report.results.iter().map(|r| r.violations.len()).sum();
+    let total_failures: usize = report
+        .results
+        .iter()
+        .map(|r| r.analysis_failures.len())
+        .sum();
+    let mut violations: Vec<AgentViolation<'_>> = Vec::with_capacity(total_violations);
     let mut by_sev = BySeverity {
         error: 0,
         warning: 0,
         info: 0,
     };
     let mut fixable_violations = 0;
-    let mut analysis_failures = Vec::new();
+    let mut analysis_failures = Vec::with_capacity(total_failures);
 
     for r in &report.results {
-        for v in &r.violations {
-            match r.level {
-                Level::Error => by_sev.error += 1,
-                Level::Warning => by_sev.warning += 1,
-                Level::Info => by_sev.info += 1,
-                Level::Off => {} // off rules don't produce violations, but be explicit
+        if !r.violations.is_empty() {
+            let severity = severity_str(r.level);
+            let safe_rule_id = crate::sanitize::sanitize_terminal(&r.rule_id);
+            let safe_policy_url = r
+                .policy_url
+                .as_deref()
+                .map(crate::sanitize::sanitize_terminal);
+            for v in &r.violations {
+                match r.level {
+                    Level::Error => by_sev.error += 1,
+                    Level::Warning => by_sev.warning += 1,
+                    Level::Info => by_sev.info += 1,
+                    Level::Off => {} // off rules don't produce violations, but be explicit
+                }
+                // Per-VIOLATION fixability, not per-rule `r.is_fixable`: an agent
+                // acts on a single violation, and `fix_command` is documented as the
+                // argv to fix THIS violation. A rule with a fixer that skips this
+                // violation (an unconvertible stem) -- or an Unsafe-tier fixer a bare
+                // `alint fix` only suggests -- must not advertise a fix here, or an
+                // agent runs the command, the violation persists, and it loops.
+                if v.is_fixable {
+                    fixable_violations += 1;
+                }
+                let file = v.report_path().map(Path::to_string_lossy);
+                let line = v.report_line();
+                let column = v.report_column();
+                let human_message =
+                    crate::sanitize::sanitize_terminal_multiline(v.message.as_ref());
+                let agent_instruction = build_agent_instruction(
+                    severity,
+                    &human_message,
+                    file.as_deref(),
+                    line,
+                    column,
+                    v.is_fixable,
+                    &safe_rule_id,
+                    safe_policy_url.as_deref(),
+                );
+                violations.push(AgentViolation {
+                    rule_id: r.rule_id.as_ref(),
+                    severity,
+                    file,
+                    line,
+                    column,
+                    human_message,
+                    agent_instruction,
+                    fix_available: v.is_fixable,
+                    fix_command: v
+                        .is_fixable
+                        .then(|| vec!["fix", "--only", r.rule_id.as_ref()]),
+                    proposed_edit: crate::utf8_proposed_edits(v),
+                    policy_url: safe_policy_url.clone(),
+                });
             }
-            // Per-VIOLATION fixability, not per-rule `r.is_fixable`: an agent
-            // acts on a single violation, and `fix_command` is documented as the
-            // argv to fix THIS violation. A rule with a fixer that skips this
-            // violation (an unconvertible stem) -- or an Unsafe-tier fixer a bare
-            // `alint fix` only suggests -- must not advertise a fix here, or an
-            // agent runs the command, the violation persists, and it loops.
-            if v.is_fixable {
-                fixable_violations += 1;
-            }
-            violations.push(AgentViolation {
-                rule_id: r.rule_id.as_ref(),
-                severity: severity_str(r.level),
-                file: v.report_path().map(Path::to_string_lossy),
-                line: v.report_line(),
-                column: v.report_column(),
-                human_message: crate::sanitize::sanitize_terminal_multiline(v.message.as_ref()),
-                agent_instruction: build_agent_instruction(r, v),
-                fix_available: v.is_fixable,
-                fix_command: v
-                    .is_fixable
-                    .then(|| vec!["fix", "--only", r.rule_id.as_ref()]),
-                proposed_edit: crate::utf8_proposed_edits(v),
-                policy_url: r
-                    .policy_url
-                    .as_deref()
-                    .map(crate::sanitize::sanitize_terminal),
-            });
         }
         analysis_failures.extend(
             r.analysis_failures
@@ -237,30 +265,41 @@ fn severity_str(level: Level) -> &'static str {
 ///   To resolve: this is a repository-level rule with no
 ///   specific file location; resolve the underlying invariant
 ///   the rule enforces."`
-fn build_agent_instruction(rule: &RuleResult, violation: &Violation) -> String {
-    let mut out = String::new();
-    out.push_str(severity_str(rule.level));
+#[allow(clippy::too_many_arguments)]
+fn build_agent_instruction(
+    severity: &str,
+    human_message: &str,
+    file: Option<&str>,
+    line: Option<usize>,
+    column: Option<usize>,
+    is_fixable: bool,
+    safe_rule_id: &str,
+    safe_policy_url: Option<&str>,
+) -> String {
+    let extra = file.map_or(112, |p| p.len() + 32)
+        + if is_fixable {
+            safe_rule_id.len() + 48
+        } else {
+            0
+        }
+        + safe_policy_url.map_or(0, |u| u.len() + 40);
+    let mut out = String::with_capacity(severity.len() + human_message.len() + 20 + extra);
+    out.push_str(severity);
     out.push_str(": ");
-    out.push_str(&crate::sanitize::sanitize_terminal_multiline(
-        &violation.message,
-    ));
+    out.push_str(human_message);
     if !out.ends_with('.') {
         out.push('.');
     }
 
     out.push_str(" To resolve: ");
-    match violation.report_path() {
+    match file {
         Some(path) => {
             out.push_str("edit ");
-            out.push_str(&crate::sanitize::sanitize_terminal(
-                &path.display().to_string(),
-            ));
-            if let Some(line) = violation.report_line() {
-                out.push(':');
-                out.push_str(&line.to_string());
-                if let Some(column) = violation.report_column() {
-                    out.push(':');
-                    out.push_str(&column.to_string());
+            out.push_str(&crate::sanitize::sanitize_terminal(path));
+            if let Some(line) = line {
+                let _ = write!(out, ":{line}");
+                if let Some(column) = column {
+                    let _ = write!(out, ":{column}");
                 }
             }
         }
@@ -273,15 +312,15 @@ fn build_agent_instruction(rule: &RuleResult, violation: &Violation) -> String {
         }
     }
 
-    if violation.is_fixable {
+    if is_fixable {
         out.push_str(" (or run `alint fix --only ");
-        out.push_str(&crate::sanitize::sanitize_terminal(&rule.rule_id));
+        out.push_str(safe_rule_id);
         out.push_str("` to apply the auto-fix)");
     }
 
-    if let Some(url) = rule.policy_url.as_deref() {
+    if let Some(url) = safe_policy_url {
         out.push_str(". See ");
-        out.push_str(&crate::sanitize::sanitize_terminal(url));
+        out.push_str(url);
         out.push_str(" for the policy this rule enforces");
     }
 
