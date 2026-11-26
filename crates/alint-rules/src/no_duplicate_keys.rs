@@ -338,10 +338,18 @@ impl NoDuplicateKeysRule {
         finding = finding.with_baseline_key(baseline);
         if self.explicit_sensitive {
             let locator = format!("{}\0{}\0dup", format.label(), crate::slash(path));
-            if let Some(sec) = dup.section.as_deref() {
-                finding.redact_evidence(&self.id, &locator, [dup.key.as_ref(), sec]);
+            if self.message.is_some() {
+                if let Some(sec) = dup.section.as_deref() {
+                    finding.redact_evidence(&self.id, &locator, [dup.key.as_ref(), sec]);
+                } else {
+                    finding.redact_evidence(&self.id, &locator, [dup.key.as_ref()]);
+                }
             } else {
-                finding.redact_evidence(&self.id, &locator, [dup.key.as_ref()]);
+                // Built-in message already renders `"duplicate key <redacted>"`
+                // without key or section text; passing raw key/section tokens
+                // would scrub fixed template words (e.g. `"e"` or `"key"`),
+                // creating a substring oracle.
+                finding.redact_evidence(&self.id, &locator, std::iter::empty());
             }
         }
         finding
@@ -395,8 +403,8 @@ fn bounded_key_token(raw: &str) -> String {
 }
 
 /// Resolve every duplicate and first-occurrence byte span to 1-based
-/// [`SourceRange`]s in strictly O(N + K log K) time (avoiding O(K * N) column
-/// rescans on 32 MiB single-line minified files).
+/// [`SourceRange`]s in strictly O(N + K log K) time and O(K) memory (avoiding
+/// O(K * N) column rescans and large line-starts tables on 32 MiB files).
 fn resolve_duplicate_ranges(
     text: &str,
     duplicates: &[DuplicateKey],
@@ -405,21 +413,7 @@ fn resolve_duplicate_ranges(
         return Vec::new();
     }
     if text.is_ascii() {
-        let starts = compute_line_starts(text);
-        let to_pos = |offset: usize| -> Option<(usize, usize)> {
-            let clamped = offset.min(text.len());
-            let idx = starts.partition_point(|&s| s <= clamped).checked_sub(1)?;
-            Some((idx + 1, clamped - starts[idx] + 1))
-        };
-        let to_range = |span: ByteSpan| -> Option<SourceRange> {
-            let (sl, sc) = to_pos(span.start)?;
-            let (el, ec) = to_pos(span.end)?;
-            SourceRange::new(sl, sc, el, ec)
-        };
-        return duplicates
-            .iter()
-            .map(|d| (to_range(d.duplicate), to_range(d.first)))
-            .collect();
+        return resolve_ascii_duplicate_ranges(text.as_bytes(), duplicates);
     }
 
     // Non-ASCII path: collect and sort all unique valid char-boundary offsets
@@ -493,28 +487,66 @@ fn resolve_duplicate_ranges(
         .collect()
 }
 
-fn compute_line_starts(text: &str) -> Vec<usize> {
-    let mut starts = vec![0usize];
-    let bytes = text.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'\n' => {
-                starts.push(i + 1);
-                i += 1;
-            }
-            b'\r' => {
-                if bytes.get(i + 1) == Some(&b'\n') {
-                    i += 2;
-                } else {
-                    i += 1;
-                }
-                starts.push(i);
-            }
-            _ => i += 1,
+fn resolve_ascii_duplicate_ranges(
+    bytes: &[u8],
+    duplicates: &[DuplicateKey],
+) -> Vec<(Option<SourceRange>, Option<SourceRange>)> {
+    let mut targets: Vec<usize> = Vec::with_capacity(duplicates.len() * 4);
+    for d in duplicates {
+        for off in [
+            d.duplicate.start,
+            d.duplicate.end,
+            d.first.start,
+            d.first.end,
+        ] {
+            targets.push(off.min(bytes.len()));
         }
     }
-    starts
+    targets.sort_unstable();
+    targets.dedup();
+
+    let mut positions: HashMap<usize, (usize, usize)> = HashMap::with_capacity(targets.len());
+    let mut target_idx = 0usize;
+    let mut line = 1usize;
+    let mut col = 1usize;
+    let mut prev_cr = false;
+    let mut i = 0usize;
+    while target_idx < targets.len() {
+        let target = targets[target_idx];
+        while i < target {
+            match bytes[i] {
+                b'\r' => {
+                    line += 1;
+                    col = 1;
+                    prev_cr = true;
+                }
+                b'\n' => {
+                    if !prev_cr {
+                        line += 1;
+                        col = 1;
+                    }
+                    prev_cr = false;
+                }
+                _ => {
+                    prev_cr = false;
+                    col += 1;
+                }
+            }
+            i += 1;
+        }
+        positions.insert(target, (line, col));
+        target_idx += 1;
+    }
+
+    let lookup = |span: ByteSpan| -> Option<SourceRange> {
+        let &(sl, sc) = positions.get(&span.start.min(bytes.len()))?;
+        let &(el, ec) = positions.get(&span.end.min(bytes.len()))?;
+        SourceRange::new(sl, sc, el, ec)
+    };
+    duplicates
+        .iter()
+        .map(|d| (lookup(d.duplicate), lookup(d.first)))
+        .collect()
 }
 
 pub static META: alint_core::KindMeta = alint_core::KindMeta {
@@ -719,5 +751,53 @@ mod tests {
                 .map(SourceRange::start_column),
             Some(10)
         );
+    }
+
+    #[test]
+    fn explicit_sensitive_preserves_builtin_template_and_handles_large_keys() {
+        let big_key = "k".repeat(256 * 1024);
+        let mut big_yaml = format!("holder: &a \"{big_key}\"\n*a: 1\n");
+        for _ in 0..200 {
+            big_yaml.push_str("*a: 2\n");
+        }
+        let (dir, index) = tempdir_with_files(&[
+            ("short.yml", b"e: 1\ne: 2\nkey: 3\nkey: 4\ndup: 5\ndup: 6\n"),
+            ("crlf.ini", b"[sec]\r\na = 1\ra = 2\r\n"),
+            ("big.yml", big_yaml.as_bytes()),
+        ]);
+        let c = ctx(dir.path(), &index);
+
+        // Built-in sensitive message must stay exact `"duplicate key <redacted>"`
+        // even when key names (`"e"`, `"key"`, `"dup"`) are substrings of it.
+        let short_rule = build(&make_spec("short.yml", "sensitive: true\n")).unwrap();
+        let short_vs = short_rule.evaluate(&c).unwrap();
+        assert_eq!(short_vs.len(), 3);
+        for v in &short_vs {
+            assert!(v.is_sensitive());
+            assert_eq!(v.message.as_ref(), "duplicate key <redacted>");
+        }
+
+        // Custom message under `sensitive: true` still scrubs the duplicated key/section.
+        let custom_rule = build(&make_spec(
+            "crlf.ini",
+            "sensitive: true\nmessage: \"custom sec a duplicate\"\n",
+        ))
+        .unwrap();
+        let custom_vs = custom_rule.evaluate(&c).unwrap();
+        assert_eq!(custom_vs.len(), 1);
+        assert!(custom_vs[0].is_sensitive());
+        assert!(!custom_vs[0].message.contains("sec"));
+        // Verify ASCII CRLF + bare CR line/column resolution.
+        assert_eq!(custom_vs[0].line, Some(3));
+        assert_eq!(custom_vs[0].column, Some(1));
+
+        // Huge aliased key with `sensitive: true` avoids allocating per-finding debug copies.
+        let big_rule = build(&make_spec("big.yml", "sensitive: true\n")).unwrap();
+        let big_vs = big_rule.evaluate(&c).unwrap();
+        assert_eq!(big_vs.len(), 200);
+        for v in &big_vs {
+            assert!(v.is_sensitive());
+            assert_eq!(v.message.as_ref(), "duplicate key <redacted>");
+        }
     }
 }

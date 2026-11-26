@@ -209,7 +209,7 @@ Default `shebang:` is `^#!`, which only enforces presence; almost every useful c
 
 **Categories:** Content, Encoding
 
-<!-- alint:since=0.23.0 -->
+<!-- alint:since=0.24 -->
 Content is detected as text (BOM, NUL-byte, magic-header, and control-byte heuristics over the first 8 KiB) -- fails on binary files matched by `paths`.
 <!-- /alint:since -->
 

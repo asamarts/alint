@@ -106,6 +106,9 @@ In scope:
 - The Docker image (`ghcr.io/asamarts/alint`)
 - The Homebrew formula (`asamarts/homebrew-alint`)
 - The npm package (`@asamarts/alint`)
+- The PyPI distribution (`alint`)
+- The official editor extensions maintained in this repo (`editors/vscode`,
+  `editors/jetbrains`, `editors/zed`)
 - The `install.sh` release installer (served from `alint.org/install.sh`)
 - The `xtask` build/release tooling
 
@@ -186,23 +189,33 @@ untrusted input. The defensive posture is:
   files of at most 32 MiB; `extends:` loading is capped at 64 MiB of sources
   and 4,194,304 entries, template expansion at 64 MiB total (32 MiB per
   rendered string), YAML nesting at 128 levels (structured YAML fixes walk
-  parser events iteratively without expanding aliases), `pinned_references`
-  merge-key and GitLab `extends:` DAG resolution are memoized under a work
-  budget, and top-level `limits.findings_per_rule` (default `10,000`, cap
-  `1,000,000`) and `limits.key_path_bytes_per_decode` (default 32 MiB, cap
-  16 GiB) bound emitted findings and key-path decode memory. A baseline file
+  parser events iteratively without expanding aliases, and alias-amplified
+  parsed trees hold a `Send + Sync` retained memory lease rather than pinning
+  in the idle LRU cache), HCL2 inputs at 4 MiB, 64 nesting levels, 1,024
+  entries per object, and bounded heredoc-backtracking / key-comparison work,
+  `no_duplicate_keys` at 1,000 findings per file with pre-hashed/bounded key
+  tokens, `pinned_references` merge-key and GitLab `extends:` DAG resolution
+  under a memoized work budget, and top-level-only `limits.findings_per_rule`
+  (default `10,000`, cap `1,000,000`) and `limits.key_path_bytes_per_decode`
+  (default 32 MiB, cap 16 GiB) -- refused in `extends:` and nested configs --
+  bound emitted findings and key-path decode memory. A baseline file
   is read only when it is a regular file of at most 256 MiB, `.git/HEAD` up
   to 64 KiB, and disk reads in `alint lsp` overlays, `alint init`, `alint
   suggest`, `alint export-agents-md --inline`, `alint fix` and `alint-testkit`
   are bounded to regular files.
-- **Output and editor links are sanitized.** User- or config-supplied
-  `policy_url` links render as clickable links in LSP hover and
+- **Output, redaction, and template substitution are hardened.** User- or
+  config-supplied `policy_url` links render as clickable links in LSP hover and
   `CodeDescription`, Markdown reports, terminal OSC 8 hyperlinks and
   `export-agents-md` only when their scheme is `http` or `https`; terminal,
   JUnit XML (`--format junit`) and `--format agent` human-facing fields
-  sanitize control, bidi and zero-width characters; and findings whose
-  path is redacted omit paths, line/column numbers and related locations
-  across all formats and LSP notes.
+  sanitize control, bidi and zero-width characters; environment-value redaction
+  uses a linear Aho-Corasick matcher with overlapping-match coalescing plus
+  structural masking of short (`<4`-character) env-derived paths; nested rule
+  tokens (`{path}`, `{dir}`, `{basename}`, `{stem}`, `{ext}`, `{parent_name}`)
+  are escaped per target option syntax (regex, RFC 9535 JSONPath and I-Regexp,
+  `when:` expressions, and manifest scopes); and findings whose path is
+  redacted omit paths, line/column numbers and related locations across all
+  formats and LSP notes.
 - **Plugin trust gating.** The `command` rule kind shells out to external
   CLIs; it's gated to the user's top-level config (extends'd configs cannot
   introduce a `command` rule). A fix of a rule an `extends:`'d ruleset or a

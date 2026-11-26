@@ -31,22 +31,17 @@ pub(crate) fn slash_path(path: &std::path::Path) -> String {
 /// Borrowed variant of [`slash_path`] avoiding allocation on `/` platforms for
 /// valid UTF-8 paths.
 pub(crate) fn slash_path_cow(path: &std::path::Path) -> std::borrow::Cow<'_, str> {
-    let raw = path.to_string_lossy();
-    if std::path::MAIN_SEPARATOR == '/' {
-        raw
-    } else if raw.contains(std::path::MAIN_SEPARATOR) {
-        std::borrow::Cow::Owned(raw.replace(std::path::MAIN_SEPARATOR, "/"))
-    } else {
-        raw
-    }
+    normalize_separators_cow(path.to_string_lossy(), std::path::MAIN_SEPARATOR)
 }
 
-#[cfg(test)]
-fn normalize_separators(s: &str, separator: char) -> String {
-    if separator == '/' {
-        s.to_string()
+fn normalize_separators_cow(
+    raw: std::borrow::Cow<'_, str>,
+    separator: char,
+) -> std::borrow::Cow<'_, str> {
+    if separator == '/' || !raw.contains(separator) {
+        raw
     } else {
-        s.replace(separator, "/")
+        std::borrow::Cow::Owned(raw.replace(separator, "/"))
     }
 }
 /// Return edits only when every target path has an exact JSON string
@@ -72,12 +67,23 @@ pub(crate) fn note_summary(count: usize) -> String {
 #[cfg(test)]
 mod path_tests {
     use super::*;
+    use std::borrow::Cow;
 
     #[test]
     fn windows_separators_become_slashes() {
-        assert_eq!(normalize_separators("src\\a\\b.rs", '\\'), "src/a/b.rs");
-        // On a `/` platform a backslash is part of the file name.
-        assert_eq!(normalize_separators("odd\\name.rs", '/'), "odd\\name.rs");
+        let converted = normalize_separators_cow(Cow::Borrowed("src\\a\\b.rs"), '\\');
+        assert_eq!(converted.as_ref(), "src/a/b.rs");
+        assert!(matches!(converted, Cow::Owned(_)));
+
+        // Already normalized on Windows stays borrowed with zero allocation.
+        let already = normalize_separators_cow(Cow::Borrowed("src/a/b.rs"), '\\');
+        assert_eq!(already.as_ref(), "src/a/b.rs");
+        assert!(matches!(already, Cow::Borrowed(_)));
+
+        // On a `/` platform a backslash is part of the file name and stays borrowed.
+        let unix = normalize_separators_cow(Cow::Borrowed("odd\\name.rs"), '/');
+        assert_eq!(unix.as_ref(), "odd\\name.rs");
+        assert!(matches!(unix, Cow::Borrowed(_)));
     }
 
     #[cfg(windows)]

@@ -211,12 +211,15 @@ and owner ADR approval ([ADR-0050](../../adr/0050-v024-phase-3-completion-design
     baseline fingerprint golden gate from #579).
 - Documentation and CHANGELOG ("Upgrading from 0.23" prominently calling out Windows baseline
   regeneration for #579, `java-no-tracked-build` for #546, the 10k per-rule finding cap for #596,
-  parent ignore-file warning for #568, and v2 additions), release-cut doc updates gated on the
-  `v0.23.0` overlay until tag time (`docs/rules.md` lines 972, 974, 1046, 1054 updating pre-v0.24
-  `constraint` prose for the 7 assertion families, v0.25 stability timeline, and `reference`
-  triggers/redaction; `docs/site/concepts/composition/bundled-rulesets.md` updating `24` -> `25`
-  bundled rulesets and the `alint://bundled/<name>@<rev>` note), tag `v0.24.0`, verify all release
-  and post-publish smoke channels, review `bench-record`, and sync `alint.org`.
+  parent ignore-file warning for #568, and v2 additions), tag `v0.24.0`, verify all release and
+  post-publish smoke channels, review `bench-record`, sync `alint.org`, and land the post-tag
+  doc follow-up PR once `v0.24.0` is live (refreshing overlay-gated pre-v0.24 prose in
+  `docs/rules.md` [lines 306, 972, 974, 1046, 1048, 1054],
+  `docs/site/concepts/composition/bundled-rulesets.md` [lines 8, 31, 46, 54: `24` -> `25` rulesets
+  and `alint://bundled/<name>@<rev>` note], and
+  `docs/site/concepts/composition/composition-and-trust.md` [lines 57-62], and unwrapping shipped
+  `<!-- alint:since=0.23.0 -->` / `<!-- alint:since=0.24 -->` / `<!-- alint:since=0.24.0 -->`
+  markers).
 
 ## 2. Out of scope (deferred deliberately)
 
@@ -231,7 +234,7 @@ and owner ADR approval ([ADR-0050](../../adr/0050-v024-phase-3-completion-design
 
 | Phase | Contents | Key issues / gates |
 |---|---|---|
-| 0 | ADR-0048, this plan, roadmap/general-linter/plugin-arch updates, #622, CI/release hygiene, `witforge 0.6.0`, `alint.org#128` | #621, #622, docs & witforge gates |
+| 0 | ADR-0048, this plan, roadmap/general-linter/plugin-arch updates, #622, CI/release hygiene, `witforge 0.6.0` (later bumped to `0.7.0` in #647), `alint.org#128` | #621, #622, #647, docs & witforge gates |
 | 1 | P0/P1 security, trust, correctness, and quick dependency cleanups | #609, #545, #596, #600, #569, #583, #585, #579, #546, #601, #564, #547, #597, #581, #611, #612, #613, #615, #610 |
 | 2 | Unified YAML track (`ayaml 0.2.3`, saphyr exit, bounded shared parse cache, alias-tree cap, span diagnostics) | #614, #549, #550, #548, #582, #572, #566, #571 |
 | 3 | Nested-rule optimization wave and owned parallel walker | #620, #565, #584, #573, #568 |
@@ -267,7 +270,7 @@ and owner ADR approval ([ADR-0050](../../adr/0050-v024-phase-3-completion-design
   evaluation.
 - 2026-11-22: Phase 0 complete. Merged #623 (ADR-0048, this plan, roadmap/design updates), #626
   (`url 2.5.9` for RUSTSEC-2026-0592 in `Cargo.lock` and `editors/zed/Cargo.lock`), #625
-  (`witforge 0.6.0` consumer bump), #624 (#621 `bench-record.yml` baseline fallback + test,
+  (`witforge 0.6.0` consumer bump; later updated to `witforge 0.7.0` in #647), #624 (#621 `bench-record.yml` baseline fallback + test,
   `release.yml` `actions/attest@v4.2.2`, `CHANGELOG.md:233`), and `asamarts/alint.org#128`.
   Post-Phase-0 audit closed a PR-body baseline-description edge case, added prerelease filtering
   and explicit `fetch-tags: true` in `bench-record.yml`, added legacy/wrong-generator header

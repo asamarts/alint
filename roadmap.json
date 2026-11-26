@@ -143,7 +143,7 @@
       "version": "0.24",
       "title": "saphyr exit, Phase 3 completion, owned walker, and LSP rewrite",
       "kind": "release",
-      "blurb": "Completes general-linter phase 3 (reference, count, multi-field group_by, array-of-objects extraction, semver range satisfaction, duplicate-key detection, strict JSON, and bundled v2 rulesets, with version: 2 soaking one more release), removes saphyr from default release builds on ayaml 0.2.3 with a bounded shared parse cache, replaces tower-lsp with lsp-server and ignore's walker with an owned parallel walker, and drains the v0.23 backlog across security, cross-platform parity, and supply-chain diet."
+      "blurb": "Completes general-linter phase 3 (reference, count, compare, multi-field group_by, array-of-objects extraction, semver range satisfaction, duplicate-key detection, strict JSON, and bundled v2 rulesets, with version: 2 soaking one more release), removes saphyr from default release builds on ayaml 0.2.3 with a bounded shared parse cache, replaces tower-lsp with lsp-server and ignore's walker with an owned parallel walker, and drains the v0.23 backlog across security, cross-platform parity, and supply-chain diet."
     },
     {
       "version": "1.0",

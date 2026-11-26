@@ -681,7 +681,7 @@ fn parse_config_interpolated_shown(
     })
 }
 
-/// [`parse_config_interpolated_inner_with_environment`] past the YAML guards.
+/// [`parse_config_interpolated_shown`] past the YAML guards.
 fn parse_guarded(
     contents: &str,
     source_path: &Path,
