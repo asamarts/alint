@@ -1691,13 +1691,14 @@ the owner decisions are
 
 - **saphyr exit and unified YAML track (#614, #548, #582, #549, #550).** Bumps `ayaml` to 0.2.3,
   migrates structured YAML fixes, spanned entry extraction, literal-subtree checks, and
-  `pinned_references` onto `ayaml` events and `SpannedTree`, and removes `saphyr` and
+  `pinned_references` onto `ayaml`'s spanned event stream and `LineIndex`, and removes `saphyr` and
   `saphyr-parser` from default release builds (staying test-only behind `yaml-reference`,
   ADR-0036 and ADR-0041). Adds a memory-budgeted per-run structured-tree cache, bounds retained
   memory of alias-expanded YAML trees, wires corpus replay YAML compare mode, adds a mid-size YAML
   `bench-scale` scenario, and unlocks span-accurate config diagnostics (#572, #566, #571).
 - **Phase 3 completion (`version: 2`, soaking one more release).** Adds `reference`, unified
-  `count` / `bounded-count`, orthogonal multi-field `group_by`, negated equality, inline literal
+  `count` / `bounded-count`, orthogonal multi-field `group_by`, unified `compare` (including
+  negated equality and ordered comparisons), inline literal
   `set` targets, multi-field array-of-objects extraction and split transforms (#592), optional
   `bound:` (#593), `{{value}}` placeholders (#594), target-file `set` placement (#595), stub
   locale roots (#598), general duplicate-key detection (gap B1), semver range satisfaction (gap

@@ -23,6 +23,7 @@ A single `Report` fans out to each format:
 | `gitlab` | `gitlab-codequality`, `code-quality` | GitLab Code Quality report. |
 | [`agent`](/docs/reference/output-formats/agent/) | `agentic`, `ai` | LLM-shaped JSON with a templated `agent_instruction` per violation. |
 
+
 Each format is shown by example in the [quickstart](/docs/getting-started/quickstart/). The [`agent` format](/docs/reference/output-formats/agent/) has its own reference because its shape is purpose-built for AI coding agents.
 
 ## Streams: report on stdout, diagnostics on stderr
