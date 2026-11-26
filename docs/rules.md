@@ -1523,11 +1523,11 @@ The declaration, Dockerfile, and GitHub Actions rules select only literal exact 
 
 ### `alint://bundled/js/workspace-deps@v2`
 
-Opt-in `version: 2` bundled ruleset for JavaScript and TypeScript monorepo workspaces (requires `version: 2` in your `.alint.yml`). Exposes the `workspace-manifests` selector and `workspace-names` / `dependency-ranges` relations (reachable via `as:`), ignoring workspace-local package names and protocol specifiers (`workspace:`, `catalog:`, `npm:`, `file:`, `link:`, `portal:`, `patch:`).
+Opt-in `version: 2` bundled ruleset for JavaScript and TypeScript monorepo workspaces (requires `version: 2` in your `.alint.yml`). Scans the root `package.json` plus one-level `packages/*/package.json` and `apps/*/package.json` manifests, exposing the `workspace-manifests` selector and `workspace-names` / `dependency-ranges` relations (reachable via `as:`), ignoring workspace-local package names and protocol specifiers (`workspace:`, `catalog:`, `npm:`, `file:`, `link:`, `portal:`, `patch:`, `exec:`, matched case-insensitively).
 
 1 rule:
 
-| Rule id | Kind | Level | Fix |
+| Rule id | Kind | Default level | Fix |
 |---|---|---|---|
 | `js-workspace-deps-consistent-range` | `constraint` | error | — |
 

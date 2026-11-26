@@ -1,7 +1,7 @@
 //! Anti-drift gate for alint's dogfood config vs the shipped bundled rulesets.
 //!
 //! alint's own `.alint.yml` hand-copies a few rules that also ship in
-//! `crates/alint-dsl/rulesets/v1/**` (same `id:`), typically to enforce them at a
+//! `crates/alint-dsl/rulesets/**` (same `id:`), typically to enforce them at a
 //! stricter `level:` on this repo. Those copies MUST keep identical *matching
 //! semantics* -- only presentation (`level`, `message`, `policy_url`, `fix`) may
 //! differ. When they drift, external users who `extends:` the bundled ruleset get
@@ -123,7 +123,7 @@ fn dogfood_rules_match_their_bundled_twins() {
     let dogfood = rules_by_id(&root.join(".alint.yml"));
 
     let mut bundled: BTreeMap<String, Value> = BTreeMap::new();
-    for path in walk_yaml(&root.join("crates/alint-dsl/rulesets/v1")) {
+    for path in walk_yaml(&root.join("crates/alint-dsl/rulesets")) {
         for (id, rule) in rules_by_id(&path) {
             bundled.insert(id, rule);
         }

@@ -1972,32 +1972,37 @@ non-trivial shape verified directly on the compiled binary
 | Family | Units | Non-D | Today | Phase 8 (+C->A) | v0.24 (B->A) | v0.24 (+C->A) | B->C |
 |---|--:|--:|--:|--:|--:|--:|--:|
 | `locale` | 134 | 114 | 22% | 28% (+7) | 31% (+10) | 46% (+28) | 1 |
-| `dep-version` | 170 | 104 | 43% | 57% (+14) | 62% (+19) | 78% (+36) | 0 |
-| `toolchain-pin` | 81 | 65 | 63% | 63% (+0) | 72% (+6) | 82% (+12) | 5 |
+| `dep-version` | 170 | 104 | 43% | 57% (+14) | 61% (+18) | 76% (+34) | 1 |
+| `toolchain-pin` | 81 | 65 | 63% | 63% (+0) | 71% (+5) | 80% (+11) | 6 |
 | other | 1,173 | 677 | 56% | 59% (+22) | 60% (+32) | 62% (+42) | 2 |
-| Pooled | 1,558 | 960 | 51% | 55% (+43) | 58% (+67) | 63% (+118) | 8 |
+| Pooled | 1,558 | 960 | 51% | 55% (+43) | 58% (+65) | 63% (+115) | 10 |
 
-- **New promotions beyond Phase 8:** +28 `B->A` units (including all three Phase 8 self-disjoint
+(Note: `Phase 8 (+C->A)` includes Phase 8's 4 C->A promotions; `v0.24 (B->A)` counts only B->A
+promotions from Today, while `v0.24 (+C->A)` includes all cumulative C->A promotions.)
+
+- **New promotions beyond Phase 8:** +26 `B->A` units (including all three Phase 8 self-disjoint
   `set` workarounds `element-web-06`, `babel-12`, and `ghost-63`, both YAML duplicate-key units
   `mattermost-56` and `zulip-28`, both per-manifest key-subset units `fluentui-24` and `trpc-07`,
-  catalog/override/module `reference` units `babel-17`, `trpc-10`, `nextcloud-b02`, `backstage-26`,
-  `jest-28`, `babel-50`, and `rocketchat-44`, `records:` units `trpc-24` and
-  `thunderbird-android-55`, mixed-reader `mattermost-27` and suffix-strip `strapi-21`, and 10
-  semver `satisfies`/`compare` units `tq-03`, `wsdk-55`, `trpc-03`, `trpc-06`, `forem-07`,
-  `immich-52`, `immich-53`, `rushstack-55`, `ghost-55`, and `rushstack-32`), plus +47 `C->A`
+  catalog/module `reference` units `babel-17`, `trpc-10`, `backstage-26`, `jest-28`, and
+  `rocketchat-44`, negated-reference `set: disjoint_from` unit `babel-50`, `records:` units
+  `trpc-24` and `thunderbird-android-55`, mixed-reader `mattermost-27` and suffix-strip
+  `strapi-21`, and 9 semver `satisfies`/`compare` units `tq-03`, `wsdk-55`, `trpc-03`, `trpc-06`,
+  `forem-07`, `immich-53`, `rushstack-55`, `ghost-55`, and `rushstack-32`), plus +46 `C->A`
   promotions (all 10 strict-JSON locale units across 8 repositories, 8 structural locale key/count
-  units, 14 dynamic workspace/role/catalog/semver `dep-version` units, 6 `toolchain-pin`
+  units, 13 dynamic workspace/role/catalog/semver `dep-version` units, 6 `toolchain-pin`
   semver/transform units, and 9 `other` units).
 - **Bundled `version: 2` ergonomics (D10):** adopting JS/TS workspace dependency consistency via
   `alint://bundled/js/workspace-deps@v2` drops from 19-24 hand-written v2 lines to 3 lines while
   preserving `as:` composition for consumer rules.
 - **Concrete gaps left for v0.25+:** cross-relation / singleton-broadcast targets for `satisfies`
-  (leaving 4 cross-directory M x 1 `toolchain-pin` units in `B->C` and 1 M x N unit in B),
-  range-subset (`semver.subset`, 2 units), array/key ordering (20 units), Markdown frontmatter
-  (10 units), placeholder/plural/ICU locale adapters (20 units), and parent-key-scoped array/value
-  extraction (`mattermost-32`, `forem-29`, `ghost-68`).
+  (leaving 4 cross-directory `M x 1` / `1 x N` `toolchain-pin` units in `B->C` and 1 `M x N` unit
+  in B), Dart pubspec range dialect (`immich-52`), range-subset (`semver.subset`, 3 units:
+  `fluentui-31`, `rocketchat-80`, `fluentui-08`), array/key ordering (20 units), Markdown
+  frontmatter (10 units), placeholder/plural/ICU locale adapters (20 units), and parent-key-scoped
+  or polymorphic nested-object extraction (`mattermost-32`, `nextcloud-b02`, `forem-29`,
+  `ghost-68`).
 - **Phase 3 completion verdict:** every targeted family moves substantially (`locale` 22% -> 46%,
-  `dep-version` 43% -> 78% [80% in JS monorepos], `toolchain-pin` 63% -> 82%, `other` 56% -> 62%,
+  `dep-version` 43% -> 76% [79% in JS monorepos], `toolchain-pin` 63% -> 80%, `other` 56% -> 62%,
   pooled 51% -> 63%). Phase 3 is complete in v0.24 while `version: 2` remains experimental through
   v0.25 at the earliest (ADR-0048 decision 3a).
 

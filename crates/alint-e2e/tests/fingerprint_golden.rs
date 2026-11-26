@@ -115,19 +115,28 @@ fn policy_test_fingerprints_match_golden() {
         .parent()
         .expect("crates directory")
         .join("alint-dsl/ruleset-tests");
-    let ruleset_tests_v1_dir = ruleset_tests_root.join("v1");
-    let ruleset_tests_v2_dir = ruleset_tests_root.join("v2");
     let mut records = Vec::new();
     let mut skipped = BTreeSet::new();
     for path in yml_files(&scenarios_dir) {
         collect_policy_test(&scenarios_dir, &path, &mut records, &mut skipped);
     }
-    for path in yml_files(&ruleset_tests_v1_dir) {
-        collect_policy_test(&ruleset_tests_v1_dir, &path, &mut records, &mut skipped);
-    }
-    if ruleset_tests_v2_dir.is_dir() {
-        for path in yml_files(&ruleset_tests_v2_dir) {
-            collect_policy_test(&ruleset_tests_root, &path, &mut records, &mut skipped);
+    let mut rev_dirs: Vec<PathBuf> = std::fs::read_dir(&ruleset_tests_root)
+        .expect("read ruleset-tests directory")
+        .filter_map(|e| e.ok().map(|entry| entry.path()))
+        .filter(|path| path.is_dir())
+        .collect();
+    rev_dirs.sort();
+    for rev_dir in rev_dirs {
+        // Keep v1 scenario keys strip-prefixed to preserve existing golden
+        // snapshot entries; namespace newer revisions (v2, v3, ...) with
+        // `<rev>/...` to avoid cross-revision key collisions.
+        let base = if rev_dir.file_name().and_then(|n| n.to_str()) == Some("v1") {
+            rev_dir.as_path()
+        } else {
+            ruleset_tests_root.as_path()
+        };
+        for path in yml_files(&rev_dir) {
+            collect_policy_test(base, &path, &mut records, &mut skipped);
         }
     }
     records.sort();

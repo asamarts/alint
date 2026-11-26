@@ -9678,7 +9678,7 @@
       "type": "object"
     },
     "v2_reference": {
-      "description": "A selector or relation: a name this config file declares, or `alias.name` for one that the file an `extends:` entry gives `as: alias` declares itself (no re-export, no `a.b.c` chain).",
+      "description": "A selector or relation: a name this config file declares, or `alias.name` for one that the local file or bundled ruleset an `extends:` entry gives `as: alias` declares itself (no re-export, no `a.b.c` chain).",
       "pattern": "^[A-Za-z_][A-Za-z0-9_-]*(\\.[A-Za-z_][A-Za-z0-9_-]*)?$",
       "type": "string"
     },
@@ -10550,7 +10550,7 @@
       "type": "string"
     },
     "extends": {
-      "description": "Configs to inherit from. Each entry is either a bare string (local path, `https://` URL with SRI, or `alint://bundled/<name>@<rev>`) or a mapping `{url, only?, except?}` that filters the inherited rule set before merging. Entries resolved left-to-right; later entries override earlier ones, and the current file's own definitions override everything it extends. **Rule merging is field-level by `id`.** A child can override just the fields it wants to change - `rules: [{id: inherited, level: warning}]` keeps the parent's `kind`/`paths`/etc. and only downgrades severity. `{id: inherited, level: off}` disables a rule without redeclaring it. **Selective adoption** via `only:` (keep these ids, drop everything else) or `except:` (drop these ids). The two are mutually exclusive on a single entry. Unknown ids are a load-time error so typos surface immediately. Remote and bundled configs cannot themselves declare `extends:` (no principled base for relative resolution in a fetched body); nest extends locally instead. In a version 2 config, a local entry may also take `as: <alias>`, through which this config reaches the selectors and relations that source declares as `<alias>.<name>`.",
+      "description": "Configs to inherit from. Each entry is either a bare string (local path, `https://` URL with SRI, or `alint://bundled/<name>@<rev>`) or a mapping `{url, only?, except?}` that filters the inherited rule set before merging. Entries resolved left-to-right; later entries override earlier ones, and the current file's own definitions override everything it extends. **Rule merging is field-level by `id`.** A child can override just the fields it wants to change - `rules: [{id: inherited, level: warning}]` keeps the parent's `kind`/`paths`/etc. and only downgrades severity. `{id: inherited, level: off}` disables a rule without redeclaring it. **Selective adoption** via `only:` (keep these ids, drop everything else) or `except:` (drop these ids). The two are mutually exclusive on a single entry. Unknown ids are a load-time error so typos surface immediately. Remote and bundled configs cannot themselves declare `extends:` (no principled base for relative resolution in a fetched body); nest extends locally instead. In a version 2 config, a local or bundled entry may also take `as: <alias>`, through which this config reaches the selectors and relations that source declares as `<alias>.<name>`.",
       "items": {
         "$ref": "#/$defs/v2_extends_entry"
       },

@@ -200,9 +200,9 @@ pub struct Config {
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct ConfigLimits {
-    /// Maximum findings a relation-backed rule (`constraint`, `key_parity`)
-    /// emits before stopping and adding one non-baselinable analysis failure
-    /// (default: 10,000; hard cap: 1,000,000).
+    /// Maximum findings a relation-backed or duplicate-key rule (`constraint`,
+    /// `key_parity`, `no_duplicate_keys`) emits before stopping and adding one
+    /// non-baselinable analysis failure (default: 10,000; hard cap: 1,000,000).
     #[serde(default)]
     pub findings_per_rule: Option<usize>,
     /// Maximum bytes of materialized key-path pointers built for a single

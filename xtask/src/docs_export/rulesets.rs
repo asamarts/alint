@@ -295,9 +295,10 @@ pub(super) fn overview_paragraph(lines: &[String]) -> String {
     out.join("\n")
 }
 
-/// The ruleset's top-level `facts:` block, verbatim, if it has one.
-fn facts_block(yaml_text: &str) -> Option<String> {
-    let mut lines = yaml_text.lines().skip_while(|l| l.trim_end() != "facts:");
+/// A ruleset's top-level YAML block for `header` (e.g. `"facts:"`,
+/// `"selectors:"`, `"relations:"`), verbatim, if present.
+fn top_level_block(yaml_text: &str, header: &str) -> Option<String> {
+    let mut lines = yaml_text.lines().skip_while(|l| l.trim_end() != header);
     let first = lines.next()?;
     let mut block = vec![first.to_string()];
     for line in lines {
@@ -313,6 +314,21 @@ fn facts_block(yaml_text: &str) -> Option<String> {
         block.pop();
     }
     Some(block.join("\n"))
+}
+
+/// The ruleset's top-level `facts:` block, verbatim, if it has one.
+fn facts_block(yaml_text: &str) -> Option<String> {
+    top_level_block(yaml_text, "facts:")
+}
+
+/// The ruleset's top-level `selectors:` block, verbatim, if it has one.
+fn selectors_block(yaml_text: &str) -> Option<String> {
+    top_level_block(yaml_text, "selectors:")
+}
+
+/// The ruleset's top-level `relations:` block, verbatim, if it has one.
+fn relations_block(yaml_text: &str) -> Option<String> {
+    top_level_block(yaml_text, "relations:")
 }
 
 /// A rule's message as one line, fit for a table cell.
@@ -416,13 +432,19 @@ pub(super) fn render_ruleset_page(
         let _ = writeln!(&mut out);
     }
 
+    let selectors = selectors_block(yaml_text);
+    let relations = relations_block(yaml_text);
     let rules = yaml
         .get("rules")
         .and_then(|r| r.as_sequence())
         .filter(|r| !r.is_empty());
     let Some(rules) = rules else {
-        let _ = writeln!(&mut out, "_(No rules: this ruleset is a placeholder.)_");
-        let _ = writeln!(&mut out);
+        if selectors.is_none() && relations.is_none() {
+            let _ = writeln!(&mut out, "_(No rules: this ruleset is a placeholder.)_");
+            let _ = writeln!(&mut out);
+        } else {
+            write_v2_blocks(&mut out, selectors.as_deref(), relations.as_deref());
+        }
         write_ruleset_source(&mut out, rel_repo_path);
         return out;
     };
@@ -438,6 +460,8 @@ pub(super) fn render_ruleset_page(
         let id = str_field(rule, "id").unwrap_or_else(|| "(no-id)".into());
         write_rule_section(&mut out, &id, rule, sources.get(&id), kind_to_family);
     }
+
+    write_v2_blocks(&mut out, selectors.as_deref(), relations.as_deref());
 
     if let Some(facts) = facts_block(yaml_text) {
         let _ = writeln!(&mut out, "## Facts");
@@ -457,6 +481,39 @@ pub(super) fn render_ruleset_page(
     write_ruleset_customize(&mut out, name, rev, is_v2, rules);
     write_ruleset_source(&mut out, rel_repo_path);
     out
+}
+
+/// Emit `## Selectors` and `## Relations` sections for `version: 2` bundled
+/// rulesets so consumers adopting via `as:` can inspect the exported names.
+fn write_v2_blocks(out: &mut String, selectors: Option<&str>, relations: Option<&str>) {
+    if let Some(selectors) = selectors {
+        let _ = writeln!(out, "## Selectors");
+        let _ = writeln!(out);
+        let _ = writeln!(
+            out,
+            "Named selectors declared by this `version: 2` ruleset. Bind an alias (`as: <alias>`) \
+             on the `extends:` entry to reference them as `<alias>.<name>` in your own relations."
+        );
+        let _ = writeln!(out);
+        let _ = writeln!(out, "```yaml");
+        let _ = writeln!(out, "{selectors}");
+        let _ = writeln!(out, "```");
+        let _ = writeln!(out);
+    }
+    if let Some(relations) = relations {
+        let _ = writeln!(out, "## Relations");
+        let _ = writeln!(out);
+        let _ = writeln!(
+            out,
+            "Named relations declared by this `version: 2` ruleset. Bind an alias (`as: <alias>`) \
+             on the `extends:` entry to reference them as `<alias>.<name>` in your own `constraint` rules."
+        );
+        let _ = writeln!(out);
+        let _ = writeln!(out, "```yaml");
+        let _ = writeln!(out, "{relations}");
+        let _ = writeln!(out, "```");
+        let _ = writeln!(out);
+    }
 }
 
 /// A string field of a rule mapping.
@@ -686,23 +743,25 @@ pub(super) fn split_ruleset_rev_name(rel_no_ext: &str) -> Result<(&str, &str)> {
 ///   above `version:`).
 /// - A `## Source` section with a link back to the canonical YAML
 ///   in the alint repo.
+struct RulesetEntry {
+    pretty: String,
+    rev: String,
+    flat_slug: String,
+    summary: String,
+}
+
 pub(super) fn generate_bundled_ruleset_pages(
     workspace: &Path,
     target_dir: &Path,
     kind_to_family: &std::collections::HashMap<String, String>,
 ) -> Result<()> {
-    struct RulesetEntry {
-        pretty: String,
-        rev: String,
-        flat_slug: String,
-        summary: String,
-    }
-
     let rulesets_root = workspace.join(docs_paths::RULESETS_DIR);
     let bundled_dir = target_dir.join("bundled-rulesets");
     fs::create_dir_all(&bundled_dir)?;
 
     let mut entries: Vec<RulesetEntry> = Vec::new();
+    let mut seen_slugs: std::collections::BTreeMap<String, std::path::PathBuf> =
+        std::collections::BTreeMap::new();
 
     for entry in walkdir_plain(&rulesets_root)? {
         let md = fs::metadata(&entry)?;
@@ -718,7 +777,18 @@ pub(super) fn generate_bundled_ruleset_pages(
         let (rev, name) = split_ruleset_rev_name(&rel_no_ext)?;
         let pretty_str = name.to_string();
         let rev_str = rev.to_string();
-        let flat_slug = pretty_str.replace('/', "-");
+        let flat_slug = if rev == "v1" {
+            pretty_str.replace('/', "-")
+        } else {
+            format!("{}-{rev}", pretty_str.replace('/', "-"))
+        };
+        if let Some(prev) = seen_slugs.insert(flat_slug.clone(), entry.clone()) {
+            anyhow::bail!(
+                "bundled ruleset page slug collision `{flat_slug}` between {} and {}",
+                prev.display(),
+                entry.display()
+            );
+        }
         let flat_filename = format!("{flat_slug}.md");
 
         let yaml_text =
@@ -760,6 +830,10 @@ pub(super) fn generate_bundled_ruleset_pages(
     // sentence of the ruleset's leading comment block) so the
     // index is scannable without opening every page.
     entries.sort_by(|a, b| a.pretty.cmp(&b.pretty).then_with(|| a.rev.cmp(&b.rev)));
+    write_bundled_rulesets_index(&bundled_dir, &entries)
+}
+
+fn write_bundled_rulesets_index(bundled_dir: &Path, entries: &[RulesetEntry]) -> Result<()> {
     let mut index = String::new();
     let _ = writeln!(&mut index, "---");
     let _ = writeln!(&mut index, "title: Bundled Rulesets");
@@ -778,7 +852,7 @@ pub(super) fn generate_bundled_ruleset_pages(
     let _ = writeln!(&mut index);
     let _ = writeln!(&mut index, "## Currently shipped");
     let _ = writeln!(&mut index);
-    for e in &entries {
+    for e in entries {
         if e.summary.is_empty() {
             let _ = writeln!(
                 &mut index,
@@ -799,7 +873,6 @@ pub(super) fn generate_bundled_ruleset_pages(
         }
     }
     fs::write(bundled_dir.join("index.md"), index)?;
-
     Ok(())
 }
 

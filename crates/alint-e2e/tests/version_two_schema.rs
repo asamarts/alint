@@ -391,3 +391,49 @@ fn the_version_two_page_examples_load_and_validate() {
     }
     assert_eq!((files.len(), v1_configs, v2_configs), (2, 2, 13));
 }
+
+#[test]
+fn bundled_version_two_rulesets_and_tests_validate_against_draft_schema() {
+    let rulesets_v2 = workspace().join("crates/alint-dsl/rulesets/v2");
+    let mut ruleset_files = Vec::new();
+    other_yaml(&rulesets_v2, &mut ruleset_files);
+    assert!(
+        !ruleset_files.is_empty(),
+        "expected at least one bundled v2 ruleset under {}",
+        rulesets_v2.display()
+    );
+    for path in &ruleset_files {
+        let config = json_of(&std::fs::read_to_string(path).unwrap());
+        assert_eq!(config["version"], 2, "{}", path.display());
+        let errors = schema_errors(&config);
+        assert!(
+            errors.is_empty(),
+            "bundled v2 ruleset {} failed schema validation:\n{}",
+            path.display(),
+            errors.join("\n")
+        );
+    }
+
+    let ruleset_tests_v2 = workspace().join("crates/alint-dsl/ruleset-tests/v2");
+    let tests = support::policy_test_sources(&ruleset_tests_v2);
+    assert!(
+        !tests.is_empty(),
+        "expected at least one bundled v2 ruleset policy test under {}",
+        ruleset_tests_v2.display()
+    );
+    for (path, yaml) in &tests {
+        let test = json_of(yaml);
+        let Some(config_str) = test["given"]["config"].as_str() else {
+            continue;
+        };
+        let config = json_of(config_str);
+        assert!(uses_version_two(&config), "{}", path.display());
+        let errors = schema_errors(&config);
+        assert!(
+            errors.is_empty(),
+            "bundled v2 ruleset test {} failed schema validation:\n{}",
+            path.display(),
+            errors.join("\n")
+        );
+    }
+}

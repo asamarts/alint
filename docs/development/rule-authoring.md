@@ -120,7 +120,7 @@ intra-workspace dependency. It refreshes the crate dependency graph
 
 General rule tests live under `crates/alint-e2e/scenarios/check/<family>/`.
 Bundled-ruleset tests live under
-`crates/alint-dsl/ruleset-tests/v1/<bundle>/`. Audits walk both trees recursively.
+`crates/alint-dsl/ruleset-tests/<rev>/<bundle>/` (`v1` or `v2`). Audits walk both trees recursively.
 
 Downstream rulesets use the same public contract under `alint-tests/`. Run `alint test` from the
 package root, pass files/directories explicitly for another layout, and use
@@ -207,7 +207,7 @@ test name, or anchor it with nextest: `cargo nextest run -p <crate> -E 'test(/^<
 
 ## Adding a new bundled ruleset
 
-1. Add `crates/alint-dsl/rulesets/v1/<name>.yml`. Its first three lines must be:
+1. Add `crates/alint-dsl/rulesets/<rev>/<name>.yml` (`v1` for `version: 1`, `v2` for `version: 2`). Its first three lines must be:
    ```text
    # alint://bundled/<name>@v<rev>
    #
@@ -215,7 +215,7 @@ test name, or anchor it with nextest: `cargo nextest run -p <crate> -E 'test(/^<
    ```
    The `bundled-ruleset-has-uri-header` rule in the root `.alint.yml` enforces
    this shape, so `alint check .` catches a malformed header.
-2. Add policy tests under `crates/alint-dsl/ruleset-tests/v1/<name>/`:
+2. Add policy tests under `crates/alint-dsl/ruleset-tests/<rev>/<name>/`:
    - at least one passing document with `expect.violations: []`
    - at least one firing document with concrete expected violations
 3. Document the ruleset in `docs/rules.md`. The rule IDs in its markdown table
@@ -273,9 +273,10 @@ Constraints:
   `has_ancestor: [pom.xml, build.gradle, build.gradle.kts]` are valid; the upward
   walk stops at the first match.
 
-The directory mirrors the complete ruleset path. For example,
+The directory mirrors the complete ruleset revision and path. For example,
 `rulesets/v1/monorepo/cargo-workspace.yml` is tested under
-`ruleset-tests/v1/monorepo/cargo-workspace/`. The parity audit rejects untested bundles,
+`ruleset-tests/v1/monorepo/cargo-workspace/`, and `rulesets/v2/js/workspace-deps.yml`
+is tested under `ruleset-tests/v2/js/workspace-deps/`. The parity audit rejects untested bundles,
 orphaned test directories, and documents extending a bundle other than their owner.
 
 ## Adding a rule-kind alias

@@ -1,6 +1,6 @@
 //! v0.9.16 audit: every per-ruleset rule table in `docs/rules.md`
 //! MUST list exactly the rules the corresponding bundled YAML at
-//! `crates/alint-dsl/rulesets/v1/<ruleset>.yml` defines.
+//! `crates/alint-dsl/rulesets/<rev>/<ruleset>.yml` defines.
 //!
 //! Why this audit exists: during the v0.9.15 launch-prep validation
 //! pass, the apache-arrow case-study subagent surfaced a three-way
@@ -42,10 +42,10 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// Walk every `.yml` under `crates/alint-dsl/rulesets/v1/` (recursive)
+/// Walk every `.yml` under `crates/alint-dsl/rulesets/<rev>/` (recursive)
 /// and return `(uri, rule_ids)` for each. URI follows the existing
-/// translation: `oss-baseline.yml` → `alint://bundled/oss-baseline@v1`,
-/// `monorepo/cargo-workspace.yml` → `alint://bundled/monorepo/cargo-workspace@v1`.
+/// translation: `v1/oss-baseline.yml` -> `alint://bundled/oss-baseline@v1`,
+/// `v2/js/workspace-deps.yml` -> `alint://bundled/js/workspace-deps@v2`.
 fn collect_yaml_rulesets() -> BTreeMap<String, BTreeSet<String>> {
     let base = workspace_root().join("crates/alint-dsl/rulesets");
     let mut out = BTreeMap::new();
@@ -119,7 +119,7 @@ fn extract_yaml_rule_ids(text: &str) -> BTreeSet<String> {
 /// IDs from its rule table. Returns a map keyed by URI.
 ///
 /// Section detection: a line that starts with three hashes + space,
-/// then a backticked URI of the form `alint://bundled/.../@v1`.
+/// then a backticked URI of the form `alint://bundled/<name>@v<digits>`.
 ///
 /// Rule-ID detection inside a section: each table row whose first
 /// column is a backticked identifier. Stops on the next section
@@ -159,7 +159,9 @@ fn parse_docs_rules_md() -> BTreeMap<String, BTreeSet<String>> {
 fn parse_uri_heading(line: &str) -> Option<String> {
     let body = line.strip_prefix("### ")?.trim();
     let stripped = body.strip_prefix('`').and_then(|s| s.strip_suffix('`'))?;
-    if !stripped.starts_with("alint://bundled/") || !stripped.ends_with("@v1") {
+    let rest = stripped.strip_prefix("alint://bundled/")?;
+    let (name, rev) = rest.rsplit_once("@v")?;
+    if name.is_empty() || rev.is_empty() || !rev.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
     Some(stripped.to_string())
@@ -193,7 +195,7 @@ fn every_documented_ruleset_section_matches_its_yaml_rules() {
         let Some(yaml_ids) = yaml.get(uri) else {
             failures.push(format!(
                 "{uri}: documented in docs/rules.md but no matching ruleset YAML at \
-                 crates/alint-dsl/rulesets/v1/...; either drop the section from docs \
+                 crates/alint-dsl/rulesets/<rev>/...; either drop the section from docs \
                  or restore the YAML",
             ));
             continue;

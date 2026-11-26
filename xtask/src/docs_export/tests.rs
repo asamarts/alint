@@ -3,7 +3,7 @@ use super::cli::{
     strip_global_options, top_level_only,
 };
 use super::exported_pages::set_frontmatter_description;
-use super::rulesets::rule_sources;
+use super::rulesets::{render_ruleset_page, rule_sources};
 use super::*;
 
 /// Release-gating of rule-body prose: `<!-- alint:since=X -->` blocks are
@@ -136,6 +136,62 @@ fn copy_site_tree_release_gates_reference_prose() {
     copy_site_tree(ws.path(), out2.path(), Some((0, 14, 0))).unwrap();
     let shipped = fs::read_to_string(out2.path().join("reference/formats.md")).unwrap();
     assert!(shipped.contains("Unreleased baseline note") && !shipped.contains("alint:since"));
+}
+
+#[test]
+fn render_ruleset_page_emits_v2_selectors_relations_and_customize() {
+    let workspace = crate::bench_release::workspace_root().expect("workspace_root");
+    let yaml_path = workspace.join("crates/alint-dsl/rulesets/v2/js/workspace-deps.yml");
+    let yaml_text = fs::read_to_string(&yaml_path).expect("read js/workspace-deps@v2");
+    let yaml: ayaml::Value = alint_core::yaml::from_str(&yaml_text).expect("parse v2 ruleset");
+    let mut kind_to_family = std::collections::HashMap::new();
+    kind_to_family.insert("constraint".to_string(), "cross-file".to_string());
+
+    let page = render_ruleset_page(
+        "js/workspace-deps",
+        "v2",
+        "Dependency version consistency.",
+        &yaml_text,
+        "crates/alint-dsl/rulesets/v2/js/workspace-deps.yml",
+        &yaml,
+        &kind_to_family,
+    );
+    assert!(page.contains("## Rules\n"), "{page}");
+    assert!(page.contains("## Selectors\n"), "{page}");
+    assert!(page.contains("workspace-manifests:"), "{page}");
+    assert!(page.contains("## Relations\n"), "{page}");
+    assert!(page.contains("dependency-ranges:"), "{page}");
+    assert!(
+        page.contains("version: 2\nextends:\n  - alint://bundled/js/workspace-deps@v2\n"),
+        "expected version: 2 in Customize snippet:\n{page}"
+    );
+    assert!(!page.contains("placeholder"), "{page}");
+
+    // A v2 library-only ruleset (`rules: []` with selectors/relations) must
+    // render its selectors/relations and must NOT be labeled a placeholder.
+    let lib_yaml_text = "\
+# alint://bundled/js/shared-selectors@v2
+#
+# Shared workspace selectors.
+
+version: 2
+selectors:
+  manifests:
+    paths: 'packages/*/package.json'
+rules: []
+";
+    let lib_yaml: ayaml::Value = alint_core::yaml::from_str(lib_yaml_text).unwrap();
+    let lib_page = render_ruleset_page(
+        "js/shared-selectors",
+        "v2",
+        "Shared workspace selectors.",
+        lib_yaml_text,
+        "crates/alint-dsl/rulesets/v2/js/shared-selectors.yml",
+        &lib_yaml,
+        &kind_to_family,
+    );
+    assert!(lib_page.contains("## Selectors\n"), "{lib_page}");
+    assert!(!lib_page.contains("placeholder"), "{lib_page}");
 }
 
 /// `lead_example_with_kind` brings the matching-kind rule to the

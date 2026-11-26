@@ -177,13 +177,25 @@ impl<'p> NamedObjects<'p> {
             .sources
             .iter()
             .zip(plan.aliases_by_source())
-            .map(|(source, aliases)| NamedSource {
-                display: redact(&source.display),
-                aliases: aliases
-                    .into_iter()
-                    .map(|(consumer, alias)| (alias.name.as_str(), consumer.0))
-                    .collect(),
-                declares: false,
+            .map(|(source, aliases)| {
+                // When multiple aliases target the same source (for example a
+                // literal `extends:` and an env-chosen `extends:` in a diamond,
+                // or two env-chosen aliases resolving to the same target), omit
+                // env-chosen aliases (`url == <redacted>`) from the shared
+                // alias list so listings cannot correlate which target an
+                // environment variable resolved to.
+                let multiple = aliases.len() > 1;
+                NamedSource {
+                    display: redact(&source.display),
+                    aliases: aliases
+                        .into_iter()
+                        .filter(|(_, alias)| {
+                            !multiple || alias.url != alint_core::CONFIGURATION_MASK
+                        })
+                        .map(|(consumer, alias)| (alias.name.as_str(), consumer.0))
+                        .collect(),
+                    declares: false,
+                }
             })
             .collect();
         let objects: Vec<NamedObject<'p>> = plan

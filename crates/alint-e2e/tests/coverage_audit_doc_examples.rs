@@ -584,13 +584,22 @@ fn published_patterns_raise_no_anchor_hints() {
             }
         }
     }
-    let rulesets = root.join("crates/alint-dsl/rulesets/v1");
+    let rulesets = root.join("crates/alint-dsl/rulesets");
     for path in files_under(&rulesets, |p| p.extension().is_some_and(|e| e == "yml")) {
-        let name = path.strip_prefix(&rulesets).unwrap().with_extension("");
-        let name = name.to_string_lossy().replace('\\', "/");
+        let rel = path.strip_prefix(&rulesets).unwrap().with_extension("");
+        let rel = rel.to_string_lossy().replace('\\', "/");
+        let (rev, name) = rel
+            .split_once('/')
+            .expect("bundled ruleset lives under a <rev>/ directory");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let doc: ayaml::Value = alint_core::yaml::from_str(&text).unwrap();
+        let version = doc
+            .get("version")
+            .and_then(ayaml::Value::as_u64)
+            .unwrap_or(1);
         inline(
-            format!("bundled ruleset {name}"),
-            &format!("version: 1\nextends:\n  - alint://bundled/{name}@v1\n"),
+            format!("bundled ruleset {name}@{rev}"),
+            &format!("version: {version}\nextends:\n  - alint://bundled/{name}@{rev}\n"),
         );
     }
     for (src, config) in fixture_configs(&root) {

@@ -1011,34 +1011,36 @@ stratum JSON records under [`stratum/`](stratum/) and `version: 1` corpus config
 ### Totals against Today and Phase 8 (v0.23)
 
 Percentages are `A / (A + B + C)`. "v0.24 (B->A)" counts only promotions from `B-config` and
-`B-adapter` to clean A (cumulative from Today: 39 in Phase 8 + 28 new in v0.24 = 67). "v0.24
-(+C->A)" also counts clean promotions from C (4 in Phase 8 + 47 new in v0.24 = 51) where v0.24
-removes layout-dependent regexes, JSONC parse relaxations, hand-listed workspace/role/plugin names,
-or regex-encoded version bounds. Units that still require a synthetic constant join key, a
-layout-dependent code regex, or an unimplemented capability stay out of A.
+`B-adapter` to clean A (cumulative from Today: 39 in Phase 8 + 26 new in v0.24 = 65; note that the
+"Phase 8 (+C->A)" column includes Phase 8's 4 C->A promotions, so "v0.24 (B->A)" excludes those 4
+while "v0.24 (+C->A)" includes all C->A promotions). "v0.24 (+C->A)" also counts clean promotions
+from C (4 in Phase 8 + 46 new in v0.24 = 50) where v0.24 removes layout-dependent regexes, JSONC
+parse relaxations, hand-listed workspace/role/plugin names, or regex-encoded version bounds. Units
+that still require a synthetic constant join key, a layout-dependent code regex, non-scalar
+`entries:` filtering, or an unimplemented capability stay out of A.
 
 | Family | Units | Non-D | Today | Phase 8 (+C->A) | v0.24 (B->A) | v0.24 (+C->A) | B->C |
 |---|--:|--:|--:|--:|--:|--:|--:|
 | `locale` | 134 | 114 | 25 (22%) | 32 (28%, +7) | 35 (31%, +10) | 53 (46%, +28) | 1 |
-| `dep-version` | 170 | 104 | 45 (43%) | 59 (57%, +14) | 64 (62%, +19) | 81 (78%, +36) | 0 |
-| `toolchain-pin` | 81 | 65 | 41 (63%) | 41 (63%, +0) | 47 (72%, +6) | 53 (82%, +12) | 5 |
+| `dep-version` | 170 | 104 | 45 (43%) | 59 (57%, +14) | 63 (61%, +18) | 79 (76%, +34) | 1 |
+| `toolchain-pin` | 81 | 65 | 41 (63%) | 41 (63%, +0) | 46 (71%, +5) | 52 (80%, +11) | 6 |
 | `other` | 1,173 | 677 | 376 (56%) | 398 (59%, +22) | 408 (60%, +32) | 418 (62%, +42) | 2 |
-| **Pooled** | 1,558 | 960 | 487 (51%) | 530 (55%, +43) | 554 (58%, +67) | 605 (63%, +118) | 8 |
+| **Pooled** | 1,558 | 960 | 487 (51%) | 530 (55%, +43) | 552 (58%, +65) | 602 (63%, +115) | 10 |
 
 By stratum:
 
 | Stratum | Family | Units | Non-D | Today | Phase 8 (+C->A) | v0.24 (B->A) | v0.24 (+C->A) |
 |---|---|--:|--:|--:|--:|--:|--:|
 | i18n | `locale` | 129 | 109 | 22% | 28% (+7) | 30% (+9) | 46% (+26) |
-| i18n | `dep-version` | 57 | 22 | 50% | 55% (+1) | 59% (+2) | 68% (+4) |
-| i18n | `toolchain-pin` | 40 | 31 | 65% | 65% (+0) | 71% (+2) | 84% (+6) |
+| i18n | `dep-version` | 57 | 22 | 50% | 55% (+1) | 55% (+1) | 64% (+3) |
+| i18n | `toolchain-pin` | 40 | 31 | 65% | 65% (+0) | 68% (+1) | 81% (+5) |
 | i18n | `other` | 630 | 354 | 62% | 64% (+4) | 65% (+9) | 66% (+14) |
-| i18n | **all** | 856 | 516 | 53% | 56% (+12) | 58% (+22) | 63% (+50) |
+| i18n | **all** | 856 | 516 | 53% | 56% (+12) | 57% (+20) | 63% (+48) |
 | JavaScript monorepo | `locale` | 5 | 5 | 20% | 20% (+0) | 40% (+1) | 60% (+2) |
-| JavaScript monorepo | `dep-version` | 113 | 82 | 41% | 57% (+13) | 62% (+17) | 80% (+32) |
+| JavaScript monorepo | `dep-version` | 113 | 82 | 41% | 57% (+13) | 62% (+17) | 79% (+31) |
 | JavaScript monorepo | `toolchain-pin` | 41 | 34 | 62% | 62% (+0) | 74% (+4) | 79% (+6) |
 | JavaScript monorepo | `other` | 543 | 323 | 48% | 54% (+18) | 55% (+23) | 57% (+28) |
-| JavaScript monorepo | **all** | 702 | 444 | 48% | 55% (+31) | 58% (+45) | 63% (+68) |
+| JavaScript monorepo | **all** | 702 | 444 | 48% | 55% (+31) | 58% (+45) | 63% (+67) |
 
 ### Unit-by-unit v0.24 additions (beyond Phase 8's 43 units)
 
@@ -1046,53 +1048,56 @@ By stratum:
 
 - **New B->A (3):**
   - `element-web-06` (was Phase 8 B->C): `entries: { format: json, at: "$", leaves: true }` + `where:` value regex and allowlist `not_in:` + `count: { max: 0 }` (replacing Phase 8's awkward self-disjoint `set`).
-  - `mattermost-27` (B-config): mixed-reader `union:` of `entries` (`entry.key`) and `read: { json: "$.*.aliases[*]" }` (`value`) + `unique: { key: [form] }`.
+  - `mattermost-27` (B-config): mixed-reader `union:` of `entries` (`entry.key`) and `read: { json: "$.*.aliases[*]" }` (`optional: true` on the `read:` part, `value`) + `unique: { key: [form] }`.
   - `strapi-21` (B-config): dual binding of `entry.key` with parameterized `{ strip_suffix: [".singular", ".plural"] }` + `where:` on the raw key + `unique: { key: [file, base] }`.
 - **New C->A (18):**
   - **10 strict-JSON parse checks across 8 repositories (D7 `strict: true`):** `rocketchat-11`, `ghost-10`, `element-web-08`, `immich-03`, `mattermost-01`, `mattermost-13`, `mattermost-23`, `signal-desktop-12`, `strapi-b01`, and `zulip-04` (`strict: true` rejects JSONC comments, trailing commas, UTF-8 BOMs, and empty files; paired with `\A[ \t\r\n]*\{` where an object root is required, which is exact under RFC 8259).
   - **8 structural key-selection, closed-key-set, and `count: { max: 0 }` promotions:** `signal-desktop-01` (top-level `entries` key-only + `count: { max: 0 }`), `mattermost-29` (`entries` key-only `set: equal_to` across glossary files), `mattermost-24`, `mattermost-31`, `mattermost-34` (`entries` at `$.*` key-only + `set: { subset_of: { values: [...] } }` replacing layout-dependent 2/4-space key regexes), `mattermost-17` (blank values scoped to `en.json` keys via `where: { key: { in: [...] } }` + `count: { max: 0 }`), `ghost-11` (`entries` key-only brace check + `count: { max: 0 }`), and `nextcloud-03` (`entries` key-only on `$.translations` + `count: { max: 0 }` paired with `json_path_absent` `$.translations..[?search(@, "\\|")]`, structurally ignoring `pluralForm`).
 - **Notable non-promotions (honest bounds):** `element-web-05` remains B (`compare: { op: ne }` solves negated equality, while `entry.path` joins with `.` rather than `|`); `mattermost-32` remains B (`entries:` eagerly validates non-scalar sibling `aliases` arrays before `where:` runs, while `records:` has no `entry.key`); `mattermost-05` and `mattermost-14` stay C (polymorphic scalar/object values or non-string entries on unreferenced keys fail `entries:` before `where:`); `mattermost-b01` stays B->C (Go slice regex).
 
-#### `dep-version` (+8 new B->A, +14 new C->A; 0 B->C)
+#### `dep-version` (+7 new B->A, +13 new C->A; 1 B->C)
 
-- **New B->A (8):**
+- **New B->A (7):**
   - `fluentui-24`, `trpc-07` (B-config): per-group cross-relation `set: { group_by: manifest, subset_of: { relation: ..., group_by: manifest } }` (or composite `reference`).
   - `babel-12` (was Phase 8 B->C): inner `join` of non-`condition:` `dependencies` and `devDependencies` + `count: { max: 0 }`.
   - `babel-17`, `trpc-10` (B-adapter `entry-values`, `reference`): default `catalog:` via single-key `reference` to `$.catalog`, and named `catalog:<name>` via `{ strip_prefix: "catalog:" }` + composite `reference: { fields: [catalog, dep] }` against `entries` on `$.catalogs.*` (`entry.parent`, `entry.key`).
-  - `nextcloud-b02` (B-adapter `entry-values`): Phase 8's equality half paired with `{ strip_prefix: "$" }` + `reference` against direct dependencies for `$<name>` overrides.
   - `forem-07` (B-adapter `version-compare`): `read: { regex: ... }` on canonical `Gemfile.lock` spec lines + `compare: { op: ge, order: semver }`.
   - `trpc-06` (B-adapter `version-compare`): `join` of non-protocol internal dependency ranges with workspace manifest versions + `satisfies: { version: version, range: range, dialect: node }`.
-- **New C->A (14):**
+- **New C->A (13):**
   - Dynamic workspace/role/catalog rules removing hand-listed package names and layout regexes: `tq-13` (optional `bound: $.private` + `count: { max: 0 }`), `tq-15` (YAML `$.catalog` keys + `reference`), `backstage-07`, `backstage-08`, `backstage-09`, `backstage-10`, `backstage-11` (optional `bound: $.backstage.role` + `set: disjoint_from`), `jest-27` (`entries` + `{ split: { on: "/", part: 1 } }` on `dir` + `set: equal_to`), `strapi-07`, `trpc-11`, `trpc-12`, and `yarnpkg-berry-02`.
-  - Semver floor/ceiling rules removing hand-encoded version regexes: `fluentui-08` (`satisfies: { range_literal: "^2.1.3" }`) and `ghost-35` (`satisfies: { range_literal: "<9" }` on MySQL image tags).
-- **Notable non-promotions:** `fluentui-31` remains B (needs range-subset `semver.subset`, not version-in-range `satisfies`); `fluentui-07` and `rushstack-b11` stay C (`satisfies` tests membership, not range-syntax validity); `rushstack-03` and `rushstack-04` stay C (`decoupledLocalDependencies` is a nested array inside `$.projects[*]`, which `records:` does not flatten); `backstage-a01` remains B (Yarn chained-patch descriptor grammar); `rushstack-01`, `rushstack-02`, `tq-11`, `wsdk-06`, and `fluentui-18` remain B.
+  - Semver ceiling rule removing a hand-encoded version regex: `ghost-35` (`satisfies: { range_literal: "<9" }` on MySQL image tags).
+- **Notable non-promotions:**
+  - `nextcloud-b02` moves **B->C** (not A): flat `$.overrides` works via Phase 8's `join` + `equal` paired with `{ strip_prefix: "$" }` + `reference` for `$<name>` overrides (including cross-package `"a": "$b"` references), but npm overrides allow nested object values (such as `build/frontend-legacy/package.json`), which fail `entries:` before `where:` runs (same ruling as keeping `mattermost-05`/`14`/`32` out of A).
+  - `fluentui-08` stays **C** (alongside `fluentui-31` in B): `satisfies` checks version-in-range membership and rejects a passing `"^2.1.3"` dependency range; verifying range-within-range requires `semver.subset`.
+  - `fluentui-07` and `rushstack-b11` stay C (`satisfies` tests membership, not range-syntax validity); `rushstack-03` and `rushstack-04` stay C (`decoupledLocalDependencies` is a nested array inside `$.projects[*]`, which `records:` does not flatten); `backstage-a01` remains B (Yarn chained-patch descriptor grammar); `rushstack-01`, `rushstack-02`, `tq-11`, `wsdk-06`, and `fluentui-18` remain B.
 
-#### `toolchain-pin` (+6 new B->A, +6 new C->A; 5 new B->C)
+#### `toolchain-pin` (+5 new B->A, +6 new C->A; 6 new B->C)
 
-- **New B->A (6, all `version-compare`):**
+- **New B->A (5, all `version-compare`):**
   - Same-file `bound:` + `satisfies`: `tq-03`, `wsdk-55`, `trpc-03` (`packageManager` with `{ strip_prefix: "pnpm@" }` against `bound: $.engines.pnpm`).
-  - Same-directory `join` on `dir` + `satisfies`: `immich-52` (`mobile/mise.toml` Flutter pin vs `mobile/pubspec.yaml` `environment.flutter`) and `immich-53` (`machine-learning/.python-version` vs `machine-learning/pyproject.toml` `requires-python` under `dialect: pep440-basic`).
+  - Same-directory `join` on `dir` + `satisfies`: `immich-53` (`machine-learning/.python-version` vs `machine-learning/pyproject.toml` `requires-python` under `dialect: pep440-basic`).
   - Same-relation `union:` + `compare: { order: semver, op: le, to: { row: ... } }`: `rushstack-55` (`rush.json` `rushVersion` vs `libraries/rush-lib/package.json` `version` under `semver-minor`).
 - **New C->A (6):**
   - `rocketchat-17` (root-dir `join` on `dir` of `.yarnrc.yml` `yarnPath` with `strip_prefix`/`strip_suffix` against `package.json` `engines.yarn` + `satisfies`), `ghost-27` (`satisfies` `pep440-basic` `>=3.10,<3.14`), `ghost-34` (`compare: { op: lt, order: semver, to: { value: "4.6.14" } }`), `mattermost-41` (same-file `strip_prefix: "npm@"` + `bound: $.engines.npm` + `equal`), `fluentui-03` (`union:` + `strip_prefix`/`strip_suffix` + `equal`), and `rushstack-07` (`compare: { op: ge, order: semver, to: { value: "5.0.0" } }`).
-- **Binary-verification finding (5 B->C, 2 remain B, 1 stays C):**
-  - `satisfies` reads `version` and `range` from one row of its `input:` relation (no cross-relation `range: { relation: ..., field: ... }` target or singleton broadcast). Four cross-directory M x 1 units (`rocketchat-16`, `wsdk-56`, `rushstack-06`, `immich-11`) can join via a synthetic constant key (`strip_suffix` to `""`) and `backstage-74` still parses `createApp.ts` via regex, so all five move **B->C** rather than A. `element-web-13` (M x N cross-directory pins vs workspace `engines.node`) and `rocketchat-80` (range-vs-range floor `^11.15.0 >= 11.5.1`) remain **B**. `thunderbird-android-b04` stays **C** because v2 `read:` intentionally omits `.properties` to preserve default value redaction.
+- **Binary-verification finding (6 B->C, 2 remain B, 1 stays C):**
+  - `immich-52` (`mobile/mise.toml` Flutter pin vs `mobile/pubspec.yaml` `environment.flutter`) moves **B->C** rather than A: Dart pubspec syntax uses space-separated bounds (`>=3.47.9 <4.0.0`) or bare exact pins, and under `dialect: node` a bare `"3.47.9"` means `=3.47.9` rather than `>=3.47.9`, while `compare: { op: ge }` cannot parse Dart range strings.
+  - `satisfies` reads `version` and `range` from one row of its `input:` relation (no cross-relation `range: { relation: ..., field: ... }` target or singleton broadcast). Four cross-directory singleton-broadcast (`M x 1` / `1 x N`) units (`rocketchat-16`, `wsdk-56`, `rushstack-06`, and `1 x N` `immich-11`) can join only via a synthetic constant key (`strip_suffix` to `""`), and `backstage-74` still parses `createApp.ts` via regex, so all five move **B->C** rather than A. `element-web-13` (M x N cross-directory pins vs workspace `engines.node`) and `rocketchat-80` (range-vs-range floor `^11.15.0 >= 11.5.1`) remain **B**. `thunderbird-android-b04` stays **C** because v2 `read:` intentionally omits `.properties` to preserve default value redaction.
 
 #### `other` (+11 new B->A, +9 new C->A; 2 B->C)
 
 - **New B->A (11):**
-  - `mattermost-56`, `zulip-28` (B-config): dedicated `no_duplicate_keys` rule kind (D6), catching nested non-leaf and sequence-element YAML duplicates that Phase 8 found `entries: leaves: true` missed.
+  - `mattermost-56`, `zulip-28` (B-config): dedicated `no_duplicate_keys` rule kind (D6), catching nested non-leaf and sequence-element YAML duplicates that Phase 8 found `entries: leaves: true` missed (`zulip-28` pairs with `zulip-yaml-parses` / `yaml_path_absent` for the single-document requirement).
   - `ghost-63` (was Phase 8 B->C): inline `set: { subset_of: { values: [extras, futureHome, lifecycle] } }` replaces self-disjoint `set`.
-  - `babel-50` (B-config): `union:` of `$.plugins[?match(@, '^@babel/(plugin|preset)-')]` and `$.plugins[*][0]` (plus presets) with `strip_prefix`/`prefix` + `set: disjoint_from` monorepo package dirs.
-  - `backstage-26` (B-config): optional `bound:` + `{ strip_suffix: "-module" }` + composite `reference: { fields: [plugin_id, role, target] }`.
+  - `babel-50` (B-config): `union:` of `$.plugins[?search(@, '^@babel/(plugin|preset)-')]`, `$.presets[?search(@, '^@babel/(plugin|preset)-')]`, `$.plugins[?search(@[0], '^@babel/(plugin|preset)-')][0]`, and `$.presets[?search(@[0], '^@babel/(plugin|preset)-')][0]` (each part `optional: true`) with `strip_prefix`/`prefix` + `set: disjoint_from` monorepo package dirs (verified on the binary so unprefixed `["preset-env", {}]` passes while `["@babel/preset-env", {}]` fails).
+  - `backstage-26` (B-config): dual-bound `raw_role` + `target_role` (`{ strip_suffix: "-module" }`) with `where: { raw_role: { matches: "-module$" } }`, `optional: true, on_missing: missing` on `pluginId`/`pluginPackage` (so missing `pluginPackage` fails under `skip_missing: false`), and composite `reference: { fields: [plugin_id, target_role, target_pkg] }` against in-repo plugin packages (external npm plugin fallback stays out of scope, matching the repo's workspace-local packages).
   - `jest-28` (B-config): `{ prefix: "version-" }` + `{ split: { on: "/", part: 2 } }` / `{ strip_suffix: "-sidebars" }` + `reference`.
-  - `trpc-24` (B-config): `records:` array-of-objects extraction (`$[?@.source == 'github']`, `$[?@.source == 'opencollective']`) + `unique:`.
-  - `thunderbird-android-55` (B-adapter `entry-values`): `records:` on `$.flags[*]` + `entries:` on `$.overrides.*` + `join:` + `compare: { op: ne }`.
-  - `ghost-55` (B-adapter `version-compare`): `union:` of migration directory `parent_name` and `ghost/package.json` `version` + `compare: { op: le, order: semver, to: { row: ... } }` (exact for release `major.minor.patch` versions; prerelease core versions would need major.minor stripping).
-  - `rushstack-32` (B-adapter `version-compare`): `records:` on `rush.json` lockstep members + `union:` with `version-policies.json` + `compare: { op: le, order: semver, to: { row: ... } }`.
+  - `trpc-24` (B-config): `records:` on `$[*]` enforcing `source` in `{ values: [github, opencollective] }` paired with per-source `records:` (`$[?@.source == 'github']` on `login`, `$[?@.source == 'opencollective']` on `slug`) + `unique:` (verified so unknown sources fail and matching handles across different sources pass).
+  - `thunderbird-android-55` (B-adapter `entry-values`): `records:` on `$.flags[*]` + `entries:` on 2-level `$.overrides.*.*` + `join:` + `compare: { op: ne }`.
+  - `ghost-55` (B-adapter `version-compare`): `union:` of `migrations/versions/*/**` (`dir`) and `ghost/package.json` (`$.version`) with `strip_prefix` + `{ split: { on: "/", part: 0 } }` + `{ split: { on: "-", part: 0 } }` + `where: { ver: { matches: '^[0-9]+\.[0-9]+(\.[0-9]+)?$' } }` + `compare: { op: le, order: semver, to: { row: ... } }` (verified on the binary with prerelease `6.1.0-alpha.1`, nested migration subdirs, and non-version `init/` directories skipped).
+  - `rushstack-32` (B-adapter `version-compare`): 2-step chained `join:` (`rush.json` `records:` on `$.projects[?@.versionPolicyName]` joined with `**/package.json` `$.version` on `projectFolder == dir`, then joined with `version-policies.json` `records:` on `$[?@.definitionName == 'lockStepVersion']` on `policyName`) + `compare: { op: le, order: semver, to: { field: target } }`.
   - `rocketchat-44` (B-adapter `derived-value`): `{ strip_suffix: ".dir" }` on `stem` + `reference` against `glyphsMapping.json` keys.
 - **New C->A (9):**
-  - `ghost-44` (`entries` at `$[*]` key-only + inline `values:`), `ghost-b09` (`records:` + composite `unique: [rule, from, to]`), `ghost-42` (optional `bound: $.private` with `on_missing: missing` + `where: not_in` + `count: { max: 0 }`), `babel-26` (anchor-free `equal: { field: ver }`), `forem-19` (`count: { exact: 2 }` / `exact: 1`), `rushstack-26` (`records:` + `where: in / not_in` + `count: { max: 0 }`), `rushstack-b12` (`entries` key-only + `count: { max: 0 }`), `yarnpkg-berry-18` (mixed-reader `union:` of YAML `$.releases` keys and `$.declined[*]` + `reference`, handling flow-style YAML), and `yarnpkg-berry-19` (`reference` on `file` tying dynamically discovered `bundles.standard` releases to `@yarnpkg/cli` bumps).
+  - `ghost-44` (`entries` at `$[*]` key-only + inline `values:`), `ghost-b09` (`records:` + composite `unique: [rule, from, to]`), `ghost-42` (optional `bound: $.private` with `on_missing: missing` + `where: not_in` + `count: { max: 0 }`), `babel-26` (anchor-free `equal: { field: ver }`), `forem-19` (`optional: true` on the regex `read:` relation so zero-match files form zero-row `group_by: file` groups and fail `count: { exact: 1 }` / `exact: 2`), `rushstack-26` (`records:` + `where: in / not_in` + `count: { max: 0 }`), `rushstack-b12` (`entries` key-only + `count: { max: 0 }`), `yarnpkg-berry-18` (split into two `reference` rules handling flow-style YAML: `$.releases` keys against versioned workspaces filtered via `bound: $.version` `optional: true, on_missing: skip`, and `$.declined[*]` with `optional: true` against all workspaces so unversioned `@yarnpkg/docusaurus` passes in `declined` and fails in `releases`), and `yarnpkg-berry-19` (`reference` on `file` tying dynamically discovered `bundles.standard` releases to `@yarnpkg/cli` bumps).
 - **Notable non-promotions:** `backstage-25` remains B (per-group `set` handles membership, but sorted array order is still missing); `yarnpkg-berry-17` remains B (multi-version-file `dep-edges` x `releases` join has neither side unique on `dep`); `forem-29` and `ghost-68` remain B (parent-key-filtered array elements); `forem-b08` remains B (needs `replace` transform); `forem-25`, `forem-48`, `rushstack-47`, `ghost-67`, `mattermost-b06`/`-b07`/`-b08`, `zulip-cc-75` remain B; `strapi-59` and `trpc-27` stay B->C.
 
 ### Bundled `version: 2` adoption (D10)

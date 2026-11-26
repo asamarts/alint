@@ -37,6 +37,8 @@ pub(crate) struct SourceContext<'a> {
     /// How the config this one is read for is named, for an error about the
     /// edge between the two (a version 1 config extending a version 2 one).
     consumer_display: Option<&'a str>,
+    /// The source class of the config this one is read for, when known.
+    consumer_class: Option<ConfigSourceClass>,
     /// Whether an `extends:` entry read from the environment chose this
     /// source or one it is read for: where it lies tells what the
     /// environment holds, so every local source below such an entry is
@@ -53,12 +55,18 @@ impl<'a> SourceContext<'a> {
             source_class,
             consumer_version,
             consumer_display: None,
+            consumer_class: None,
             environment_chosen: false,
         }
     }
 
     const fn consumed_by(mut self, display: &'a str) -> Self {
         self.consumer_display = Some(display);
+        self
+    }
+
+    const fn consumer_class(mut self, class: ConfigSourceClass) -> Self {
+        self.consumer_class = Some(class);
         self
     }
 
@@ -75,6 +83,7 @@ impl<'a> SourceContext<'a> {
     {
         crate::v2::Origin::new(self.source_class, display)
             .consumer(self.consumer_version, self.consumer_display)
+            .consumer_class(self.consumer_class)
     }
 }
 
@@ -1286,6 +1295,7 @@ pub(crate) fn load_recursive(
                 trusted,
                 SourceContext::new(ConfigSourceClass::LocalExtend, config.version)
                     .consumed_by(&display)
+                    .consumer_class(context.source_class)
                     .chosen_by_environment(context.environment_chosen),
             )?,
         };
@@ -1598,6 +1608,8 @@ fn load_extended_source(
     let chosen = context.environment_chosen;
     let mut source_display = if kind.is_url() {
         remote_source_display(url)
+    } else if let ExtendsEntryKind::Bundled(spec) = kind {
+        format!("alint://bundled/{spec}")
     } else {
         url.to_string()
     };
@@ -1653,7 +1665,8 @@ fn load_extended_source(
         if bundled.surface == crate::v2::Surface::V2 {
             let bundled_origin =
                 crate::v2::Origin::new(ConfigSourceClass::Bundled, &bundled_display)
-                    .consumer(consumer_version, context.consumer_display);
+                    .consumer(consumer_version, context.consumer_display)
+                    .consumer_class(context.consumer_class);
             crate::v2::refuse_v2_edge(&bundled_origin)?;
         }
         validate_source_compatibility(
@@ -1996,7 +2009,7 @@ fn decode_bundled(
     let (expansion, expanded) = yaml_guards.expansion_and_size(body);
     if !yaml_guards.flow_within_limit() || !expansion.within_limit_for_ayaml() {
         return Err(Error::internal(format!(
-            "built-in ruleset '{spec}' exceeds a maximum supported YAML complexity limit"
+            "built-in ruleset '{display}' exceeds a maximum supported YAML complexity limit"
         )));
     }
     // Bundled rulesets may be `version: 1` or `version: 2` (ADR-0050 D10,
@@ -2017,9 +2030,16 @@ fn decode_bundled(
         if surface == crate::v2::Surface::V2 {
             let document = document.ok_or_else(|| {
                 Error::internal(format!(
-                    "built-in version 2 ruleset '{spec}' did not produce a YAML document"
+                    "built-in version 2 ruleset '{display}' did not produce a YAML document"
                 ))
             })?;
+            reject_nonliteral_requirement_in_value(body, display, &document)
+                .map_err(|error| Error::internal(error.to_string()))?;
+            if value_reads_environment(&document) {
+                return Err(Error::internal(format!(
+                    "built-in version 2 ruleset '{display}' references environment variables"
+                )));
+            }
             crate::v2::check_document(&document, body, display)
                 .map_err(|error| Error::internal(error.to_string()))?;
             let (mut config, v2_keys) = decode_value(document, crate::v2::Surface::V2)
@@ -2028,8 +2048,13 @@ fn decode_bundled(
             // attaching internal v2 field-origin and inline-input markers.
             crate::reject_ambiguous_yaml_in(&config, display)
                 .map_err(|e| Error::internal(e.to_string()))?;
-            crate::reject_env_expansion_in(&config.rules, &config.templates, display)
-                .map_err(|e| Error::internal(e.to_string()))?;
+            crate::trust::reject_env_expansion_in_source(
+                &config.rules,
+                &config.templates,
+                display,
+                "a bundled ruleset",
+            )
+            .map_err(|e| Error::internal(e.to_string()))?;
             config.surface = crate::v2::Surface::V2;
             let locator = alint_core::relation::plan::SourceLocator::Bundled(format!(
                 "alint://bundled/{spec}"
@@ -2051,14 +2076,28 @@ fn decode_bundled(
                 // A ruleset shipped *inside* the binary failing to parse is an
                 // alint bug, not the user's config — Internal → CLI exit 3 (M11).
                 Error::internal(format!(
-                    "built-in ruleset '{spec}' failed to parse: {error}"
+                    "built-in ruleset '{display}' failed to parse: {error}"
                 ))
             }
             other => Error::internal(other.to_string()),
         }
     })?;
+    if body.contains("{{")
+        && decode_text::<ayaml::Value>(body).is_ok_and(|doc| value_reads_environment(&doc))
+    {
+        return Err(Error::internal(format!(
+            "built-in ruleset '{display}' references environment variables"
+        )));
+    }
     crate::reject_ambiguous_yaml_in(&config, display)
         .map_err(|e| Error::internal(e.to_string()))?;
+    crate::trust::reject_env_expansion_in_source(
+        &config.rules,
+        &config.templates,
+        display,
+        "a bundled ruleset",
+    )
+    .map_err(|e| Error::internal(e.to_string()))?;
     Ok(RawConfig {
         source_size: source_size(body, expanded),
         ..config

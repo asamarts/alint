@@ -87,7 +87,7 @@ fn config_schema_descriptions_have_no_em_dash() {
 #[test]
 fn bundled_rule_messages_have_no_em_dash() {
     let root = workspace_root();
-    let rulesets = root.join("crates/alint-dsl/rulesets/v1");
+    let rulesets = root.join("crates/alint-dsl/rulesets");
     let mut offenders = Vec::new();
     scan_bundled_messages(&root, &rulesets, &mut offenders);
     offenders.sort();

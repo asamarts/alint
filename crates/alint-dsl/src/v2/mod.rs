@@ -1,14 +1,16 @@
-//! `version: 2` of the configuration language: experimental in v0.23
-//! (ADR-0034 decision 1, as ADR-0037 decision 3 corrects it).
+//! `version: 2` of the configuration language: experimental in v0.23 and v0.24
+//! (ADR-0034 decision 1, as ADR-0037 decision 3 corrects it, extended by
+//! ADR-0050 D10 for bundled `version: 2` rulesets).
 //!
 //! The loader reads a source's top-level `version:` before any typed decode
 //! and dispatches on it ([`dispatch`]). A v2 source accepts every v1 key with
 //! its v1 meaning, plus `selectors:`, `relations:` and an `extends:` entry's
 //! `as:`; in a v1 source each of those is an error that names the version it
-//! needs. v2 sources are local files: the top-level config, local `extends:`
-//! targets and `.alint.d` fragments. Bundled and remote sources, nested
-//! configs and `alint_dsl::parse` input must be `version: 1`, and a v1 source
-//! never extends a v2 one (ADR-0022's direction rule).
+//! needs. v2 sources are local files (the top-level config, local `extends:`
+//! targets and `.alint.d` fragments) and compiled-in bundled rulesets
+//! (`alint://bundled/...`). Remote sources, nested configs and
+//! `alint_dsl::parse` input must be `version: 1`, and a v1 source never
+//! extends a v2 one (ADR-0022's direction rule).
 //!
 //! The decoded selectors and relations ride on the loader's merged config
 //! with the source that declared each ([`Objects`]). Once every source has
@@ -75,6 +77,9 @@ pub(crate) struct Origin<'a> {
     pub(crate) consumer_version: Option<u32>,
     /// How that config is named.
     pub(crate) consumer_display: Option<&'a str>,
+    /// The source class of that extending config, when known (used to tailor
+    /// remediation hints for `.alint.d` drop-ins).
+    pub(crate) consumer_class: Option<ConfigSourceClass>,
 }
 
 impl<'a> Origin<'a> {
@@ -84,6 +89,7 @@ impl<'a> Origin<'a> {
             display,
             consumer_version: None,
             consumer_display: None,
+            consumer_class: None,
         }
     }
 
@@ -91,6 +97,12 @@ impl<'a> Origin<'a> {
     pub(crate) const fn consumer(mut self, version: Option<u32>, display: Option<&'a str>) -> Self {
         self.consumer_version = version;
         self.consumer_display = display;
+        self
+    }
+
+    #[must_use]
+    pub(crate) const fn consumer_class(mut self, class: Option<ConfigSourceClass>) -> Self {
+        self.consumer_class = class;
         self
     }
 }
@@ -201,12 +213,12 @@ const fn may_be_v2(class: ConfigSourceClass) -> bool {
 fn v1_only_class(class: ConfigSourceClass) -> &'static str {
     match class {
         ConfigSourceClass::Remote => "a remote `extends:` source",
-        ConfigSourceClass::Bundled => "a bundled ruleset",
         ConfigSourceClass::Nested => "a nested config (`nested_configs:`)",
         ConfigSourceClass::Inline => "a config parsed from a string (`alint_dsl::parse`)",
-        ConfigSourceClass::Root | ConfigSourceClass::DropIn | ConfigSourceClass::LocalExtend => {
-            "a local config"
-        }
+        ConfigSourceClass::Root
+        | ConfigSourceClass::DropIn
+        | ConfigSourceClass::LocalExtend
+        | ConfigSourceClass::Bundled => "a local config or bundled ruleset",
     }
 }
 
@@ -263,8 +275,8 @@ pub(crate) fn plainly_v1(config: &crate::RawConfig, origin: &Origin<'_>) -> bool
 pub(crate) fn unsupported_version(version: u32) -> String {
     if version == VERSION {
         "unsupported config version 2 as written: only a literal `version: 2` in a local config \
-         file selects the experimental version 2 (a version read from the environment is \
-         version 1)"
+         file or bundled ruleset selects the experimental version 2 (a version read from the \
+         environment is version 1)"
             .to_string()
     } else {
         format!(
@@ -414,9 +426,14 @@ pub(crate) fn refuse_v2_edge(origin: &Origin<'_>) -> Result<()> {
             if !crate::loader::source_version_allowed(consumer, VERSION) =>
         {
             let consumer_display = origin.consumer_display.unwrap_or("the extending config");
+            let upgrade_target = if origin.consumer_class == Some(ConfigSourceClass::DropIn) {
+                "the root config"
+            } else {
+                consumer_display
+            };
             Err(Error::Other(format!(
                 "{display}: a version {consumer} config ({consumer_display}) cannot extend this \
-                 version {VERSION} bundled ruleset; give {consumer_display} `version: {VERSION}`"
+                 version {VERSION} bundled ruleset; give {upgrade_target} `version: {VERSION}`"
             )))
         }
         _ => Ok(()),

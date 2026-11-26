@@ -69,6 +69,12 @@ rules:
 
 `alint list` shows the union of the inherited rules with your override applied; `alint check` runs the Rust rules only if the tree actually has Rust.
 
+<!-- alint:since=0.24.0 -->
+### Version 2 bundled rulesets
+
+Starting in v0.24, bundled rulesets may also use `version: 2` (for example `alint://bundled/js/workspace-deps@v2` for JS/TS monorepo dependency range consistency). Adopting a `version: 2` bundled ruleset requires `version: 2` in your `.alint.yml` (a `version: 1` config cannot extend a `version: 2` source), and you can attach `as: <alias>` on the `extends:` entry to reference its exported selectors and relations (`<alias>.<name>`) from your own `constraint` rules.
+<!-- /alint:since -->
+
 ## Going deeper
 
 - [Bundled rulesets reference](/docs/bundled-rulesets/) documents every ruleset and the rules it contains.

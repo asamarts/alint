@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # T1.2 (v0.9.20): audit bundled-rule message lengths.
 #
-# Walks every `crates/alint-dsl/rulesets/v1/**/*.yml`, extracts each
+# Walks every `crates/alint-dsl/rulesets/**/*.yml`, extracts each
 # rule's `message:` field, and reports any whose effective text is
 # too long for a single wrapped line at MSG_INDENT (14 cols) on an
 # 80-col terminal.
@@ -36,7 +36,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-RULESETS_DIR="$REPO_ROOT/crates/alint-dsl/rulesets/v1"
+RULESETS_DIR="$REPO_ROOT/crates/alint-dsl/rulesets"
 
 cd "$REPO_ROOT"
 

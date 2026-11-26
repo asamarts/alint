@@ -103,3 +103,87 @@ fn the_human_listing_names_each_source_once_with_its_aliases() {
         r#"{"sources":[{"aliases":[{"alias":"a0","in":1},{"alias":"a1","in":1}],"path":"p/a.yml"},{"aliases":[],"path":".alint.yml"}],"selectors":[{"name":"s0","source":0},{"name":"s1","source":0}],"relations":[]}"#
     );
 }
+
+#[test]
+fn env_chosen_aliases_do_not_correlate_with_sibling_aliases() {
+    let make_plan = |aliases: Vec<PlanAlias>| Plan {
+        sources: vec![
+            PlanSource {
+                display: alint_core::CONFIGURATION_MASK.into(),
+                locator: SourceLocator::Bundled("alint://bundled/js/workspace-deps@v2".into()),
+                class: ConfigSourceClass::Bundled,
+                aliases: Vec::new(),
+            },
+            PlanSource {
+                display: ".alint.yml".into(),
+                locator: SourceLocator::Local(PathBuf::from("/repo/.alint.yml")),
+                class: ConfigSourceClass::Root,
+                aliases,
+            },
+        ],
+        selectors: vec![NamedSelector {
+            name: "s0".into(),
+            source: SourceIndex(0),
+            selector: SelectorDef {
+                paths: alint_core::PathsSpec::Single("x".into()),
+                scope_filter: None,
+            },
+            capabilities: Capabilities::default(),
+            reads_environment: false,
+        }],
+        ..Plan::default()
+    };
+
+    // Public + env-chosen diamond: env_ws is omitted so listings never fuse it
+    // onto pub_ws's target source.
+    let mixed = make_plan(vec![
+        PlanAlias {
+            name: "pub_ws".into(),
+            url: "alint://bundled/js/workspace-deps@v2".into(),
+            target: Some(SourceIndex(0)),
+        },
+        PlanAlias {
+            name: "env_ws".into(),
+            url: alint_core::CONFIGURATION_MASK.into(),
+            target: Some(SourceIndex(0)),
+        },
+    ]);
+    let [human, json, markdown] = listings(&mixed);
+    for (what, out) in [
+        ("human", &without_styles(&human)),
+        ("json", &json),
+        ("markdown", &markdown),
+    ] {
+        assert!(out.contains("pub_ws"), "{what}: {out}");
+        assert!(
+            !out.contains("env_ws"),
+            "{what} must not fuse env_ws with pub_ws: {out}"
+        );
+    }
+
+    // Two env-chosen aliases targeting the same source: neither is fused, so
+    // listings never reveal `env.A == env.B`.
+    let both_env = make_plan(vec![
+        PlanAlias {
+            name: "env_a".into(),
+            url: alint_core::CONFIGURATION_MASK.into(),
+            target: Some(SourceIndex(0)),
+        },
+        PlanAlias {
+            name: "env_b".into(),
+            url: alint_core::CONFIGURATION_MASK.into(),
+            target: Some(SourceIndex(0)),
+        },
+    ]);
+    let [human, json, markdown] = listings(&both_env);
+    for (what, out) in [
+        ("human", &without_styles(&human)),
+        ("json", &json),
+        ("markdown", &markdown),
+    ] {
+        assert!(
+            !out.contains("env_a") && !out.contains("env_b"),
+            "{what} must not correlate env_a and env_b: {out}"
+        );
+    }
+}

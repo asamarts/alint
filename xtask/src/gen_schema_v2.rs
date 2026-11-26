@@ -457,8 +457,8 @@ fn add_properties(properties: &mut Map<String, Value>) -> Result<()> {
     extends.insert(
         "description".into(),
         Value::from(format!(
-            "{extends_description} In a version 2 config, a local entry may also take `as: \
-             <alias>`, through which this config reaches the selectors and relations that \
+            "{extends_description} In a version 2 config, a local or bundled entry may also take \
+             `as: <alias>`, through which this config reaches the selectors and relations that \
              source declares as `<alias>.<name>`."
         )),
     );
@@ -511,8 +511,8 @@ fn name_and_selector_defs(v1_defs: &Map<String, Value>) -> Result<Vec<(String, V
                 "type": "string",
                 "pattern": format!("^{NAME}(\\.{NAME})?$"),
                 "description": "A selector or relation: a name this config file declares, or \
-                    `alias.name` for one that the file an `extends:` entry gives `as: alias` \
-                    declares itself (no re-export, no `a.b.c` chain).",
+                    `alias.name` for one that the local file or bundled ruleset an `extends:` \
+                    entry gives `as: alias` declares itself (no re-export, no `a.b.c` chain).",
             }),
         ),
         ("v2_extends_entry".into(), extends_entry(v1_defs)?),

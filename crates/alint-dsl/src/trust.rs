@@ -1850,6 +1850,17 @@ pub(crate) fn reject_env_expansion_in(
     templates: &[Mapping],
     source: &str,
 ) -> Result<()> {
+    reject_env_expansion_in_source(rules, templates, source, "a remote ruleset")
+}
+
+/// Like [`reject_env_expansion_in`], naming `source_kind` (for example
+/// `"a remote ruleset"` or `"a bundled ruleset"`) in the refusal.
+pub(crate) fn reject_env_expansion_in_source(
+    rules: &[Mapping],
+    templates: &[Mapping],
+    source: &str,
+    source_kind: &str,
+) -> Result<()> {
     fn offending(m: &Mapping) -> Option<String> {
         let has_env = |v: &ayaml::Value| v.as_str().is_some_and(|s| s.contains("${"));
         if m.get("since").is_some_and(has_env) {
@@ -1874,7 +1885,7 @@ pub(crate) fn reject_env_expansion_in(
             let id = m.get("id").and_then(|v| v.as_str()).unwrap_or("(unknown)");
             return Err(Error::Other(format!(
                 "{id:?}: `{field}` references an environment variable (`${{...}}`), which \
-                 a remote ruleset ({source}) may not read; set the value in your own \
+                 {source_kind} ({source}) may not read; set the value in your own \
                  top-level config instead"
             )));
         }

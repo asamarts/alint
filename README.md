@@ -211,7 +211,7 @@ alint is an eleven-crate Cargo workspace. Seven crates publish to crates.io: `al
 `alint-core` (the engine API), `alint-testkit` (the versioned policy-test model and hermetic
 runner), plus the internal implementation crates `alint-dsl`, `alint-rules`, `alint-output`, and
 `alint-lsp`. General policy tests live under `crates/alint-e2e/scenarios/`; bundled ruleset tests
-live beside their owners under `crates/alint-dsl/ruleset-tests/v1/`. CLI snapshots run through
+live beside their owners under `crates/alint-dsl/ruleset-tests/<rev>/`. CLI snapshots run through
 `trycmd`, and CI jobs use scripts under `ci/scripts/`.
 
 ## License

@@ -5,7 +5,7 @@
 //! `python` / `go` / `java` / `compliance/*` as not-yet-shipped long
 //! after all five shipped — the same status-drift class as the public
 //! roadmap mislabelling WASM as the latest release. This gate ties the
-//! claim to the surface area: any `alint://bundled/<name>@v1` that
+//! claim to the surface area: any `alint://bundled/<name>@v<rev>` that
 //! appears under a heading containing "planned" must NOT be present in
 //! `facts.json`'s `bundled_rulesets` (the shipped catalogue). If it is,
 //! it shipped and the "Planned" copy is stale.
@@ -33,7 +33,7 @@ fn shipped_rulesets() -> BTreeSet<String> {
         .collect()
 }
 
-/// Pull the `<name>` out of `alint://bundled/<name>@v1`.
+/// Pull the `<name>` out of `alint://bundled/<name>@v<rev>`.
 fn ruleset_name(line: &str) -> Option<String> {
     let start = line.find("alint://bundled/")? + "alint://bundled/".len();
     let rest = &line[start..];
@@ -64,9 +64,9 @@ fn no_planned_section_lists_a_shipped_ruleset() {
                 && shipped.contains(&name)
             {
                 stale.push(format!(
-                    "{rel}:{}: `alint://bundled/{name}@v1` is under a \
+                    "{rel}:{}: `alint://bundled/{name}@...` is under a \
                      \"Planned\" heading but is in facts.json \
-                     (it shipped) — update the status copy.",
+                     (it shipped) -- update the status copy.",
                     i + 1
                 ));
             }

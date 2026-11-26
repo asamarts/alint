@@ -37,7 +37,8 @@ version: 1
 Each source is checked before it is merged. `version: 2` is experimental: it adds named selectors
 and relations, and may change in any release until one declares it stable (see
 [Version 2 (experimental)](/docs/configuration/version-2/)). A version 2 config may extend version
-1 and version 2 files; a version 1 config never extends a version 2 one.
+1 and version 2 local files and compiled-in bundled rulesets (`alint://bundled/...`); a version 1
+config never extends a version 2 source.
 
 ### `requires`
 
