@@ -144,8 +144,7 @@ impl PinnedReferencesRule {
                 )];
             }
         };
-        let line_index = LineIndex::new(text);
-        let mut collector = Collector::new(self, path, &document, &line_index);
+        let mut collector = Collector::new(self, path, &document, text);
         let collection = match format {
             InputFormat::GithubActions => {
                 collect_github_actions(&mut collector);
@@ -1079,7 +1078,8 @@ struct Collector<'a> {
     rule: &'a PinnedReferencesRule,
     path: Arc<Path>,
     document: &'a YamlDocument,
-    line_index: &'a LineIndex<'a>,
+    text: &'a str,
+    line_index: Option<LineIndex<'a>>,
     findings: Vec<Violation>,
     seen_spans: HashSet<(usize, usize, usize, usize, String)>,
 }
@@ -1089,13 +1089,14 @@ impl<'a> Collector<'a> {
         rule: &'a PinnedReferencesRule,
         path: &Path,
         document: &'a YamlDocument,
-        line_index: &'a LineIndex<'a>,
+        text: &'a str,
     ) -> Self {
         Self {
             rule,
             path: Arc::from(path),
             document,
-            line_index,
+            text,
+            line_index: None,
             findings: Vec::new(),
             seen_spans: HashSet::new(),
         }
@@ -1198,7 +1199,10 @@ impl<'a> Collector<'a> {
     }
 
     fn push(&mut self, reference: ScalarRef<'_>, selector: &str, message: &'static str) {
-        let span = FindingSpan::from_yaml(reference.span, self.line_index);
+        let line_index = self
+            .line_index
+            .get_or_insert_with(|| LineIndex::new(self.text));
+        let span = FindingSpan::from_yaml(reference.span, line_index);
         let key = span.map_or_else(
             || (0, 0, 0, 0, selector.to_owned()),
             |span| {

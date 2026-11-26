@@ -41,7 +41,15 @@ pub(crate) use options_schema_for;
 /// to reported paths.
 #[must_use]
 pub(crate) fn slash(path: impl AsRef<std::path::Path>) -> String {
-    path.as_ref().display().to_string().replace('\\', "/")
+    let path = path.as_ref();
+    if let Some(s) = path.to_str() {
+        return if s.contains('\\') {
+            s.replace('\\', "/")
+        } else {
+            s.to_owned()
+        };
+    }
+    path.to_string_lossy().replace('\\', "/")
 }
 
 /// One policy violation for a structured extractor that selected values a

@@ -1200,7 +1200,7 @@ fn locate_repeated_key_span_pass(
                 {
                     let resolved = scalar_anchors.get(anchor.as_str());
                     if *matched_depth == Some(parent_path.len()) {
-                        if resolved.is_some_and(&key_matches) {
+                        if resolved.is_some_and(key_matches) {
                             if seen_target_key {
                                 return Some(span);
                             }

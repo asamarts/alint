@@ -241,6 +241,9 @@ impl LoadState {
     /// The subset of [`Self::config_files`] reachable only via an
     /// environment-chosen `extends:` entry, in load order.
     pub(crate) fn environment_config_files(&self) -> Vec<PathBuf> {
+        if self.env_chosen_config_files.is_empty() {
+            return Vec::new();
+        }
         self.config_files
             .iter()
             .filter(|path| self.env_chosen_config_files.contains(*path))

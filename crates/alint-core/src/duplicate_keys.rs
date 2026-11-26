@@ -24,7 +24,10 @@ pub struct DuplicateKey {
     pub key: Arc<str>,
     /// Optional canonical key identity used for stable, type-aware baseline
     /// keys (set for YAML Core Schema typed keys so `1` and `"1"` stay distinct
-    /// while `true`/`True` and `1`/`0x1` share one baseline key).
+    /// while `true`/`True` and `1`/`0x1` share one baseline key). Keys whose
+    /// canonical token exceeds 128 bytes are hashed once (`sha256:...`) so
+    /// aliased multi-megabyte YAML keys never amplify memory or CPU across
+    /// repeats.
     pub canonical_key: Option<Arc<str>>,
     /// Optional INI section name enclosing the duplicate key.
     pub section: Option<Arc<str>>,
@@ -119,6 +122,55 @@ enum YamlKey {
     Tagged(Arc<str>, Box<Self>),
 }
 
+/// Maximum raw canonical-token byte length retained inline before switching to
+/// a 71-byte `sha256:<hex>` digest (matches `alint-rules`'s `bounded_key_token`).
+const MAX_INLINE_CANONICAL_TOKEN_BYTES: usize = 128;
+
+enum BoundedTokenSink {
+    Inline(String),
+    Hashed(sha2::Sha256),
+}
+
+impl BoundedTokenSink {
+    fn new() -> Self {
+        Self::Inline(String::new())
+    }
+
+    fn push_str(&mut self, chunk: &str) {
+        use sha2::Digest as _;
+        match self {
+            Self::Inline(buf) => {
+                if buf.len().saturating_add(chunk.len()) <= MAX_INLINE_CANONICAL_TOKEN_BYTES {
+                    buf.push_str(chunk);
+                } else {
+                    let mut hasher = sha2::Sha256::new();
+                    hasher.update(buf.as_bytes());
+                    hasher.update(chunk.as_bytes());
+                    *self = Self::Hashed(hasher);
+                }
+            }
+            Self::Hashed(hasher) => hasher.update(chunk.as_bytes()),
+        }
+    }
+
+    fn finish(self) -> Arc<str> {
+        use sha2::Digest as _;
+        use std::fmt::Write as _;
+        match self {
+            Self::Inline(buf) => Arc::from(buf),
+            Self::Hashed(hasher) => {
+                let digest = hasher.finalize();
+                let mut out = String::with_capacity(7 + 64);
+                out.push_str("sha256:");
+                for b in digest {
+                    let _ = write!(out, "{b:02x}");
+                }
+                Arc::from(out)
+            }
+        }
+    }
+}
+
 impl YamlKey {
     fn from_core_scalar(scalar: crate::yaml::CoreScalar) -> Self {
         use crate::yaml::CoreScalar;
@@ -132,16 +184,33 @@ impl YamlKey {
         }
     }
 
-    fn canonical_token(&self) -> String {
+    fn write_canonical_token(&self, sink: &mut BoundedTokenSink) {
         match self {
-            Self::Null => "null".to_string(),
-            Self::Bool(b) => format!("bool:{b}"),
-            Self::Uint(u) => format!("uint:{u}"),
-            Self::NegInt(i) => format!("neg:{i}"),
-            Self::Float(bits) => format!("float:{bits:016x}"),
-            Self::String(s) => format!("str:{s}"),
-            Self::Tagged(tag, inner) => format!("tag:{tag}:{}", inner.canonical_token()),
+            Self::Null => sink.push_str("null"),
+            Self::Bool(b) => sink.push_str(if *b { "bool:true" } else { "bool:false" }),
+            Self::Uint(u) => sink.push_str(&format!("uint:{u}")),
+            Self::NegInt(i) => sink.push_str(&format!("neg:{i}")),
+            Self::Float(bits) => sink.push_str(&format!("float:{bits:016x}")),
+            Self::String(s) => {
+                sink.push_str("str:");
+                sink.push_str(s);
+            }
+            Self::Tagged(tag, inner) => {
+                sink.push_str("tag:");
+                sink.push_str(tag);
+                sink.push_str(":");
+                inner.write_canonical_token(sink);
+            }
         }
+    }
+
+    /// Return the canonical baseline token for this key, streaming directly
+    /// into SHA-256 without materializing an intermediate buffer when the
+    /// canonical form exceeds [`MAX_INLINE_CANONICAL_TOKEN_BYTES`].
+    fn bounded_canonical_token(&self) -> Arc<str> {
+        let mut sink = BoundedTokenSink::new();
+        self.write_canonical_token(&mut sink);
+        sink.finish()
     }
 }
 
@@ -235,7 +304,8 @@ enum YamlFrame {
     Mapping {
         anchor: Option<String>,
         expecting_key: bool,
-        seen: HashMap<Arc<YamlKey>, ByteSpan>,
+        /// Maps each seen key to `(first_span, lazily cached bounded canonical token)`.
+        seen: HashMap<Arc<YamlKey>, (ByteSpan, Option<Arc<str>>)>,
     },
     Sequence {
         anchor: Option<String>,
@@ -279,19 +349,21 @@ impl YamlWalk {
         }) = self.stack.last_mut()
             && *expecting_key
         {
-            if let Some(&first) = seen.get(&key_id) {
+            if let Some((first, canonical_slot)) = seen.get_mut(&key_id) {
                 if !self.scan.capped {
-                    let canonical = Arc::from(key_id.canonical_token());
+                    let canonical = Arc::clone(
+                        canonical_slot.get_or_insert_with(|| key_id.bounded_canonical_token()),
+                    );
                     self.scan.push(DuplicateKey {
                         key: display,
                         canonical_key: Some(canonical),
                         section: None,
                         duplicate: key_span,
-                        first,
+                        first: *first,
                     });
                 }
             } else {
-                seen.insert(key_id, key_span);
+                seen.insert(key_id, (key_span, None));
             }
             *expecting_key = false;
         }
@@ -644,22 +716,32 @@ fn scan_properties(text: &str) -> Result<DuplicateScan, String> {
 // ---------------------------------------------------------------------------
 
 fn scan_ini(text: &str) -> Result<DuplicateScan, String> {
+    type SectionBucket<'a> = (
+        Option<Arc<str>>,
+        HashMap<&'a str, (ByteSpan, Option<Arc<str>>)>,
+    );
     let mut scan = DuplicateScan::default();
-    let mut seen: HashMap<(Option<String>, String), ByteSpan> = HashMap::new();
+    let mut sections: HashMap<Option<&str>, SectionBucket<'_>> = HashMap::new();
     crate::ini::for_each_entry(text, |entry| {
-        let scope = (entry.section.map(str::to_string), entry.key.to_string());
-        if let Some(&first) = seen.get(&scope) {
+        let (section_arc, keys) = sections
+            .entry(entry.section)
+            .or_insert_with(|| (None, HashMap::new()));
+        if let Some((first, key_arc)) = keys.get_mut(entry.key) {
             if !scan.capped {
+                let shared_section = entry
+                    .section
+                    .map(|s| Arc::clone(section_arc.get_or_insert_with(|| Arc::from(s))));
+                let shared_key = Arc::clone(key_arc.get_or_insert_with(|| Arc::from(entry.key)));
                 scan.push(DuplicateKey {
-                    key: Arc::from(entry.key),
+                    key: shared_key,
                     canonical_key: None,
-                    section: entry.section.map(Arc::from),
+                    section: shared_section,
                     duplicate: entry.key_span,
-                    first,
+                    first: *first,
                 });
             }
         } else {
-            seen.insert(scope, entry.key_span);
+            keys.insert(entry.key, (entry.key_span, None));
         }
     })?;
     Ok(scan)
@@ -757,15 +839,52 @@ fn scan_hcl_expr(expr: &hcl::edit::expr::Expression, offset: usize, scan: &mut D
                 }
                 pending.push(&f.intro.collection_expr);
             }
-            E::Traversal(t) => pending.push(&t.expr),
-            E::Null(_)
-            | E::Bool(_)
-            | E::Number(_)
-            | E::String(_)
-            | E::Variable(_)
-            | E::StringTemplate(_)
-            | E::HeredocTemplate(_) => {}
+            E::Traversal(t) => {
+                for op in t.operators.iter().rev() {
+                    if let hcl::edit::expr::TraversalOperator::Index(idx_expr) = op.value() {
+                        pending.push(idx_expr);
+                    }
+                }
+                pending.push(&t.expr);
+            }
+            E::StringTemplate(t) => push_hcl_template_exprs(t, &mut pending),
+            E::HeredocTemplate(t) => push_hcl_template_exprs(&t.template, &mut pending),
+            E::Null(_) | E::Bool(_) | E::Number(_) | E::String(_) | E::Variable(_) => {}
         }
+    }
+}
+
+fn push_hcl_template_exprs<'a>(
+    template: &'a hcl::edit::template::Template,
+    pending: &mut Vec<&'a hcl::edit::expr::Expression>,
+) {
+    use hcl::edit::template::{Directive, Element};
+
+    let mut templates: Vec<&'a hcl::edit::template::Template> = vec![template];
+    let mut exprs: Vec<&'a hcl::edit::expr::Expression> = Vec::new();
+    while let Some(cur) = templates.pop() {
+        for elem in cur {
+            match elem {
+                Element::Literal(_) => {}
+                Element::Interpolation(interp) => exprs.push(&interp.expr),
+                Element::Directive(dir) => match dir.as_ref() {
+                    Directive::If(if_dir) => {
+                        exprs.push(&if_dir.if_expr.cond_expr);
+                        if let Some(else_expr) = &if_dir.else_expr {
+                            templates.push(&else_expr.template);
+                        }
+                        templates.push(&if_dir.if_expr.template);
+                    }
+                    Directive::For(for_dir) => {
+                        exprs.push(&for_dir.for_expr.collection_expr);
+                        templates.push(&for_dir.for_expr.template);
+                    }
+                },
+            }
+        }
+    }
+    for expr in exprs.into_iter().rev() {
+        pending.push(expr);
     }
 }
 
@@ -975,7 +1094,70 @@ abc: 5
         assert_eq!(scan.duplicates[0].key.as_ref(), "foo");
         assert_eq!(scan.duplicates[1].key.as_ref(), "foo");
         assert!(scan.duplicates[0].duplicate.start > scan.duplicates[0].first.start);
+        // Mixed duplicate object keys inside HCL template interpolations,
+        // directives, heredocs, and traversal index expressions are caught too.
+        let hcl_nested = concat!(
+            "s = \"${jsonencode({ a = 1, \"a\" = 2 })}\"\n",
+            "t = a[{ b = 1, \"b\" = 2 }]\n",
+            "h = <<EOF\n%{if true}${jsonencode({ c = 1, \"c\" = 2 })}%{endif}\nEOF\n",
+        );
+        let nested_scan = find_duplicate_keys(Format::Hcl, hcl_nested, false).unwrap();
+        let nested_keys: Vec<&str> = nested_scan
+            .duplicates
+            .iter()
+            .map(|d| d.key.as_ref())
+            .collect();
+        assert_eq!(nested_keys, ["a", "b", "c"]);
         assert!(find_duplicate_keys(Format::Xml, "<r><a/><a/></r>", false).is_err());
+    }
+
+    #[test]
+    fn large_ini_section_and_aliased_yaml_keys_share_allocations_and_hash_once() {
+        use std::fmt::Write as _;
+
+        // Large INI section with thousands of unique + repeated keys must borrow
+        // from input and share one Arc<str> per duplicated section/key.
+        let big_sec = "s".repeat(64 * 1024);
+        let mut ini = format!("[{big_sec}]\n");
+        for i in 0..2_000 {
+            let _ = writeln!(ini, "k{i} = 1");
+        }
+        for _ in 0..200 {
+            ini.push_str("k0 = 2\n");
+        }
+        let ini_scan = find_duplicate_keys(Format::Ini, &ini, false).unwrap();
+        assert_eq!(ini_scan.duplicates.len(), 200);
+        let first_sec = ini_scan.duplicates[0].section.as_ref().unwrap();
+        let first_key = &ini_scan.duplicates[0].key;
+        for dup in &ini_scan.duplicates[1..] {
+            assert!(Arc::ptr_eq(first_sec, dup.section.as_ref().unwrap()));
+            assert!(Arc::ptr_eq(first_key, &dup.key));
+        }
+
+        // Large anchored YAML scalar aliased as a mapping key 1,050 times must
+        // share one pre-hashed bounded canonical_key (71-byte sha256:...)
+        // instead of allocating 1,000 copies of the raw key.
+        let big_key = "k".repeat(256 * 1024);
+        let mut yaml = format!("anchor_holder: &a \"{big_key}\"\n*a: 1\n");
+        for _ in 0..(MAX_DUPLICATES_PER_FILE + 50) {
+            yaml.push_str("*a: 1\n");
+        }
+        let yaml_scan = find_duplicate_keys(Format::Yaml, &yaml, false).unwrap();
+        assert_eq!(yaml_scan.duplicates.len(), MAX_DUPLICATES_PER_FILE);
+        assert!(yaml_scan.capped);
+        let first_canon = yaml_scan.duplicates[0].canonical_key.as_ref().unwrap();
+        assert!(
+            first_canon.starts_with("sha256:") && first_canon.len() == 71,
+            "expected bounded sha256 canonical key, got len={}",
+            first_canon.len()
+        );
+        for dup in &yaml_scan.duplicates[1..] {
+            assert!(Arc::ptr_eq(
+                first_canon,
+                dup.canonical_key.as_ref().unwrap()
+            ));
+            assert!(Arc::ptr_eq(&yaml_scan.duplicates[0].key, &dup.key));
+        }
     }
 
     #[test]

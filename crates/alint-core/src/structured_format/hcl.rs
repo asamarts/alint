@@ -27,6 +27,7 @@
 
 use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
+use std::rc::Rc;
 
 use serde::Deserialize as _;
 use serde_json::{Map, Value};
@@ -56,6 +57,11 @@ pub(crate) const MAX_HCL_OBJECT_WORK: u64 = 64_000_000;
 /// = 64 MiB). Admits dozens of legitimate empty heredocs (`<<EOF\nEOF`) inside
 /// multi-MiB Terraform files while strictly bounding worst-case rescan work.
 const MAX_HCL_RESCAN_BYTES: usize = 16 * MAX_HCL_BYTES;
+
+/// Maximum deferred empty-heredoc backtrack branches explored across one file.
+/// Bounds peak worklist memory even when ambiguous empty heredocs with template
+/// markers cluster near EOF (where each branch's remaining byte cost is small).
+const MAX_HCL_BACKTRACK_BRANCHES: usize = 512;
 
 /// Maximum nesting depth of object literals opened inside an enclosing object
 /// literal's key expression (`{ { ... } = 1 }`). Bounds `hcl-edit`'s `VecMap::eq`
@@ -124,7 +130,7 @@ fn is_hcl_id_continue(c: char) -> bool {
     c == '_' || c == '-' || unicode_ident::is_xid_continue(c)
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum WidthScope {
     /// Inside a root or block body (`locals { ... }`, `resource "t" "n" { ... }`).
     /// `in_expr` is `true` while scanning an attribute's RHS expression (so `{`
@@ -190,7 +196,11 @@ enum WidthScope {
         /// no later body-terminated delimiter exists or a template element
         /// backtracks.
         seen_body_line: bool,
-        empty_close: Option<usize>,
+        /// Line-1 empty-heredoc fallback `(resume_at, scope_snapshot)`. Held
+        /// directly inside the active heredoc scope via `Rc` so non-backtracking
+        /// heredocs reclaim their snapshot immediately on close instead of
+        /// accumulating across the file.
+        empty_close: Option<(usize, Rc<[WidthScope]>)>,
         /// Whether an unescaped `${` or `%{` appeared inside this heredoc (only
         /// template markers can trigger mid-file winnow `opt(...)` backtracking).
         saw_marker: bool,
@@ -198,9 +208,6 @@ enum WidthScope {
         /// backtrack so scanned expressions inside the discarded branch are not
         /// double-charged.
         work_at_open: u64,
-        /// Index into the scanner's snapshot table storing the scope stack right
-        /// after this heredoc would close empty on line 1.
-        snapshot_idx: Option<usize>,
     },
     /// Inside a `%{if ...}...%{endif}` or `%{for ...}...%{endfor}` directive
     /// body, where `hcl-edit` (`parser/template.rs`) ignores `"` and outer
@@ -209,7 +216,7 @@ enum WidthScope {
 }
 
 /// Deferred empty-heredoc branch `(scopes, resume_at, work_at_open)`.
-type BacktrackBranch = (Vec<WidthScope>, usize, u64);
+type BacktrackBranch = (Rc<[WidthScope]>, usize, u64);
 
 fn push_scope(scopes: &mut Vec<WidthScope>, scope: WidthScope) -> Result<(), String> {
     if scopes.len() >= MAX_HCL_SCAN_DEPTH {
@@ -478,21 +485,21 @@ fn scan_heredoc_scope(
     text: &str,
     i: &mut usize,
     scopes: &mut Vec<WidthScope>,
-    snapshots: &mut Vec<Vec<WidthScope>>,
+    rescan_budget: &mut usize,
+    backtrack_branches: &mut usize,
     worklist: &mut Vec<BacktrackBranch>,
 ) -> Result<(), String> {
-    let WidthScope::Heredoc {
+    let Some(&WidthScope::Heredoc {
         tag_start,
         tag_end,
         seen_body_line,
-        empty_close,
-        saw_marker,
-        work_at_open,
-        snapshot_idx,
-    } = *scopes.last().expect("caller matched Heredoc")
+        ref empty_close,
+        ..
+    }) = scopes.last()
     else {
         return Ok(());
     };
+    let has_empty_close = empty_close.is_some();
     let b = text.as_bytes();
     let n = b.len();
     let tag = &b[tag_start..tag_end];
@@ -500,15 +507,30 @@ fn scan_heredoc_scope(
         && let Some(after) = match_heredoc_delimiter(text, *i, tag)
     {
         if seen_body_line {
+            let popped = scopes.pop();
             // If an unescaped `${` / `%{` appeared inside this heredoc after an
             // empty-heredoc candidate on line 1, `hcl-edit`'s `opt(...)` could
-            // have backtracked mid-file (e.g. `%{x}`, `${<}`, `${"`). Queue the
-            // empty-close branch so both interpretations are bounded.
-            if saw_marker && let (Some(resume_at), Some(idx)) = (empty_close, snapshot_idx) {
-                worklist.push((snapshots[idx].clone(), resume_at, work_at_open));
+            // have backtracked mid-file (e.g. `%{x}`, `${<}`, `${"`). Charge the
+            // rescan and branch budgets eagerly before queueing so adversarial
+            // inputs cannot accumulate unbounded worklist memory.
+            if let Some(WidthScope::Heredoc {
+                saw_marker: true,
+                empty_close: Some((resume_at, snap)),
+                work_at_open,
+                ..
+            }) = popped
+            {
+                let cost = n.saturating_sub(resume_at);
+                if *backtrack_branches >= MAX_HCL_BACKTRACK_BRANCHES || cost > *rescan_budget {
+                    return Err(format!(
+                        "HCL heredoc backtracking exceeds the maximum supported complexity ({MAX_HCL_RESCAN_BYTES} bytes)"
+                    ));
+                }
+                *backtrack_branches += 1;
+                *rescan_budget -= cost;
+                worklist.push((snap, resume_at, work_at_open));
             }
             *i = after;
-            scopes.pop();
             set_expr_op(scopes, false, false);
             return Ok(());
         }
@@ -516,20 +538,13 @@ fn scan_heredoc_scope(
         // empty-heredoc fallback (matching `hcl-edit`'s `opt(...)` in
         // `heredoc_template`) and continue scanning for a greedy body-line
         // terminator.
-        if empty_close.is_none() {
+        if !has_empty_close {
             let mut snap = scopes.clone();
             snap.pop();
             set_expr_op(&mut snap, false, false);
-            let idx = snapshots.len();
-            snapshots.push(snap);
-            if let Some(WidthScope::Heredoc {
-                empty_close,
-                snapshot_idx,
-                ..
-            }) = scopes.last_mut()
-            {
-                *empty_close = Some(after);
-                *snapshot_idx = Some(idx);
+            let snap: Rc<[WidthScope]> = Rc::from(snap);
+            if let Some(WidthScope::Heredoc { empty_close, .. }) = scopes.last_mut() {
+                *empty_close = Some((after, snap));
             }
         }
     }
@@ -656,7 +671,6 @@ fn scan_heredoc_opener(
                     empty_close: None,
                     saw_marker: false,
                     work_at_open: total_work,
-                    snapshot_idx: None,
                 },
             )?;
             return Ok(());
@@ -1001,19 +1015,19 @@ fn scan_code_token(
         }
         _ => {
             note_object_key_token(scopes, *i);
-            if let Some(first) = text[*i..].chars().next()
-                && is_hcl_id_start(first)
-            {
-                // Consume a complete HCL identifier (including `-` and Unicode
-                // XID continue chars) so hyphenated block types/labels like
-                // `env us-east-1 { ... }` and trailing-`-` identifiers never
-                // trip the binary `-` operator path.
+            if let Some(first) = text[*i..].chars().next() {
                 *i += first.len_utf8();
-                while let Some(ch) = text[*i..].chars().next() {
-                    if is_hcl_id_continue(ch) {
-                        *i += ch.len_utf8();
-                    } else {
-                        break;
+                if is_hcl_id_start(first) {
+                    // Consume a complete HCL identifier (including `-` and Unicode
+                    // XID continue chars) so hyphenated block types/labels like
+                    // `env us-east-1 { ... }` and trailing-`-` identifiers never
+                    // trip the binary `-` operator path.
+                    while let Some(ch) = text[*i..].chars().next() {
+                        if is_hcl_id_continue(ch) {
+                            *i += ch.len_utf8();
+                        } else {
+                            break;
+                        }
                     }
                 }
             } else {
@@ -1036,7 +1050,7 @@ fn check_object_width(text: &str) -> Result<(), String> {
     let mut i = 0usize;
     let mut total_work = 0u64;
     let mut rescan_budget = MAX_HCL_RESCAN_BYTES;
-    let mut snapshots: Vec<Vec<WidthScope>> = Vec::new();
+    let mut backtrack_branches = 0usize;
     let mut worklist: Vec<BacktrackBranch> = Vec::new();
     let mut scopes: Vec<WidthScope> = vec![WidthScope::BlockBrace {
         in_expr: false,
@@ -1046,13 +1060,20 @@ fn check_object_width(text: &str) -> Result<(), String> {
 
     loop {
         while i < n {
-            match *scopes.last().expect("root BlockBrace always present") {
+            match scopes.last().expect("root BlockBrace always present") {
                 WidthScope::String => scan_string_scope(text, &mut i, &mut scopes)?,
                 WidthScope::TemplateDirective => {
                     scan_directive_body_scope(b, &mut i, &mut scopes)?;
                 }
                 WidthScope::Heredoc { .. } => {
-                    scan_heredoc_scope(text, &mut i, &mut scopes, &mut snapshots, &mut worklist)?;
+                    scan_heredoc_scope(
+                        text,
+                        &mut i,
+                        &mut scopes,
+                        &mut rescan_budget,
+                        &mut backtrack_branches,
+                        &mut worklist,
+                    )?;
                 }
                 WidthScope::BlockBrace { .. }
                 | WidthScope::ObjectBrace { .. }
@@ -1078,20 +1099,22 @@ fn check_object_width(text: &str) -> Result<(), String> {
                 }
             )
         }) && let WidthScope::Heredoc {
-            empty_close: Some(resume_at),
+            empty_close: Some((resume_at, snap)),
             work_at_open,
-            snapshot_idx: Some(snap_idx),
             ..
-        } = scopes[heredoc_idx]
+        } = &scopes[heredoc_idx]
         {
+            let resume_at = *resume_at;
+            let work_at_open = *work_at_open;
             let cost = n.saturating_sub(resume_at);
-            if cost > rescan_budget {
+            if backtrack_branches >= MAX_HCL_BACKTRACK_BRANCHES || cost > rescan_budget {
                 return Err(format!(
                     "HCL heredoc backtracking exceeds the maximum supported complexity ({MAX_HCL_RESCAN_BYTES} bytes)"
                 ));
             }
+            backtrack_branches += 1;
             rescan_budget -= cost;
-            scopes = snapshots[snap_idx].clone();
+            scopes = snap.to_vec();
             total_work = work_at_open;
             i = resume_at;
             continue;
@@ -1100,15 +1123,9 @@ fn check_object_width(text: &str) -> Result<(), String> {
         // Also scan any deferred empty-heredoc branch recorded when a heredoc
         // containing `${` / `%{` markers closed on a later line (covering
         // mid-file winnow `opt(...)` backtracking such as `# %{x}` or `# ${<}`).
+        // Its rescan and branch budgets were already charged eagerly on push.
         if let Some((next_scopes, resume_at, work_at_open)) = worklist.pop() {
-            let cost = n.saturating_sub(resume_at);
-            if cost > rescan_budget {
-                return Err(format!(
-                    "HCL heredoc backtracking exceeds the maximum supported complexity ({MAX_HCL_RESCAN_BYTES} bytes)"
-                ));
-            }
-            rescan_budget -= cost;
-            scopes = next_scopes;
+            scopes = next_scopes.to_vec();
             total_work = work_at_open;
             i = resume_at;
             continue;
@@ -1282,5 +1299,48 @@ fn edit_key_expr_to_string(expr: hcl::edit::expr::Expression) -> Result<String, 
         E::Array(_) => Err("invalid type: sequence, expected a string".to_string()),
         E::Object(_) => Err("invalid type: map, expected a string".to_string()),
         other => String::deserialize(hcl::Expression::from(other)).map_err(|e| e.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn non_ascii_non_identifier_punctuation_never_panics() {
+        for input in [
+            "a = “smart”\n",
+            "a = 1 — 2\n",
+            "a = €100\n",
+            "a = 🔥\n",
+            "a =\u{00a0}1\n",
+            "“\n",
+        ] {
+            // Must return Ok/Err cleanly — never panic on a UTF-8 continuation byte.
+            let _ = check_limits(input);
+            let _ = hcl_to_value(input);
+        }
+    }
+
+    #[test]
+    fn repeated_empty_heredoc_candidates_stay_bounded_in_memory() {
+        // Vector 2A: non-marker heredocs matching line 1 must reclaim snapshots
+        // immediately on close rather than retaining O(N * depth) snapshots.
+        let mut no_marker = "(".repeat(250);
+        no_marker.push('\n');
+        for _ in 0..4_000 {
+            no_marker.push_str("<<A\nA\nA\n");
+        }
+        assert!(check_limits(&no_marker).is_ok());
+
+        // Vector 2B: marker-bearing ambiguous heredocs near EOF must hit the
+        // eager branch/rescan cap before queueing unbounded worklist entries.
+        let mut with_marker = "(".repeat(250);
+        with_marker.push('\n');
+        for _ in 0..2_000 {
+            with_marker.push_str("<<A\nA${}\nA\n");
+        }
+        let err = check_limits(&with_marker).unwrap_err();
+        assert!(err.contains("HCL heredoc backtracking"), "got: {err}");
     }
 }

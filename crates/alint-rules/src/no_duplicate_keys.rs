@@ -245,6 +245,9 @@ impl NoDuplicateKeysRule {
         let ranges = resolve_duplicate_ranges(text, &scan.duplicates);
         let mut violations = Vec::with_capacity(scan.duplicates.len() + usize::from(scan.capped));
         let path_arc: Arc<Path> = Arc::from(path);
+        // Memoize SHA-256 baseline tokens for large (>128 B) shared Arc<str>
+        // keys/sections within this immutable `scan` so 1,000 repeats hash once.
+        let mut long_token_cache: HashMap<(usize, usize), String> = HashMap::new();
 
         for (dup, (dup_range, first_range)) in scan.duplicates.iter().zip(ranges) {
             violations.push(self.build_finding(
@@ -254,6 +257,7 @@ impl NoDuplicateKeysRule {
                 dup,
                 dup_range,
                 first_range,
+                &mut long_token_cache,
             ));
         }
 
@@ -271,6 +275,7 @@ impl NoDuplicateKeysRule {
         violations
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn build_finding(
         &self,
         format: Format,
@@ -279,6 +284,7 @@ impl NoDuplicateKeysRule {
         dup: &DuplicateKey,
         dup_range: Option<SourceRange>,
         first_range: Option<SourceRange>,
+        long_token_cache: &mut HashMap<(usize, usize), String>,
     ) -> Violation {
         let msg = if let Some(custom) = &self.message {
             custom.clone()
@@ -320,11 +326,11 @@ impl NoDuplicateKeysRule {
             finding = finding.with_related_location(rel);
         }
         let baseline_key_src = dup.canonical_key.as_deref().unwrap_or(dup.key.as_ref());
-        let baseline_key_part = bounded_key_token(baseline_key_src);
-        let baseline_sec_part = dup
-            .section
-            .as_deref()
-            .map_or_else(String::new, bounded_key_token);
+        let baseline_key_part = cached_bounded_key_token(baseline_key_src, long_token_cache);
+        let baseline_sec_part = dup.section.as_deref().map_or_else(
+            || std::borrow::Cow::Borrowed(""),
+            |sec| cached_bounded_key_token(sec, long_token_cache),
+        );
         let baseline = format!(
             "dup\u{0}{}\u{0}{baseline_sec_part}\u{0}{baseline_key_part}",
             format.label(),
@@ -356,6 +362,21 @@ fn escape_display_truncated(raw: &str, max_chars: usize) -> String {
         }
     }
     out
+}
+
+fn cached_bounded_key_token<'a>(
+    raw: &'a str,
+    cache: &mut HashMap<(usize, usize), String>,
+) -> std::borrow::Cow<'a, str> {
+    if raw.len() <= 128 {
+        return std::borrow::Cow::Borrowed(raw);
+    }
+    let key = (raw.as_ptr() as usize, raw.len());
+    let token = cache
+        .entry(key)
+        .or_insert_with(|| bounded_key_token(raw))
+        .clone();
+    std::borrow::Cow::Owned(token)
 }
 
 fn bounded_key_token(raw: &str) -> String {

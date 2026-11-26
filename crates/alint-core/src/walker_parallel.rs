@@ -188,7 +188,10 @@ impl Ancestors {
 struct WalkCtx {
     canonical_walk_root: Option<PathBuf>,
     canonical_confinement_root: Option<PathBuf>,
-    overrides: Override,
+    /// Compiled `ignore::overrides::Override` when `extra_ignores` is non-empty;
+    /// `None` uses the exact-name `.git` fast path with zero globset build or
+    /// matching overhead.
+    overrides: Option<Override>,
     respect_gitignore: bool,
     bounded: bool,
     /// Ignore files of directories above `canonical_walk_root`, nearest first.
@@ -208,7 +211,7 @@ impl WalkCtx {
     fn new(
         canonical_walk_root: Option<PathBuf>,
         canonical_confinement_root: Option<PathBuf>,
-        overrides: Override,
+        overrides: Option<Override>,
         respect_gitignore: bool,
         bounded: bool,
         parents: Vec<DirIgnores>,
@@ -331,10 +334,17 @@ impl WalkCtx {
         is_dir: bool,
         chain: Option<&IgnoreNode>,
     ) -> bool {
-        match self.overrides.matched(abs, is_dir) {
-            Match::Ignore(_) => return true,
-            Match::Whitelist(_) => return false,
-            Match::None => {}
+        match &self.overrides {
+            Some(overrides) => match overrides.matched(abs, is_dir) {
+                Match::Ignore(_) => return true,
+                Match::Whitelist(_) => return false,
+                Match::None => {}
+            },
+            None => {
+                if abs.file_name() == Some(OsStr::new(".git")) {
+                    return true;
+                }
+            }
         }
         if !self.respect_gitignore {
             return false;
@@ -410,7 +420,11 @@ fn init_walk(
     confinement_root: &Path,
     opts: &WalkOptions,
 ) -> Result<Option<(WalkCtx, Vec<RawChild>, Option<Arc<IgnoreNode>>, Vec<String>)>> {
-    let overrides = build_overrides(root, opts)?;
+    let overrides = if opts.extra_ignores.is_empty() {
+        None
+    } else {
+        Some(build_overrides(root, opts)?)
+    };
 
     // Canonicalize once up front (reused for parent ignores, symlink
     // confinement, and cycle detection).
