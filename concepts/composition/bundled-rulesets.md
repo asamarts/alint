@@ -69,6 +69,7 @@ rules:
 
 `alint list` shows the union of the inherited rules with your override applied; `alint check` runs the Rust rules only if the tree actually has Rust.
 
+
 ## Going deeper
 
 - [Bundled rulesets reference](/docs/bundled-rulesets/) documents every ruleset and the rules it contains.
