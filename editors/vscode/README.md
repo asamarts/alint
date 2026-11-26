@@ -48,10 +48,10 @@ The extension follows VS Code's
 In Restricted Mode, alint lints without running anything the
 repository's `.alint.yml` could start: command rules, rules that run Git
 and `custom:` facts are skipped, a remote `extends:` is not fetched,
-and `{{env.*}}` values are left unset. The workspace's own `alint.path`
-and `alint.serverArgs` are ignored, and **alint: Show effective rules** is
-off. Granting trust restarts the server with all of them on, exactly as
-before.
+`allow_out_of_root:` is refused, and `{{env.*}}` values are left unset.
+The workspace's own `alint.path` and `alint.serverArgs` are ignored, and
+**alint: Show effective rules** is off. Granting trust restarts the
+server with all of them on, exactly as before.
 
 ## Commands
 
@@ -62,4 +62,4 @@ before.
 ## Versioning
 
 The extension version tracks the alint release it ships against
-(`0.10.x` of the extension targets `alint 0.10.x`).
+(matching `alint`'s `0.x.y` workspace release).

@@ -220,19 +220,19 @@ pub(crate) fn for_each_entry<'a>(
 ) -> Result<(), String> {
     use std::collections::HashSet;
 
-    if text.len() > crate::structured_format::MAX_STRUCTURED_BYTES {
+    let stripped = text.trim_start_matches('\u{feff}');
+    if stripped.len() > crate::structured_format::MAX_STRUCTURED_BYTES {
         return Err(format!(
             "input exceeds the maximum supported size for a structured document ({} bytes)",
             crate::structured_format::MAX_STRUCTURED_BYTES
         ));
     }
-    if text
+    if stripped
         .trim_matches(|c: char| c == '\u{feff}' || c.is_whitespace())
         .is_empty()
     {
         return Ok(());
     }
-    let stripped = text.trim_start_matches('\u{feff}');
     let base = text.len() - stripped.len();
     let mut global_keys: HashSet<&str> = HashSet::new();
     let mut section: Option<&str> = None;

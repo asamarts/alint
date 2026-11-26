@@ -545,14 +545,7 @@ mod tests {
 
     #[test]
     fn single_pass_xml_sanitizers_match_two_step_reference() {
-        let samples = [
-            "plain/ascii-123.rs",
-            "a&b<c>d\"e'f",
-            "ctrl\x00\x01\x07\x08\x09\x0a\x0b\x0c\x0d\x1b\x1f\x7fend",
-            "crlf\r\nline\rnext\r",
-            "unicode\u{0085}\u{009b}\u{202e}\u{200b}\u{180e}\u{feff}\u{e0069}caf\u{e9}",
-        ];
-        for sample in samples {
+        fn ref_attr_for(sample: &str) -> String {
             let ref_sanitized = crate::sanitize::sanitize_xml_display(sample);
             let mut ref_attr = String::new();
             for ch in ref_sanitized.chars() {
@@ -569,8 +562,11 @@ mod tests {
                     _ => ref_attr.push(ch),
                 }
             }
-            assert_eq!(xml_attr_sanitized(sample).as_ref(), ref_attr, "{sample:?}");
+            ref_attr
+        }
 
+        fn ref_text_for(sample: &str) -> String {
+            let ref_sanitized = crate::sanitize::sanitize_xml_display(sample);
             let mut ref_text = String::new();
             let mut chars = ref_sanitized.chars().peekable();
             while let Some(ch) = chars.next() {
@@ -588,8 +584,51 @@ mod tests {
                     _ => ref_text.push(ch),
                 }
             }
-            assert_eq!(xml_text_sanitized(sample).as_ref(), ref_text, "{sample:?}");
+            ref_text
         }
+
+        // Exhaustive parity across every valid Unicode scalar value.
+        let mut buf = [0u8; 4];
+        for cp in 0u32..=0x0010_FFFF {
+            let Some(ch) = char::from_u32(cp) else {
+                continue;
+            };
+            let s = ch.encode_utf8(&mut buf);
+            assert_eq!(
+                xml_attr_sanitized(s).as_ref(),
+                ref_attr_for(s),
+                "attr mismatch at U+{cp:04X}"
+            );
+            assert_eq!(
+                xml_text_sanitized(s).as_ref(),
+                ref_text_for(s),
+                "text mismatch at U+{cp:04X}"
+            );
+        }
+
+        // Multi-character interaction sequences (CRLF, double CR, CR + illegal
+        // C0 control, XML noncharacters U+FFFE/U+FFFF, display-deceptive chars).
+        let samples = [
+            "plain/ascii-123.rs",
+            "a&b<c>d\"e'f",
+            "ctrl\x00\x01\x07\x08\x09\x0a\x0b\x0c\x0d\x1b\x1f\x7fend",
+            "crlf\r\nline\rnext\r\r\x01\n\r",
+            "nonchar\u{fffe}\u{ffff}end",
+            "unicode\u{0085}\u{009b}\u{202e}\u{200b}\u{180e}\u{feff}\u{e0069}caf\u{e9}",
+        ];
+        for sample in samples {
+            assert_eq!(
+                xml_attr_sanitized(sample).as_ref(),
+                ref_attr_for(sample),
+                "{sample:?}"
+            );
+            assert_eq!(
+                xml_text_sanitized(sample).as_ref(),
+                ref_text_for(sample),
+                "{sample:?}"
+            );
+        }
+
         // Verify trailing `\r` + policy URL produces the exact single `\n` before `Policy:`.
         let report = Report {
             results: vec![RuleResult {
@@ -607,5 +646,39 @@ mod tests {
             out.contains("a.rs: msg\nPolicy: https://example.com/p</failure>"),
             "{out}"
         );
+    }
+
+    #[test]
+    fn level_off_with_analysis_failures_emits_error_cases() {
+        // `Level::Off` with analysis failures still emits `<error>` cases
+        // while keeping `failures="0"` and omitting suppressed policy findings.
+        let off_with_err = Report {
+            results: vec![RuleResult {
+                rule_id: "off-rule".into(),
+                level: Level::Off,
+                policy_url: None,
+                violations: vec![Violation::new("ignored").with_path(PathBuf::from("a.rs"))],
+                notes: Vec::new(),
+                is_fixable: false,
+                analysis_failures: vec![
+                    AnalysisFailure::new(
+                        alint_core::AnalysisFailureKind::ResourceParse,
+                        "bad\r\x01file",
+                    )
+                    .with_path(PathBuf::from("bad.yml")),
+                ],
+            }],
+        };
+        let off_out = render(&off_with_err);
+        assert!(
+            off_out.contains(r#"tests="1" failures="0" errors="1""#),
+            "{off_out}"
+        );
+        assert!(
+            off_out.contains(r#"classname="alint.off-rule" name="bad.yml""#),
+            "{off_out}"
+        );
+        assert!(off_out.contains(r#"type="analysis_failure""#), "{off_out}");
+        assert!(!off_out.contains("<failure"), "{off_out}");
     }
 }

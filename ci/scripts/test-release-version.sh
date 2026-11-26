@@ -122,6 +122,18 @@ done
 # Stage the overlay, so `git diff` below lists only what the bump edits, not an
 # uncommitted change to one of these files in the working tree under test.
 git add -- "${overlay[@]}"
+# Synthesize a v2 schema body change so this block exercises the changed-schema
+# path even when HEAD is already tagged with v$CUR (as in release.yml on a tag
+# push). Staging it keeps `git diff --name-only` below focused on bump-version's
+# own edits, and `git reset --hard` below restores HEAD for the unchanged test.
+python3 - <<'PY'
+import json, pathlib
+p = pathlib.Path("schemas/v2/config.json")
+data = json.loads(p.read_text(encoding="utf-8"))
+data["x-test-release-version-bump"] = True
+p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+PY
+git add -- schemas/v2/config.json
 PATH="$TMP_ROOT/fake-bin:$PATH" bash ci/scripts/bump-version.sh "$NEXT" >/dev/null
 expect_ok "bump-version updates workspace and Action together" "v$NEXT"
 

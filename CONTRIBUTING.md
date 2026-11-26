@@ -83,6 +83,7 @@ ci/scripts/check-docs-overlay-since.py     # lines added since the latest v* tag
 ci/scripts/check-version-pins.sh           # README/SECURITY/docs/site install snippets + npm pin to workspace version
 ci/scripts/check-v2-schema-id.sh           # draft v2 schema $id matches gen_schema_v2 RELEASE + docs modelines
 ci/scripts/check-workspace-dep-floors.sh   # [workspace.dependencies] floors <= workspace.package.version
+ci/scripts/check-secrets-inventory.sh      # workflow secrets match documented inventory
 ci/scripts/dogfood.sh                      # cargo build --release + alint check on this repo
 ```
 
@@ -175,7 +176,7 @@ alint.org bump fails CI there.
 rule (`install-snippets-match-workspace-version` in `.alint.yml`), so any
 drift fails CI before publish.
 
-All nine must pass before opening a PR. The wrapper falls through on
+All ten must pass before opening a PR. The wrapper falls through on
 failure (rather than fast-exiting on the first one) so a single run shows
 the full set of things to fix instead of fix-rerun-fix-rerun. Skip a
 specific check while debugging: `PREFLIGHT_SKIP=clippy bash ci/scripts/preflight.sh`.

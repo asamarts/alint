@@ -5,7 +5,11 @@
 //! `alint-rules` adds zero direct parser dependencies and per-file evaluation
 //! stays streaming and linear in memory.
 
+use std::cell::OnceCell;
 use std::collections::HashMap;
+use std::collections::hash_map::RandomState;
+use std::hash::{BuildHasher as _, Hash, Hasher};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::extract::{ByteSpan, json_parse_options};
@@ -246,6 +250,56 @@ fn validate_yaml_core_tag(
     Ok(())
 }
 
+struct InternedYamlKey {
+    hash: u64,
+    key: YamlKey,
+    canonical: OnceCell<Arc<str>>,
+}
+
+/// O(1)-cloneable, pre-hashed YAML key handle shared across anchors, aliases,
+/// and mappings within one `scan_yaml` walk.
+///
+/// Computing the `SipHash` once per scalar and short-circuiting equality with
+/// `Rc::ptr_eq` prevents multi-megabyte anchored keys from being re-hashed or
+/// byte-compared on every `*alias` lookup, and `OnceCell` ensures the bounded
+/// canonical token (`<= 128 B` or `sha256:...`) is computed at most once per
+/// document even across thousands of distinct mappings.
+#[derive(Clone)]
+struct SharedYamlKey(Rc<InternedYamlKey>);
+
+impl SharedYamlKey {
+    fn new(key: YamlKey, hasher_state: &RandomState) -> Self {
+        let hash = hasher_state.hash_one(&key);
+        Self(Rc::new(InternedYamlKey {
+            hash,
+            key,
+            canonical: OnceCell::new(),
+        }))
+    }
+
+    fn bounded_canonical_token(&self) -> Arc<str> {
+        Arc::clone(
+            self.0
+                .canonical
+                .get_or_init(|| self.0.key.bounded_canonical_token()),
+        )
+    }
+}
+
+impl PartialEq for SharedYamlKey {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0) || (self.0.hash == other.0.hash && self.0.key == other.0.key)
+    }
+}
+
+impl Eq for SharedYamlKey {}
+
+impl Hash for SharedYamlKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.hash.hash(state);
+    }
+}
+
 /// Resolve a YAML mapping key or anchored scalar into a shared, O(1)-cloneable
 /// typed key + display label, preserving custom and unknown core tags as
 /// distinct key types (matching `ayaml-0.2.3/src/resolver.rs`).
@@ -253,7 +307,8 @@ fn resolve_yaml_key(
     value: &str,
     style: ayaml::ScalarStyle,
     tag: Option<&ayaml::Tag>,
-) -> Result<(Arc<YamlKey>, Arc<str>), String> {
+    hasher_state: &RandomState,
+) -> Result<(SharedYamlKey, Arc<str>), String> {
     let key = match tag {
         Some(t) if crate::yaml::is_core_scalar_tag(t) => {
             let scalar =
@@ -282,12 +337,16 @@ fn resolve_yaml_key(
             YamlKey::from_core_scalar,
         ),
     };
-    let display: Arc<str> = if value.is_empty() && matches!(key, YamlKey::Null) {
-        Arc::from("null")
-    } else {
-        Arc::from(value)
+    let display: Arc<str> = match &key {
+        YamlKey::Null if value.is_empty() => Arc::from("null"),
+        YamlKey::String(s) => Arc::clone(s),
+        YamlKey::Tagged(_, inner) => match inner.as_ref() {
+            YamlKey::String(s) => Arc::clone(s),
+            _ => Arc::from(value),
+        },
+        _ => Arc::from(value),
     };
-    Ok((Arc::new(key), display))
+    Ok((SharedYamlKey::new(key, hasher_state), display))
 }
 
 #[derive(Clone)]
@@ -296,16 +355,15 @@ enum AnchorState {
     Open,
     /// Finished mapping or sequence anchor (valid alias, skipped as complex key).
     Collection,
-    /// Scalar anchor resolved once into O(1)-cloneable `Arc` handles.
-    Scalar(Arc<YamlKey>, Arc<str>),
+    /// Scalar anchor resolved once into O(1)-cloneable handles.
+    Scalar(SharedYamlKey, Arc<str>),
 }
 
 enum YamlFrame {
     Mapping {
         anchor: Option<String>,
         expecting_key: bool,
-        /// Maps each seen key to `(first_span, lazily cached bounded canonical token)`.
-        seen: HashMap<Arc<YamlKey>, (ByteSpan, Option<Arc<str>>)>,
+        seen: HashMap<SharedYamlKey, ByteSpan>,
     },
     Sequence {
         anchor: Option<String>,
@@ -318,6 +376,7 @@ struct YamlWalk {
     stack: Vec<YamlFrame>,
     anchors: HashMap<String, AnchorState>,
     collection_depth: usize,
+    hasher_state: RandomState,
 }
 
 impl YamlWalk {
@@ -328,6 +387,7 @@ impl YamlWalk {
             stack: Vec::new(),
             anchors: HashMap::new(),
             collection_depth: 0,
+            hasher_state: RandomState::new(),
         }
     }
 
@@ -341,7 +401,7 @@ impl YamlWalk {
         )
     }
 
-    fn record_key(&mut self, key_id: Arc<YamlKey>, display: Arc<str>, key_span: ByteSpan) {
+    fn record_key(&mut self, key_id: SharedYamlKey, display: Arc<str>, key_span: ByteSpan) {
         if let Some(YamlFrame::Mapping {
             expecting_key,
             seen,
@@ -349,21 +409,19 @@ impl YamlWalk {
         }) = self.stack.last_mut()
             && *expecting_key
         {
-            if let Some((first, canonical_slot)) = seen.get_mut(&key_id) {
-                if !self.scan.capped {
-                    let canonical = Arc::clone(
-                        canonical_slot.get_or_insert_with(|| key_id.bounded_canonical_token()),
-                    );
+            if !self.scan.capped {
+                if let Some(&first) = seen.get(&key_id) {
+                    let canonical = key_id.bounded_canonical_token();
                     self.scan.push(DuplicateKey {
                         key: display,
                         canonical_key: Some(canonical),
                         section: None,
                         duplicate: key_span,
-                        first: *first,
+                        first,
                     });
+                } else {
+                    seen.insert(key_id, key_span);
                 }
-            } else {
-                seen.insert(key_id, (key_span, None));
             }
             *expecting_key = false;
         }
@@ -388,11 +446,12 @@ impl YamlWalk {
             } => {
                 let is_key = self.expecting_mapping_key();
                 if is_key || anchor.is_some() {
-                    let (key_id, display) = resolve_yaml_key(&value, style, tag.as_ref())?;
+                    let (key_id, display) =
+                        resolve_yaml_key(&value, style, tag.as_ref(), &self.hasher_state)?;
                     if let Some(a) = anchor {
                         self.anchors.insert(
                             a.as_str().to_string(),
-                            AnchorState::Scalar(Arc::clone(&key_id), Arc::clone(&display)),
+                            AnchorState::Scalar(key_id.clone(), Arc::clone(&display)),
                         );
                     }
                     if is_key {
@@ -418,7 +477,7 @@ impl YamlWalk {
                         return Err(format!("cyclic YAML alias `*{}`", anchor.as_str()));
                     }
                     Some(AnchorState::Collection) => None,
-                    Some(AnchorState::Scalar(k, d)) => Some((Arc::clone(k), Arc::clone(d))),
+                    Some(AnchorState::Scalar(k, d)) => Some((k.clone(), Arc::clone(d))),
                 };
                 if let Some(YamlFrame::Mapping { expecting_key, .. }) = self.stack.last_mut() {
                     if *expecting_key {
@@ -721,25 +780,42 @@ fn scan_ini(text: &str) -> Result<DuplicateScan, String> {
         HashMap<&'a str, (ByteSpan, Option<Arc<str>>)>,
     );
     let mut scan = DuplicateScan::default();
-    let mut sections: HashMap<Option<&str>, SectionBucket<'_>> = HashMap::new();
+    let mut buckets: Vec<SectionBucket<'_>> = Vec::new();
+    let mut section_ids: HashMap<Option<&str>, usize> = HashMap::new();
+    // 1-slot fast path for consecutive keys inside the same `[section]` header
+    // (keyed by slice pointer + len since all sections borrow from `text`),
+    // avoiding O(N * section_len) SipHash and memcmp on large section headers.
+    let mut active_section: Option<(Option<(usize, usize)>, usize)> = None;
     crate::ini::for_each_entry(text, |entry| {
-        let (section_arc, keys) = sections
-            .entry(entry.section)
-            .or_insert_with(|| (None, HashMap::new()));
-        if let Some((first, key_arc)) = keys.get_mut(entry.key) {
-            if !scan.capped {
-                let shared_section = entry
-                    .section
-                    .map(|s| Arc::clone(section_arc.get_or_insert_with(|| Arc::from(s))));
-                let shared_key = Arc::clone(key_arc.get_or_insert_with(|| Arc::from(entry.key)));
-                scan.push(DuplicateKey {
-                    key: shared_key,
-                    canonical_key: None,
-                    section: shared_section,
-                    duplicate: entry.key_span,
-                    first: *first,
+        if scan.capped {
+            return;
+        }
+        let sec_ptr = entry.section.map(|s| (s.as_ptr() as usize, s.len()));
+        let bucket_idx = match active_section {
+            Some((cached_ptr, idx)) if cached_ptr == sec_ptr => idx,
+            _ => {
+                let idx = *section_ids.entry(entry.section).or_insert_with(|| {
+                    let next = buckets.len();
+                    buckets.push((None, HashMap::new()));
+                    next
                 });
+                active_section = Some((sec_ptr, idx));
+                idx
             }
+        };
+        let (section_arc, keys) = &mut buckets[bucket_idx];
+        if let Some((first, key_arc)) = keys.get_mut(entry.key) {
+            let shared_section = entry
+                .section
+                .map(|s| Arc::clone(section_arc.get_or_insert_with(|| Arc::from(s))));
+            let shared_key = Arc::clone(key_arc.get_or_insert_with(|| Arc::from(entry.key)));
+            scan.push(DuplicateKey {
+                key: shared_key,
+                canonical_key: None,
+                section: shared_section,
+                duplicate: entry.key_span,
+                first: *first,
+            });
         } else {
             keys.insert(entry.key, (entry.key_span, None));
         }
@@ -860,27 +936,38 @@ fn push_hcl_template_exprs<'a>(
 ) {
     use hcl::edit::template::{Directive, Element};
 
-    let mut templates: Vec<&'a hcl::edit::template::Template> = vec![template];
+    enum Work<'a> {
+        Template(&'a hcl::edit::template::Template),
+        Elem(&'a Element),
+        Expr(&'a hcl::edit::expr::Expression),
+    }
+
+    let mut work = vec![Work::Template(template)];
     let mut exprs: Vec<&'a hcl::edit::expr::Expression> = Vec::new();
-    while let Some(cur) = templates.pop() {
-        for elem in cur {
-            match elem {
-                Element::Literal(_) => {}
-                Element::Interpolation(interp) => exprs.push(&interp.expr),
-                Element::Directive(dir) => match dir.as_ref() {
-                    Directive::If(if_dir) => {
-                        exprs.push(&if_dir.if_expr.cond_expr);
-                        if let Some(else_expr) = &if_dir.else_expr {
-                            templates.push(&else_expr.template);
-                        }
-                        templates.push(&if_dir.if_expr.template);
-                    }
-                    Directive::For(for_dir) => {
-                        exprs.push(&for_dir.for_expr.collection_expr);
-                        templates.push(&for_dir.for_expr.template);
-                    }
-                },
+    while let Some(item) = work.pop() {
+        match item {
+            Work::Template(tpl) => {
+                let elems: Vec<&Element> = tpl.into_iter().collect();
+                for elem in elems.into_iter().rev() {
+                    work.push(Work::Elem(elem));
+                }
             }
+            Work::Elem(Element::Literal(_)) => {}
+            Work::Elem(Element::Interpolation(interp)) => exprs.push(&interp.expr),
+            Work::Elem(Element::Directive(dir)) => match dir.as_ref() {
+                Directive::If(if_dir) => {
+                    if let Some(else_expr) = &if_dir.else_expr {
+                        work.push(Work::Template(&else_expr.template));
+                    }
+                    work.push(Work::Template(&if_dir.if_expr.template));
+                    work.push(Work::Expr(&if_dir.if_expr.cond_expr));
+                }
+                Directive::For(for_dir) => {
+                    work.push(Work::Template(&for_dir.for_expr.template));
+                    work.push(Work::Expr(&for_dir.for_expr.collection_expr));
+                }
+            },
+            Work::Expr(expr) => exprs.push(expr),
         }
     }
     for expr in exprs.into_iter().rev() {
@@ -1157,6 +1244,60 @@ abc: 5
                 dup.canonical_key.as_ref().unwrap()
             ));
             assert!(Arc::ptr_eq(&yaml_scan.duplicates[0].key, &dup.key));
+        }
+
+        // Large anchored YAML scalar aliased across many distinct mappings
+        // (both zero-duplicate and duplicate cases) must pre-hash once and
+        // share a single document-wide bounded canonical token via Arc::ptr_eq.
+        let mut multi_map_clean = format!("anchor_holder: &a \"{big_key}\"\nitems:\n");
+        for _ in 0..2_000 {
+            multi_map_clean.push_str("  - *a: 1\n");
+        }
+        let clean_scan = find_duplicate_keys(Format::Yaml, &multi_map_clean, false).unwrap();
+        assert_eq!(clean_scan.duplicates, []);
+
+        let mut multi_map_dup = format!("anchor_holder: &a \"{big_key}\"\nitems:\n");
+        for _ in 0..500 {
+            multi_map_dup.push_str("  - *a: 1\n    *a: 2\n");
+        }
+        let multi_dup_scan = find_duplicate_keys(Format::Yaml, &multi_map_dup, false).unwrap();
+        assert_eq!(multi_dup_scan.duplicates.len(), 500);
+        let shared_canon = multi_dup_scan.duplicates[0].canonical_key.as_ref().unwrap();
+        for dup in &multi_dup_scan.duplicates[1..] {
+            assert!(Arc::ptr_eq(
+                shared_canon,
+                dup.canonical_key.as_ref().unwrap()
+            ));
+        }
+
+        // Large INI section (512 KiB) with 5,000 keys hits the 1-slot
+        // active-section fast path without re-hashing the section per line.
+        let huge_sec = "z".repeat(512 * 1024);
+        let mut big_ini = format!("[{huge_sec}]\n");
+        for i in 0..5_000 {
+            let _ = writeln!(big_ini, "key_{i} = 1");
+        }
+        let big_ini_scan = find_duplicate_keys(Format::Ini, &big_ini, false).unwrap();
+        assert_eq!(big_ini_scan.duplicates, []);
+    }
+
+    #[test]
+    fn hcl_template_directives_report_duplicates_in_true_source_order() {
+        let hcl = concat!(
+            "s = <<EOF\n",
+            "%{if length({ c1 = 1, \"c1\" = 2 }) > 0}${jsonencode({ d1 = 1, \"d1\" = 2 })}%{else}${jsonencode({ e1 = 1, \"e1\" = 2 })}%{endif}",
+            "${jsonencode({ after = 1, \"after\" = 2 })}",
+            "%{for x in [jsonencode({ f1 = 1, \"f1\" = 2 })]}${jsonencode({ body = 1, \"body\" = 2 })}%{endfor}\n",
+            "EOF\n",
+        );
+        let scan = find_duplicate_keys(Format::Hcl, hcl, false).unwrap();
+        let keys: Vec<&str> = scan.duplicates.iter().map(|d| d.key.as_ref()).collect();
+        assert_eq!(keys, ["c1", "d1", "e1", "after", "f1", "body"]);
+        for pair in scan.duplicates.windows(2) {
+            assert!(
+                pair[0].duplicate.start < pair[1].duplicate.start,
+                "expected strictly ascending source spans: {pair:?}"
+            );
         }
     }
 

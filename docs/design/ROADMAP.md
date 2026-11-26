@@ -1838,7 +1838,7 @@ Later: Phase 3 completion and the saphyr exit land in v0.24
 plugin hosts and a stable `version: 2` follow in v0.25 at the earliest.
 
 ## v0.24: saphyr exit, Phase 3 completion, owned walker, and LSP rewrite
-<!-- roadmap-public: blurb="Completes general-linter phase 3 (reference, count, multi-field group_by, array-of-objects extraction, semver range satisfaction, duplicate-key detection, strict JSON, and bundled v2 rulesets, with version: 2 soaking one more release), removes saphyr from default release builds on ayaml 0.2.3 with a bounded shared parse cache, replaces tower-lsp with lsp-server and ignore's walker with an owned parallel walker, and drains the v0.23 backlog across security, cross-platform parity, and supply-chain diet." -->
+<!-- roadmap-public: blurb="Completes general-linter phase 3 (reference, count, compare, multi-field group_by, array-of-objects extraction, semver range satisfaction, duplicate-key detection, strict JSON, and bundled v2 rulesets, with version: 2 soaking one more release), removes saphyr from default release builds on ayaml 0.2.3 with a bounded shared parse cache, replaces tower-lsp with lsp-server and ignore's walker with an owned parallel walker, and drains the v0.23 backlog across security, cross-platform parity, and supply-chain diet." -->
 
 Completes Phase 3 of
 [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md)
@@ -1850,13 +1850,14 @@ the owner decisions are
 
 - **saphyr exit and unified YAML track (#614, #548, #582, #549, #550).** Bumps `ayaml` to 0.2.3,
   migrates structured YAML fixes, spanned entry extraction, literal-subtree checks, and
-  `pinned_references` onto `ayaml` events and `SpannedTree`, and removes `saphyr` and
+  `pinned_references` onto `ayaml`'s spanned event stream and `LineIndex`, and removes `saphyr` and
   `saphyr-parser` from default release builds (staying test-only behind `yaml-reference`,
   ADR-0036 and ADR-0041). Adds a memory-budgeted per-run structured-tree cache, bounds retained
   memory of alias-expanded YAML trees, wires corpus replay YAML compare mode, adds a mid-size YAML
   `bench-scale` scenario, and unlocks span-accurate config diagnostics (#572, #566, #571).
 - **Phase 3 completion (`version: 2`, soaking one more release).** Adds `reference`, unified
-  `count` / `bounded-count`, orthogonal multi-field `group_by`, negated equality, inline literal
+  `count` / `bounded-count`, orthogonal multi-field `group_by`, unified `compare` (including
+  negated equality and ordered comparisons), inline literal
   `set` targets, multi-field array-of-objects extraction and split transforms (#592), optional
   `bound:` (#593), `{{value}}` placeholders (#594), target-file `set` placement (#595), stub
   locale roots (#598), general duplicate-key detection (gap B1), semver range satisfaction (gap

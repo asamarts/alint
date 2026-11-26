@@ -167,9 +167,7 @@ Available fact kinds: `any_file_exists`, `all_files_exist`, `count_files`, `file
 map accepts exactly one RFC 9535 JSONPath for `json`, `yaml`, `toml`, `xml`, `dotenv`,
 `properties`, `ini`, or `hcl`, and applies the pattern to each selected string instead.
 Non-string selections, malformed input, and missing paths are non-matches.
-<!-- alint:since=0.23.0 -->
 For JSON extraction, numbers outside the finite IEEE-754 `f64` range (such as `1e400`) also fail JSON parsing and therefore evaluate as non-matches (`false`).
-<!-- /alint:since -->
 Against raw content, `^` and `$` anchor to the whole file, not to each line; see
 [Regex patterns and anchors](/docs/configuration/patterns/).
 
@@ -427,6 +425,21 @@ baseline: .alint-baseline.json
 ```
 
 A `--baseline <path>` flag overrides this key. There is **no silent auto-detect**: a baseline suppresses findings only when it is explicitly opted in (via this key or the flag), never because a baseline file merely exists on disk. Write and refresh the file with `alint baseline`. See [Baseline mode](/docs/concepts/adoption/baseline/) for the full workflow, the fingerprinting semantics, and which output formats are baseline-aware.
+
+### `limits`
+
+Optional runtime safety budgets that bound per-rule findings and structured-decode key-path memory.
+
+```yaml
+limits:
+  findings_per_rule: 10000          # default 10,000; allowed range 1..=1,000,000
+  key_path_bytes_per_decode: 33554432  # default 32 MiB; allowed range 1..=16 GiB (17,179,869,184)
+```
+
+- **`findings_per_rule`** *(default `10,000`, range `1..=1,000,000`)*: caps emitted findings per rule for `key_parity`, `constraint`, and `no_duplicate_keys`. When a rule reaches the cap, alint emits one non-baselinable analysis failure naming the limit rather than allocating unbounded findings.
+- **`key_path_bytes_per_decode`** *(default `33,554,432` [32 MiB], range `1..=17,179,869,184` [16 GiB])*: caps cumulative retained key-path string bytes per structured decode in `key_parity` and `version: 2` relation readers.
+
+**Security.** `limits:` is top-level only: it is accepted in your root `.alint.yml` and `.alint.d/` drop-ins, and refused at load time in `extends:` rulesets and nested configs so an inherited source cannot raise memory or finding caps. See [Limits](#limits) below for fixed load-time bounds.
 
 ## Limits
 

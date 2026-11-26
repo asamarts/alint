@@ -40,9 +40,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `{"fr": {}}`, TOML `[fr]` / `fr = {}`) remain valid empty locales (#597).
 - Library users (`alint-core`): `baseline::BaselineEntry` gains `pub paths: Vec<String>` and
   `baseline::FingerprintedViolation` gains `pub path_free_identity: bool` (ADR-0049; prefer
-  `FingerprintedViolation::from_violation` when constructing violations, #601); `ExtractSpec`
-  gains `pub strict: bool` (ADR-0050 D7); `MAX_HCL_DEPTH` and `MAX_HCL_BYTES` are removed from
-  the public API (#608); and the pinned `ayaml` version advances from `=0.2.2` to `=0.2.3` (#614).
+  `FingerprintedViolation::from_violation` when constructing violations, #601); `StructuredExtract`
+  and `EditVerifier::Structured` gain `strict: bool` (ADR-0050 D7); and the pinned `ayaml` version
+  advances from `=0.2.2` to `=0.2.3` (#614).
 
 ### Security
 

@@ -1192,6 +1192,37 @@ impl Rule for StructuredCrossFileProbe {
     }
 }
 
+#[derive(Debug)]
+struct DoubleReadCrossProbe {
+    addrs: Arc<parking_lot::Mutex<Vec<usize>>>,
+    nested: Vec<crate::CompiledNestedSpec>,
+}
+
+impl Rule for DoubleReadCrossProbe {
+    fn id(&self) -> &'static str {
+        "double-read"
+    }
+    fn level(&self) -> Level {
+        Level::Error
+    }
+    fn nested_rule_specs(&self) -> &[crate::CompiledNestedSpec] {
+        &self.nested
+    }
+    fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
+        let text = "name: svc-0\nport: 8000\n";
+        let first = ctx
+            .parse_structured(Path::new("svc-0.yml"), crate::Format::Yaml, text)
+            .unwrap();
+        let second = ctx
+            .parse_structured(Path::new("svc-0.yml"), crate::Format::Yaml, text)
+            .unwrap();
+        let mut lock = self.addrs.lock();
+        lock.push(std::ptr::from_ref(&*first) as usize);
+        lock.push(std::ptr::from_ref(&*second) as usize);
+        Ok(Vec::new())
+    }
+}
+
 #[test]
 #[allow(clippy::too_many_lines)]
 fn structured_rules_share_parsed_trees_per_file_across_partitions_and_skip_single_rule() {
@@ -1315,5 +1346,47 @@ fn structured_rules_share_parsed_trees_per_file_across_partitions_and_skip_singl
         buf_addrs.len(),
         1,
         "run_for_file must parse edited buffer once across matching rules"
+    );
+
+    // 5. Single non-reusing cross-file rule skips the run-scoped structured
+    //    cache (two parses of the same file yield distinct allocations).
+    let single_cross_addrs = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    Engine::new(
+        vec![Box::new(DoubleReadCrossProbe {
+            addrs: Arc::clone(&single_cross_addrs),
+            nested: Vec::new(),
+        })],
+        RuleRegistry::new(),
+    )
+    .run(tmp.path(), &index)
+    .unwrap();
+    let addrs = single_cross_addrs.lock();
+    assert_eq!(addrs.len(), 2);
+    assert_ne!(
+        addrs[0], addrs[1],
+        "single non-reusing cross-file rule must skip run structured cache"
+    );
+    drop(addrs);
+
+    // 6. Single programmatic composite rule (non-empty `nested_rule_specs()`,
+    //    no `entry.spec`) enables the run-scoped structured cache.
+    let nested_addrs = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let dummy_spec: crate::NestedRuleSpec =
+        crate::yaml::from_str("kind: nested_scope_fixture\npaths: '**/*.yml'\n").unwrap();
+    let dummy_nested = crate::CompiledNestedSpec::compile(dummy_spec, "double-read", 0).unwrap();
+    Engine::new(
+        vec![Box::new(DoubleReadCrossProbe {
+            addrs: Arc::clone(&nested_addrs),
+            nested: vec![dummy_nested],
+        })],
+        nested_registry(),
+    )
+    .run(tmp.path(), &index)
+    .unwrap();
+    let naddrs = nested_addrs.lock();
+    assert_eq!(naddrs.len(), 2);
+    assert_eq!(
+        naddrs[0], naddrs[1],
+        "programmatic composite rule with nested_rule_specs must share run structured cache"
     );
 }

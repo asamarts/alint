@@ -371,7 +371,9 @@ impl Violation {
         let locator = format!("implicit\0{rule_id}\0{locator}");
         let mut rendered = Vec::new();
         for value in evidence {
-            if value.is_empty() {
+            if value.is_empty() || value.len() > self.message.len() {
+                // Neither `value` nor `format!("{value:?}")` (always >=
+                // `value.len() + 2` bytes) can appear in `self.message`.
                 continue;
             }
             let debug = format!("{value:?}");

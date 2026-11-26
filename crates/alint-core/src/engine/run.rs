@@ -628,15 +628,17 @@ impl Engine {
             )
         });
         let has_manifest_scope = self.entries.iter().any(|entry| {
-            entry
-                .rule
-                .path_scope()
-                .or_else(|| entry.rule.as_per_file().map(PerFileRule::path_scope))
+            super::effective_path_scope(entry.rule.as_ref())
                 .and_then(crate::Scope::scope_filter)
                 .is_some_and(|filter| !filter.manifest_predicates().is_empty())
+                || entry
+                    .rule
+                    .trigger_scope()
+                    .is_some_and(|trigger| trigger.manifest_predicates().next().is_some())
         });
         let has_internal_structured_reuse = self.entries.iter().any(|entry| {
             entry.rule.uses_relations()
+                || !entry.rule.nested_rule_specs().is_empty()
                 || entry.spec.as_deref().is_some_and(|spec| {
                     matches!(
                         self.registry.canonical_kind(&spec.kind),
@@ -645,12 +647,14 @@ impl Engine {
                             | "every_matching_has"
                             | "cross_file"
                             | "constraint"
+                            | "registry_paths_resolve"
                     )
                 })
         });
         let need_run_structured_cache = has_structured_fact
             || has_manifest_scope
-            || (has_cross_file && (self.entries.len() >= 2 || has_internal_structured_reuse));
+            || has_internal_structured_reuse
+            || (has_cross_file && self.entries.len() >= 2);
         let run_structured_cache = need_run_structured_cache.then(|| {
             crate::structured_cache::StructuredCache::new(
                 crate::yaml_budget::YAML_PARSE_BUDGET_BYTES,

@@ -23,6 +23,13 @@ A single `Report` fans out to each format:
 | `gitlab` | `gitlab-codequality`, `code-quality` | GitLab Code Quality report. |
 | [`agent`](/docs/reference/output-formats/agent/) | `agentic`, `ai` | LLM-shaped JSON with a templated `agent_instruction` per violation. |
 
+<!-- alint:since=0.24 -->
+Display sanitization: `junit` escapes terminal controls, bidirectional overrides and isolates,
+zero-width characters, and astral tag characters across `<testcase>`, `<failure>`, `<error>`, and
+`<system-out>` text and attributes while normalizing bare CR to LF and stripping XML 1.0-illegal C0
+controls.
+<!-- /alint:since -->
+
 Each format is shown by example in the [quickstart](/docs/getting-started/quickstart/). The [`agent` format](/docs/reference/output-formats/agent/) has its own reference because its shape is purpose-built for AI coding agents.
 
 ## Streams: report on stdout, diagnostics on stderr

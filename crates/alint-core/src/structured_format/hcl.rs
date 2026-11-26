@@ -163,7 +163,7 @@ enum WidthScope {
         last_was_op: bool,
         /// Tracks `last_was_dot` for legacy attr splat (`a.*`) in value expressions.
         last_was_dot: bool,
-        /// Unparenthesized `? ... :` ternary nesting depth inside a value.
+        /// Unparenthesized `? ... :` ternary nesting depth inside a key or value.
         ternary_depth: usize,
         /// Multiplicative `VecMap::eq` cost multiplier contributed by nested
         /// `ObjectBrace`s inside the current entry's key expression.
@@ -217,6 +217,186 @@ enum WidthScope {
 
 /// Deferred empty-heredoc branch `(scopes, resume_at, work_at_open)`.
 type BacktrackBranch = (Rc<[WidthScope]>, usize, u64);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum ScopeShape {
+    BlockBrace {
+        in_expr: bool,
+        last_was_op: bool,
+        last_was_dot: bool,
+    },
+    ObjectBrace {
+        in_value: bool,
+        last_was_op: bool,
+        last_was_dot: bool,
+        ternary_depth: usize,
+        in_ancestor_key: bool,
+    },
+    ForBrace,
+    Bracket,
+    Paren,
+    InterpBrace,
+    String,
+    Heredoc {
+        tag_start: usize,
+        tag_end: usize,
+        seen_body_line: bool,
+        saw_marker: bool,
+    },
+    TemplateDirective,
+}
+
+#[derive(Debug, Clone)]
+struct ObjectScopeCost {
+    count: usize,
+    key_bytes: u64,
+    current_key_eq_cost: u64,
+    max_child_eq_cost: u64,
+}
+
+#[derive(Debug, Clone)]
+struct BranchCost {
+    total_work: u64,
+    object_costs: Vec<ObjectScopeCost>,
+}
+
+impl BranchCost {
+    fn capture(total_work: u64, scopes: &[WidthScope]) -> Self {
+        let mut object_costs = Vec::new();
+        for scope in scopes {
+            if let WidthScope::ObjectBrace {
+                count,
+                key_bytes,
+                current_key_eq_cost,
+                max_child_eq_cost,
+                ..
+            } = scope
+            {
+                object_costs.push(ObjectScopeCost {
+                    count: *count,
+                    key_bytes: *key_bytes,
+                    current_key_eq_cost: *current_key_eq_cost,
+                    max_child_eq_cost: *max_child_eq_cost,
+                });
+            }
+        }
+        Self {
+            total_work,
+            object_costs,
+        }
+    }
+
+    fn dominates(&self, other: &Self) -> bool {
+        self.total_work >= other.total_work
+            && self.object_costs.len() == other.object_costs.len()
+            && self
+                .object_costs
+                .iter()
+                .zip(&other.object_costs)
+                .all(|(a, b)| {
+                    a.count >= b.count
+                        && a.key_bytes >= b.key_bytes
+                        && a.current_key_eq_cost >= b.current_key_eq_cost
+                        && a.max_child_eq_cost >= b.max_child_eq_cost
+                })
+    }
+}
+
+fn scope_shape(scopes: &[WidthScope]) -> Vec<ScopeShape> {
+    scopes
+        .iter()
+        .map(|scope| match scope {
+            WidthScope::BlockBrace {
+                in_expr,
+                last_was_op,
+                last_was_dot,
+            } => ScopeShape::BlockBrace {
+                in_expr: *in_expr,
+                last_was_op: *last_was_op,
+                last_was_dot: *last_was_dot,
+            },
+            WidthScope::ObjectBrace {
+                in_value,
+                last_was_op,
+                last_was_dot,
+                ternary_depth,
+                in_ancestor_key,
+                ..
+            } => ScopeShape::ObjectBrace {
+                in_value: *in_value,
+                last_was_op: *last_was_op,
+                last_was_dot: *last_was_dot,
+                ternary_depth: *ternary_depth,
+                in_ancestor_key: *in_ancestor_key,
+            },
+            WidthScope::ForBrace => ScopeShape::ForBrace,
+            WidthScope::Bracket => ScopeShape::Bracket,
+            WidthScope::Paren => ScopeShape::Paren,
+            WidthScope::InterpBrace => ScopeShape::InterpBrace,
+            WidthScope::String => ScopeShape::String,
+            WidthScope::Heredoc {
+                tag_start,
+                tag_end,
+                seen_body_line,
+                saw_marker,
+                ..
+            } => ScopeShape::Heredoc {
+                tag_start: *tag_start,
+                tag_end: *tag_end,
+                seen_body_line: *seen_body_line,
+                saw_marker: *saw_marker,
+            },
+            WidthScope::TemplateDirective => ScopeShape::TemplateDirective,
+        })
+        .collect()
+}
+
+struct BacktrackState {
+    rescan_budget: usize,
+    branches: usize,
+    worklist: Vec<BacktrackBranch>,
+    visited: std::collections::HashMap<(usize, Vec<ScopeShape>), Vec<BranchCost>>,
+}
+
+impl BacktrackState {
+    fn new() -> Self {
+        Self {
+            rescan_budget: MAX_HCL_RESCAN_BYTES,
+            branches: 0,
+            worklist: Vec::new(),
+            visited: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Record `(resume_at, scopes, work_at_open)` and charge budgets if this
+    /// state is not already dominated by a previously scheduled branch.
+    /// Returns `Ok(true)` when the caller should scan/enqueue this branch.
+    fn schedule(
+        &mut self,
+        n: usize,
+        resume_at: usize,
+        scopes: &[WidthScope],
+        work_at_open: u64,
+    ) -> Result<bool, String> {
+        let key = (resume_at, scope_shape(scopes));
+        let cost = BranchCost::capture(work_at_open, scopes);
+        let entries = self.visited.entry(key).or_default();
+        if entries.iter().any(|prev| prev.dominates(&cost)) {
+            return Ok(false);
+        }
+        let rescan_cost = n.saturating_sub(resume_at);
+        if self.branches >= MAX_HCL_BACKTRACK_BRANCHES || rescan_cost > self.rescan_budget {
+            return Err(format!(
+                "HCL heredoc backtracking exceeds the maximum supported complexity ({MAX_HCL_RESCAN_BYTES} bytes)"
+            ));
+        }
+        entries.retain(|prev| !cost.dominates(prev));
+        entries.push(cost);
+        self.branches += 1;
+        self.rescan_budget -= rescan_cost;
+        Ok(true)
+    }
+}
 
 fn push_scope(scopes: &mut Vec<WidthScope>, scope: WidthScope) -> Result<(), String> {
     if scopes.len() >= MAX_HCL_SCAN_DEPTH {
@@ -485,9 +665,7 @@ fn scan_heredoc_scope(
     text: &str,
     i: &mut usize,
     scopes: &mut Vec<WidthScope>,
-    rescan_budget: &mut usize,
-    backtrack_branches: &mut usize,
-    worklist: &mut Vec<BacktrackBranch>,
+    backtrack: &mut BacktrackState,
 ) -> Result<(), String> {
     let Some(&WidthScope::Heredoc {
         tag_start,
@@ -510,25 +688,18 @@ fn scan_heredoc_scope(
             let popped = scopes.pop();
             // If an unescaped `${` / `%{` appeared inside this heredoc after an
             // empty-heredoc candidate on line 1, `hcl-edit`'s `opt(...)` could
-            // have backtracked mid-file (e.g. `%{x}`, `${<}`, `${"`). Charge the
-            // rescan and branch budgets eagerly before queueing so adversarial
-            // inputs cannot accumulate unbounded worklist memory.
+            // have backtracked mid-file (e.g. `%{x}`, `${<}`, `${"`). Deduplicate
+            // dominated states so sequential valid heredocs stay O(k), and charge
+            // budgets eagerly before queueing so adversarial inputs stay bounded.
             if let Some(WidthScope::Heredoc {
                 saw_marker: true,
                 empty_close: Some((resume_at, snap)),
                 work_at_open,
                 ..
             }) = popped
+                && backtrack.schedule(n, resume_at, &snap, work_at_open)?
             {
-                let cost = n.saturating_sub(resume_at);
-                if *backtrack_branches >= MAX_HCL_BACKTRACK_BRANCHES || cost > *rescan_budget {
-                    return Err(format!(
-                        "HCL heredoc backtracking exceeds the maximum supported complexity ({MAX_HCL_RESCAN_BYTES} bytes)"
-                    ));
-                }
-                *backtrack_branches += 1;
-                *rescan_budget -= cost;
-                worklist.push((snap, resume_at, work_at_open));
+                backtrack.worklist.push((snap, resume_at, work_at_open));
             }
             *i = after;
             set_expr_op(scopes, false, false);
@@ -539,8 +710,9 @@ fn scan_heredoc_scope(
         // `heredoc_template`) and continue scanning for a greedy body-line
         // terminator.
         if !has_empty_close {
-            let mut snap = scopes.clone();
-            snap.pop();
+            let prefix_len = scopes.len().saturating_sub(1);
+            let mut snap = Vec::with_capacity(prefix_len);
+            snap.extend_from_slice(&scopes[..prefix_len]);
             set_expr_op(&mut snap, false, false);
             let snap: Rc<[WidthScope]> = Rc::from(snap);
             if let Some(WidthScope::Heredoc { empty_close, .. }) = scopes.last_mut() {
@@ -958,12 +1130,7 @@ fn scan_code_token(
         }
         b'?' => {
             note_object_key_token(scopes, *i);
-            if let Some(WidthScope::ObjectBrace {
-                in_value: true,
-                ternary_depth,
-                ..
-            }) = scopes.last_mut()
-            {
+            if let Some(WidthScope::ObjectBrace { ternary_depth, .. }) = scopes.last_mut() {
                 *ternary_depth = ternary_depth.saturating_add(1);
             }
             set_expr_op(scopes, true, true);
@@ -991,11 +1158,7 @@ fn scan_code_token(
                 note_object_key_token(scopes, *i);
                 set_expr_op(scopes, false, true);
                 *i += 2;
-            } else if let Some(WidthScope::ObjectBrace {
-                in_value: true,
-                ternary_depth,
-                ..
-            }) = scopes.last_mut()
+            } else if let Some(WidthScope::ObjectBrace { ternary_depth, .. }) = scopes.last_mut()
                 && *ternary_depth > 0
             {
                 *ternary_depth -= 1;
@@ -1049,9 +1212,7 @@ fn check_object_width(text: &str) -> Result<(), String> {
     let n = b.len();
     let mut i = 0usize;
     let mut total_work = 0u64;
-    let mut rescan_budget = MAX_HCL_RESCAN_BYTES;
-    let mut backtrack_branches = 0usize;
-    let mut worklist: Vec<BacktrackBranch> = Vec::new();
+    let mut backtrack = BacktrackState::new();
     let mut scopes: Vec<WidthScope> = vec![WidthScope::BlockBrace {
         in_expr: false,
         last_was_op: false,
@@ -1066,14 +1227,7 @@ fn check_object_width(text: &str) -> Result<(), String> {
                     scan_directive_body_scope(b, &mut i, &mut scopes)?;
                 }
                 WidthScope::Heredoc { .. } => {
-                    scan_heredoc_scope(
-                        text,
-                        &mut i,
-                        &mut scopes,
-                        &mut rescan_budget,
-                        &mut backtrack_branches,
-                        &mut worklist,
-                    )?;
+                    scan_heredoc_scope(text, &mut i, &mut scopes, &mut backtrack)?;
                 }
                 WidthScope::BlockBrace { .. }
                 | WidthScope::ObjectBrace { .. }
@@ -1086,35 +1240,26 @@ fn check_object_width(text: &str) -> Result<(), String> {
             }
         }
 
-        // If EOF was reached while ANY enclosing heredoc had a line-1
-        // empty-heredoc fallback (even if an inner `InterpBrace` / `String` /
-        // `TemplateDirective` was left unclosed above it), emulate `hcl-edit`'s
-        // `opt(...)` fallback and resume right after line 1's delimiter.
-        if let Some(heredoc_idx) = scopes.iter().rposition(|s| {
-            matches!(
-                s,
-                WidthScope::Heredoc {
-                    empty_close: Some(_),
-                    ..
-                }
-            )
-        }) && let WidthScope::Heredoc {
-            empty_close: Some((resume_at, snap)),
-            work_at_open,
-            ..
-        } = &scopes[heredoc_idx]
-        {
-            let resume_at = *resume_at;
-            let work_at_open = *work_at_open;
-            let cost = n.saturating_sub(resume_at);
-            if backtrack_branches >= MAX_HCL_BACKTRACK_BRANCHES || cost > rescan_budget {
-                return Err(format!(
-                    "HCL heredoc backtracking exceeds the maximum supported complexity ({MAX_HCL_RESCAN_BYTES} bytes)"
-                ));
+        // If EOF was reached while ANY enclosing heredoc had an unvisited
+        // line-1 empty-heredoc fallback (even if an inner `InterpBrace` /
+        // `String` / `TemplateDirective` was left unclosed above it), emulate
+        // `hcl-edit`'s `opt(...)` fallback and resume right after line 1's
+        // delimiter.
+        let mut eof_fallback: Option<(Rc<[WidthScope]>, usize, u64)> = None;
+        for scope in scopes.iter().rev() {
+            if let WidthScope::Heredoc {
+                empty_close: Some((resume_at, snap)),
+                work_at_open,
+                ..
+            } = scope
+                && backtrack.schedule(n, *resume_at, snap, *work_at_open)?
+            {
+                eof_fallback = Some((Rc::clone(snap), *resume_at, *work_at_open));
+                break;
             }
-            backtrack_branches += 1;
-            rescan_budget -= cost;
-            scopes = snap.to_vec();
+        }
+        if let Some((next_scopes, resume_at, work_at_open)) = eof_fallback {
+            scopes = next_scopes.to_vec();
             total_work = work_at_open;
             i = resume_at;
             continue;
@@ -1124,7 +1269,7 @@ fn check_object_width(text: &str) -> Result<(), String> {
         // containing `${` / `%{` markers closed on a later line (covering
         // mid-file winnow `opt(...)` backtracking such as `# %{x}` or `# ${<}`).
         // Its rescan and branch budgets were already charged eagerly on push.
-        if let Some((next_scopes, resume_at, work_at_open)) = worklist.pop() {
+        if let Some((next_scopes, resume_at, work_at_open)) = backtrack.worklist.pop() {
             scopes = next_scopes.to_vec();
             total_work = work_at_open;
             i = resume_at;
@@ -1342,5 +1487,41 @@ mod tests {
         }
         let err = check_limits(&with_marker).unwrap_err();
         assert!(err.contains("HCL heredoc backtracking"), "got: {err}");
+    }
+
+    #[test]
+    fn sequential_valid_heredocs_with_line1_prefix_and_interpolation_do_not_blow_up() {
+        use std::fmt::Write as _;
+
+        // 15 valid sequential heredocs whose line 1 starts with the delimiter
+        // followed by punctuation and an interpolation (`Note: ${var.a}`).
+        // Without state deduplication, this generated 2^15 - 1 branches and
+        // falsely tripped MAX_HCL_BACKTRACK_BRANCHES (512).
+        let mut hcl = String::new();
+        for idx in 0..15 {
+            let _ = writeln!(hcl, "m{idx} = <<Note\nNote: ${{var.a}}\nNote");
+        }
+        let val = hcl_to_value(&hcl).expect("15 valid sequential heredocs must parse cleanly");
+        assert_eq!(val.as_object().map(Map::len), Some(15));
+    }
+
+    #[test]
+    fn ternary_in_object_key_keeps_key_position_and_enforces_key_object_limits() {
+        use std::fmt::Write as _;
+
+        // `{ true ? 1 : <inner_obj> = 1 }` must NOT let `:` flip `in_value`
+        // before the outer `=`, so the inner object stays subject to
+        // `MAX_HCL_KEY_OBJECT_ITEMS` (64).
+        let mut inner = String::from("{ ");
+        for idx in 0..=64 {
+            let _ = write!(inner, "a{idx} = 0, ");
+        }
+        inner.push('}');
+        let hcl = format!("x = {{ true ? 1 : {inner} = 1 }}\n");
+        let err = check_limits(&hcl).unwrap_err();
+        assert!(
+            err.contains("64 entries"),
+            "expected key-object width limit (64 entries), got: {err}"
+        );
     }
 }

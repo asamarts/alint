@@ -48,11 +48,12 @@ cd editors/jetbrains
 ```
 
 The build is exercised by the `editors` CI job (it also typechecks the
-VS Code extension and wasm-builds the Zed one). A headless `runIde`
-smoke has confirmed the plugin loads in a real IntelliJ 2024.2 alongside
-LSP4IJ with no errors; what's left to verify by hand is the server
-actually attaching and surfacing diagnostics when you open a file in a
-project (`./gradlew runIde`, then open a repo with a `.alint.yml`).
+VS Code extension and wasm-builds the Zed one). Headless integration
+tests (`AlintLspIntegrationTest.kt`) run the plugin against a real
+`alint lsp` binary in both trusted and untrusted project states,
+verifying live diagnostics, trust-state reloads, and open-tab
+reconnection. You can also launch an interactive sandbox IDE with
+`./gradlew runIde` and open a repository with a `.alint.yml`.
 
 ## Publishing
 
