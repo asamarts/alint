@@ -1716,7 +1716,7 @@ the owner decisions are
   upgrades `hcl-rs` from `0.18` to `0.20` (`hcl-edit 0.10.0`), retiring the 512 MiB parse
   thread, 64 KiB cap, and recursion pre-scanner (#608; no `ahcl` crate needed).
 - **Security, trust, and cross-platform fixes.** JetBrains workspace trust pass-through (#545),
-  per-rule 10,000-finding cap on `constraint` `set` and `key_parity` (#596), JUnit and agent
+  per-rule 10,000-finding cap on `constraint`, `key_parity`, and `no_duplicate_keys` (#596), JUnit and agent
   bidi/zero-width escaping (#600), `key_parity` pointer cap (#569), nested-rule option escaping
   (#583), linear structural env redaction (#585), POSIX-normalized `{path}`/`{dir}` tokens on
   Windows with cross-platform baseline fingerprint parity (#579), `java-no-tracked-build`
