@@ -1486,3 +1486,44 @@ fn pre_022_hidden_path_hint_does_not_false_fire_on_unrelated_fixed_rule() {
         "hint must fire when the same rule has both an unmatched pre-0.22 entry and a live hidden violation"
     );
 }
+
+#[test]
+fn offending_line_splits_lone_cr_and_matches_lf_and_crlf() {
+    let v = Violation::new("m")
+        .with_path(Path::new("f.txt"))
+        .with_location(2, 1);
+    let lf = fingerprint("r", &v, Some(b"first\nsecond\nthird\n"));
+    let crlf = fingerprint("r", &v, Some(b"first\r\nsecond\r\nthird\r\n"));
+    let cr = fingerprint("r", &v, Some(b"first\rsecond\rthird\r"));
+    assert_eq!(lf, crlf);
+    assert_eq!(lf, cr, "lone CR must delimit line 2 identically to LF/CRLF");
+}
+
+#[cfg(unix)]
+#[test]
+fn load_file_redacted_checks_and_reads_same_path_and_walk_exclude_keeps_symlink_name() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().join("repo");
+    let outside = tmp.path().join("outside");
+    std::fs::create_dir_all(&repo).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("ext.json"), "{\"schema_version\":1}\n").unwrap();
+    std::os::unix::fs::symlink(outside.join("ext.json"), repo.join("escape.json")).unwrap();
+    // Root-relative escaping symlink is refused even when CWD != repo.
+    let err =
+        Baseline::load_file_redacted(Path::new("escape.json"), Some(&repo), false).unwrap_err();
+    assert!(err.contains("outside the repository"), "{err}");
+
+    // Valid root-relative baseline reads from `repo` regardless of process CWD.
+    std::fs::write(repo.join("in_repo.json"), "{\"schema_version\":1}\n").unwrap();
+    assert!(Baseline::load_file_redacted(Path::new("in_repo.json"), Some(&repo), false).is_ok());
+
+    // `walk_exclude` for an in-repo symlink excludes the symlink's own path.
+    std::fs::create_dir_all(repo.join("baselines")).unwrap();
+    std::fs::write(repo.join("baselines/prod.json"), "{\"schema_version\":1}\n").unwrap();
+    std::os::unix::fs::symlink("baselines/prod.json", repo.join(".alint-baseline.json")).unwrap();
+    assert_eq!(
+        walk_exclude(&repo, &repo.join(".alint-baseline.json")).as_deref(),
+        Some("/.alint-baseline.json")
+    );
+}

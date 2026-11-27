@@ -115,7 +115,7 @@ pub(crate) fn name_field_sources(mapping: &mut Mapping, names: &[String]) {
 
 pub(crate) const INTERNAL_FIELD_PREFIX: &str = "__alint_internal_";
 
-/// A class of `extends:` source recorded in [`PROVENANCE_MARKER`].
+/// A class of `extends:` or nested source recorded in [`PROVENANCE_MARKER`].
 #[derive(Clone, Copy)]
 pub(crate) enum SourceClass {
     /// Any config reached through `extends:` (local, remote, or bundled).
@@ -124,6 +124,8 @@ pub(crate) enum SourceClass {
     Remote,
     /// An `https://` `extends:` entry NOT allowlisted in `trusted_extends:`.
     UntrustedRemote,
+    /// A nested subdirectory `.alint.yml` (untrusted like an unallowlisted remote).
+    UntrustedNested,
 }
 
 impl SourceClass {
@@ -132,6 +134,7 @@ impl SourceClass {
             Self::Extended => "extended",
             Self::Remote => "remote",
             Self::UntrustedRemote => "untrusted_remote",
+            Self::UntrustedNested => "untrusted_nested",
         }
     }
 }
@@ -142,6 +145,7 @@ pub(crate) struct Provenance {
     pub(crate) extended: Option<String>,
     remote: Option<String>,
     untrusted_remote: Option<String>,
+    untrusted_nested: Option<String>,
 }
 
 impl Provenance {
@@ -160,7 +164,18 @@ impl Provenance {
             extended: source(SourceClass::Extended),
             remote: source(SourceClass::Remote),
             untrusted_remote: source(SourceClass::UntrustedRemote),
+            untrusted_nested: source(SourceClass::UntrustedNested),
         }
+    }
+
+    fn untrusted(&self) -> Option<&str> {
+        self.untrusted_remote
+            .as_deref()
+            .or(self.untrusted_nested.as_deref())
+    }
+
+    fn remote_or_nested(&self) -> Option<&str> {
+        self.remote.as_deref().or(self.untrusted_nested.as_deref())
     }
 }
 
@@ -583,7 +598,8 @@ pub(crate) fn reject_remote_assembled_env_refs(
     id: &str,
     source_names: &[String],
 ) -> Result<()> {
-    let Some(source) = Provenance::read(rule, source_names).remote else {
+    let provenance = Provenance::read(rule, source_names);
+    let Some(source) = provenance.remote_or_nested() else {
         return Ok(());
     };
     let Some(template) = rule
@@ -797,7 +813,8 @@ pub(crate) fn reject_untrusted_assembled_when(
     env_vars: &std::collections::HashMap<String, String>,
     source_names: &[String],
 ) -> Result<()> {
-    let Some(source) = Provenance::read(rule, source_names).untrusted_remote else {
+    let provenance = Provenance::read(rule, source_names);
+    let Some(source) = provenance.untrusted() else {
         return Ok(());
     };
     let Some(template) = rule
@@ -812,7 +829,7 @@ pub(crate) fn reject_untrusted_assembled_when(
     // the template is irrelevant to what the remote could assemble.
     let rendered = render_placeholder_whens(template, &vars);
     if let Some(refusal) = find_when_refusal(&rendered, true, env_vars) {
-        return Err(when_refusal_error("rule", id, &refusal, &source));
+        return Err(when_refusal_error("rule", id, &refusal, source));
     }
     Ok(())
 }
@@ -848,10 +865,9 @@ pub(crate) fn reject_untrusted_env_instance_vars(
     else {
         return Ok(());
     };
-    let Some(source) = Provenance::read(rule, source_names)
-        .untrusted_remote
-        .or_else(|| Provenance::read(template, source_names).untrusted_remote)
-    else {
+    let rule_prov = Provenance::read(rule, source_names);
+    let tmpl_prov = Provenance::read(template, source_names);
+    let Some(source) = rule_prov.untrusted().or_else(|| tmpl_prov.untrusted()) else {
         return Ok(());
     };
     // Scan with the expansion's own placeholder parser, so spacing variants
@@ -1510,8 +1526,7 @@ fn kind_spawns(kind: &str, catalog: Option<KindCatalog<'_>>) -> bool {
     catalog
         .and_then(|catalog| catalog.meta(kind))
         .is_none_or(|meta| {
-            meta.capabilities
-                .iter()
+            meta.effective_capabilities()
                 .any(|entry| matches!(entry.capability, Capability::SpawnUserCommand))
         })
 }

@@ -29,6 +29,7 @@ use std::io::IsTerminal;
 use std::str::FromStr;
 use std::time::Duration;
 
+use alint_output::{GlyphSet, sanitize_terminal};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 
 /// User-selected progress mode. Resolves at `Progress::new`
@@ -76,79 +77,86 @@ pub struct Progress {
     /// mode (CI, --quiet, non-TTY auto).
     inner: Option<MultiProgress>,
     /// Whether status/summary one-liners write to stderr.
-    /// `true` for `Auto`/`Always`; `false` for `Never`.
+    /// `true` for `Always`, and for `Auto` when stderr is a TTY; `false` for `Never`.
     emit_summary: bool,
+    color: bool,
+    glyphs: GlyphSet,
 }
 
 impl Progress {
     /// Build a new reporter. `Auto` resolves against
-    /// `stderr.is_terminal()`. Production callers pass the
-    /// CLI-flag value; tests pass `ProgressMode::Never` (or use
-    /// the `null()` shortcut).
+    /// `stderr.is_terminal()`. Production callers use [`Self::with_style`]
+    /// to thread `--color` and `--ascii`; tests pass `ProgressMode::Never`
+    /// (or use the `null()` shortcut).
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(mode: ProgressMode) -> Self {
+        Self::with_style(mode, true, GlyphSet::UNICODE)
+    }
+
+    /// Build a new reporter honoring resolved color and glyph preferences.
+    pub fn with_style(mode: ProgressMode, color: bool, glyphs: GlyphSet) -> Self {
+        let is_tty = std::io::stderr().is_terminal();
         // Animated bars only when stderr is a real TTY —
         // carriage-return repaints in a captured log file are
-        // noise, not progress. Even `--progress=always` won't
-        // force bars onto a non-TTY: indicatif silences itself
-        // for non-TTY draw targets, and eprintln-based status
-        // lines (below) cover the captured-log case more
-        // usefully.
-        let bars_visible = !matches!(mode, ProgressMode::Never) && std::io::stderr().is_terminal();
+        // noise, not progress.
+        let bars_visible = !matches!(mode, ProgressMode::Never) && is_tty;
         let inner =
             bars_visible.then(|| MultiProgress::with_draw_target(ProgressDrawTarget::stderr()));
-        // Status / summary lines write to stderr in every mode
-        // except `Never`. Captured stderr (CI logs) still gets
-        // the one-line milestones — useful for "what was
-        // happening when this run failed?" diagnostics.
-        let emit_summary = !matches!(mode, ProgressMode::Never);
+        // `Auto` renders only when stderr is a TTY; `Always` forces milestone
+        // lines even on non-TTY stderr; `Never` silences everything.
+        let emit_summary = match mode {
+            ProgressMode::Auto => is_tty,
+            ProgressMode::Always => true,
+            ProgressMode::Never => false,
+        };
         Self {
             inner,
             emit_summary,
+            color,
+            glyphs,
         }
     }
 
     /// Shortcut for tests that want every method to be a no-op
     /// without TTY probing. Production callers use
-    /// `Progress::new(ProgressMode::Never)`.
+    /// `Progress::with_style(ProgressMode::Never, ...)`.
     #[cfg(test)]
     pub fn null() -> Self {
         Self {
             inner: None,
             emit_summary: false,
+            color: false,
+            glyphs: GlyphSet::UNICODE,
         }
     }
 
     /// Begin a new phase with optional known total.
     /// `total: None` produces a spinner; `Some(n)` produces a
     /// determinate bar with ETA.
-    ///
-    /// When bars aren't being drawn but status output is still
-    /// enabled (`--progress=auto` on a non-TTY,
-    /// `--progress=always` on a non-TTY, or any captured
-    /// stderr scenario), the returned [`Phase`] writes a
-    /// one-line `<label> — <summary>` milestone on `finish` so
-    /// captured logs retain phase boundaries.
     pub fn phase(&self, label: &str, total: Option<u64>) -> Phase {
+        let safe_label = sanitize_terminal(label).into_owned();
         let Some(multi) = &self.inner else {
             return Phase {
                 bar: None,
-                fallback_label: self.emit_summary.then(|| label.to_string()),
+                fallback_label: self.emit_summary.then_some(safe_label),
+                bullet: self.glyphs.bullet,
             };
         };
         let bar = if let Some(n) = total {
             let pb = multi.add(ProgressBar::new(n));
-            pb.set_style(determinate_style());
+            pb.set_style(determinate_style(self.color));
             pb
         } else {
             let pb = multi.add(ProgressBar::new_spinner());
-            pb.set_style(spinner_style());
+            pb.set_style(spinner_style(self.color));
             pb.enable_steady_tick(Duration::from_millis(120));
             pb
         };
-        bar.set_message(label.to_string());
+        bar.set_message(safe_label);
         Phase {
             bar: Some(bar),
             fallback_label: None,
+            bullet: self.glyphs.bullet,
         }
     }
 
@@ -161,12 +169,12 @@ impl Progress {
         if !self.emit_summary {
             return;
         }
+        let safe = sanitize_terminal(message);
+        let bullet = self.glyphs.bullet;
         if let Some(multi) = &self.inner {
-            let _ = multi.println(format!("· {message}"));
+            let _ = multi.println(format!("{bullet} {safe}"));
         } else {
-            // No bars in flight (captured stderr or
-            // `--progress=auto` on a non-TTY). Direct write.
-            eprintln!("· {message}");
+            eprintln!("{bullet} {safe}");
         }
     }
 
@@ -176,10 +184,11 @@ impl Progress {
         if !self.emit_summary {
             return;
         }
+        let safe = sanitize_terminal(message);
         if let Some(multi) = &self.inner {
-            let _ = multi.println(message);
+            let _ = multi.println(&safe);
         } else {
-            eprintln!("{message}");
+            eprintln!("{safe}");
         }
     }
 }
@@ -194,8 +203,9 @@ pub struct Phase {
     bar: Option<ProgressBar>,
     /// When set, `finish` writes a one-line milestone to
     /// stderr instead of a bar update. Active only in
-    /// captured-stderr scenarios (no TTY but progress enabled).
+    /// captured-stderr scenarios (`--progress=always` on non-TTY).
     fallback_label: Option<String>,
+    bullet: &'static str,
 }
 
 impl Phase {
@@ -204,6 +214,7 @@ impl Phase {
         Self {
             bar: None,
             fallback_label: None,
+            bullet: GlyphSet::UNICODE.bullet,
         }
     }
 
@@ -221,7 +232,7 @@ impl Phase {
     /// fixed phase label.
     pub fn set_message(&self, msg: &str) {
         if let Some(bar) = &self.bar {
-            bar.set_message(msg.to_string());
+            bar.set_message(sanitize_terminal(msg).into_owned());
         }
     }
 
@@ -231,28 +242,35 @@ impl Phase {
     /// CI logs retain phase boundaries. With neither (silent /
     /// null mode): no-op.
     pub fn finish(self, summary: &str) {
+        let safe = sanitize_terminal(summary);
         if let Some(bar) = self.bar {
-            bar.finish_with_message(summary.to_string());
+            bar.finish_with_message(safe.into_owned());
         } else if let Some(label) = self.fallback_label {
-            eprintln!("· {label} - {summary}");
+            eprintln!("{} {label} - {safe}", self.bullet);
         }
     }
 }
 
-fn determinate_style() -> ProgressStyle {
+fn determinate_style(color: bool) -> ProgressStyle {
     // "{spinner} label [bar] pos/len (eta)" — width is auto via
-    // `wide_bar`. `dim` template tokens render in a muted style
-    // so the bar foregrounds the active count.
-    ProgressStyle::with_template(
-        "{spinner:.cyan} {msg} [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})",
-    )
-    .expect("valid indicatif template")
-    .progress_chars("=> ")
+    // `wide_bar`. Strip color directives when colors are disabled.
+    let template = if color {
+        "{spinner:.cyan} {msg} [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})"
+    } else {
+        "{spinner} {msg} [{wide_bar}] {pos}/{len} ({eta})"
+    };
+    ProgressStyle::with_template(template)
+        .expect("valid indicatif template")
+        .progress_chars("=> ")
 }
 
-fn spinner_style() -> ProgressStyle {
-    ProgressStyle::with_template("{spinner:.cyan} {msg} {elapsed:.dim}")
-        .expect("valid indicatif template")
+fn spinner_style(color: bool) -> ProgressStyle {
+    let template = if color {
+        "{spinner:.cyan} {msg} {elapsed:.dim}"
+    } else {
+        "{spinner} {msg} {elapsed}"
+    };
+    ProgressStyle::with_template(template).expect("valid indicatif template")
 }
 
 #[cfg(test)]

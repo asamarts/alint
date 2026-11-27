@@ -1526,15 +1526,14 @@ fn an_alternating_list_of_overriding_rulesets_is_charged_its_merges() {
     assert_eq!(counted.charged, 2 * rules + rules + 19 * (rules + rules));
 }
 
-/// A ruleset that repeats a rule's id merges each later copy onto the one
-/// before it, each time an entry merges the ruleset, and each such merge is
-/// charged: the copies of one entry are not the copies of another, so none is
-/// left as it is (`[a, b, a]`, `a` holding 100 copies of one rule).
+/// A single ruleset that declares the same rule id twice is rejected at load
+/// time rather than silently merging the second copy over the first (matching
+/// standalone config validation).
 #[test]
-fn a_source_that_repeats_a_rule_id_is_charged_each_merge() {
+fn a_source_that_repeats_a_rule_id_is_rejected_before_merge() {
     use std::fmt::Write as _;
     let tmp = tempfile::tempdir().unwrap();
-    let copies = 100;
+    let copies = 10;
     let mut text = String::from("version: 1\nrules:\n");
     for index in 0..copies {
         writeln!(
@@ -1547,15 +1546,8 @@ fn a_source_that_repeats_a_rule_id_is_charged_each_merge() {
     let a = "./a.yml".to_string();
     let entries = [a.clone(), write_ruleset(tmp.path(), "b", 1, 1), a];
     let counted = load_counted(&write_extending(tmp.path(), &entries));
-    let raw = counted.raw.unwrap();
-    assert_eq!(raw.rules.len(), 2);
-    assert_eq!(raw.rules[0]["message"], ayaml::Value::from("m99"));
-    assert_eq!(counted.merged_onto, (copies - 1) + copies);
-    // Loading `a` and `b`, what each entry brings in, and the merges.
-    assert_eq!(
-        counted.charged,
-        (copies + 1) + (copies + 1 + copies) + (copies - 1) + copies
-    );
+    let err = counted.raw.unwrap_err().to_string();
+    assert!(err.contains("duplicate rule id"), "{err}");
 }
 
 #[test]

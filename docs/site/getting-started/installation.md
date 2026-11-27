@@ -22,7 +22,7 @@ The recommended path on macOS and Linux. The [asamarts/homebrew-alint](https://g
 curl -fsSL https://alint.org/install.sh | bash
 ```
 
-Detects platform (Linux / macOS, x86_64 / aarch64), downloads the matching tarball from GitHub Releases, verifies its SHA-256, and installs to `$INSTALL_DIR` (default `~/.local/bin`). This path is shell-based, so it does not cover Windows; Windows users have [npm](#npm), [cargo](#cargo), or the manual tarball (see [Windows](#windows)).
+Detects platform (Linux / macOS, x86_64 / aarch64), downloads the matching tarball from GitHub Releases, verifies its SHA-256, and installs to `$INSTALL_DIR` (default `~/.local/bin`). This path is shell-based, so it does not cover Windows; Windows users have [npm](#npm), [PyPI](#pypi-uvx--pipx--pip--uv), [cargo](#cargo), or the manual tarball (see [Windows](#windows)).
 
 Pin a specific version (and skip the "latest release" GitHub API lookup, which can rate-limit on shared CI egress IPs):
 
@@ -115,6 +115,7 @@ Also published: the bare semver (`:0.23.0`), the `:<major>.<minor>` rolling chan
 The `install.sh` one-liner is shell-based and does not cover Windows. On Windows, use:
 
 - **npm:** `npm install -g @asamarts/alint` (see [npm](#npm)) — the simplest path;
+- **PyPI:** `uvx alint check`, `pipx install alint`, or `pip install alint` (see [PyPI](#pypi-uvx--pipx--pip--uv));
 - **cargo:** `cargo install alint` or `cargo binstall alint` (see [cargo](#cargo));
 - **manual:** download `alint-v0.23.0-x86_64-pc-windows-msvc.tar.gz` (or `aarch64-pc-windows-msvc` for Windows on ARM) from the [Releases page](https://github.com/asamarts/alint/releases), extract, and put `alint.exe` on your `PATH`.
 

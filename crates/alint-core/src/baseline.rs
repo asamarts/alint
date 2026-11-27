@@ -249,13 +249,44 @@ fn normalize_path(path: &Path) -> Cow<'_, [u8]> {
     }
 }
 
-/// The bytes of 1-based line `n` in `bytes`, with a trailing `\r`
-/// stripped (the `\n` is consumed by the split). `None` if the line
-/// doesn't exist or `n == 0`.
+/// The bytes of 1-based line `n` in `bytes`, splitting on `\r\n`, `\n`, and
+/// lone `\r` (matching [`crate::location::physical_lines`]) with the line
+/// ending stripped. `None` if the line doesn't exist or `n == 0`.
 fn offending_line(bytes: &[u8], n: usize) -> Option<&[u8]> {
-    let idx = n.checked_sub(1)?;
-    let line = bytes.split(|&b| b == b'\n').nth(idx)?;
-    Some(line.strip_suffix(b"\r").unwrap_or(line))
+    let target = n.checked_sub(1)?;
+    let mut line_idx = 0usize;
+    let mut start = 0usize;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\n' => {
+                if line_idx == target {
+                    return Some(&bytes[start..i]);
+                }
+                line_idx += 1;
+                i += 1;
+                start = i;
+            }
+            b'\r' => {
+                if line_idx == target {
+                    return Some(&bytes[start..i]);
+                }
+                line_idx += 1;
+                i += if bytes.get(i + 1) == Some(&b'\n') {
+                    2
+                } else {
+                    1
+                };
+                start = i;
+            }
+            _ => i += 1,
+        }
+    }
+    if line_idx == target {
+        Some(&bytes[start..])
+    } else {
+        None
+    }
 }
 
 fn to_hex(digest: &[u8]) -> String {
@@ -528,8 +559,25 @@ impl Baseline {
         } else {
             std::borrow::Cow::Owned(path.display().to_string())
         };
-        if let Some(root) = repository_root {
-            let refusal = match crate::resolve_named_read(root, path) {
+        let read_path: Cow<'_, Path> = if let Some(root) = repository_root {
+            // Compute ONE target path for both confinement check and disk read:
+            // - absolute `path`: check & read `path` directly
+            // - relative `path` already prefixed by a relative `root`
+            //   (e.g. caller passed `root.join(b)`): strip `root` before passing
+            //   to `resolve_named_read(root, rel)` so it doesn't double-join
+            // - other relative `path` (root-relative): join with `root` for both
+            //   the check and the read so CWD != `root` can never read another file.
+            let (check_arg, resolved_read) = if path.is_absolute() {
+                (path, Cow::Borrowed(path))
+            } else if root.is_relative()
+                && !root.as_os_str().is_empty()
+                && let Ok(rel) = path.strip_prefix(root)
+            {
+                (rel, Cow::Owned(root.join(rel)))
+            } else {
+                (path, Cow::Owned(root.join(path)))
+            };
+            let refusal = match crate::resolve_named_read(root, check_arg) {
                 crate::NamedRead::InRoot => None,
                 crate::NamedRead::GitDirectory => Some(
                     "is in a Git directory, where alint never reads; the `baseline:` key \
@@ -543,8 +591,11 @@ impl Baseline {
             if let Some(refusal) = refusal {
                 return Err(format!("baseline file {shown} {refusal}"));
             }
-        }
-        let bytes = crate::bounded_file::read_regular_capped(path, crate::MAX_ANALYZE_BYTES)
+            resolved_read
+        } else {
+            Cow::Borrowed(path)
+        };
+        let bytes = crate::bounded_file::read_regular_capped(&read_path, crate::MAX_ANALYZE_BYTES)
             .map_err(|e| {
                 format!("reading baseline file {shown} (run `alint baseline` to create it): {e}")
             })?;
@@ -1041,7 +1092,20 @@ fn order_key(v: &Violation) -> (Option<std::borrow::Cow<'_, str>>, usize, usize,
 #[must_use]
 pub fn walk_exclude(root: &Path, baseline: &Path) -> Option<String> {
     let root_abs = root.canonicalize().ok()?;
-    let base_abs = baseline.canonicalize().ok()?;
+    // Ensure the baseline entry exists (without following a final symlink so an
+    // in-repo symlink `.alint-baseline.json -> baselines/prod.json` excludes the
+    // symlink's own repo-relative path rather than its target).
+    let meta = baseline.symlink_metadata().ok()?;
+    let base_abs = if meta.file_type().is_symlink() {
+        let name = baseline.file_name()?;
+        let parent = baseline
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        parent.canonicalize().ok()?.join(name)
+    } else {
+        baseline.canonicalize().ok()?
+    };
     let rel = base_abs.strip_prefix(&root_abs).ok()?;
     // Root-anchored (leading `/`): the walker turns this into an override
     // `!/…` that matches ONLY the baseline at the repo root, never a same-named

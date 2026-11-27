@@ -116,32 +116,11 @@ runs:
           "${ACTION_REF:-}" \
           "$ALINT_BAKED_VERSION")"
         export ALINT_VERSION="$ver"
-        if [[ -z "$ref" ]]; then
-          install_sh="$ACTION_PATH/install.sh"
-          echo "alint action: installing '${ver}' (action_ref='<local>', install.sh=bundled ${install_sh})"
-          if [[ ! -f "$install_sh" ]]; then
-            echo "::error::local action checkout has no install.sh at ${install_sh}" >&2
-            exit 1
-          fi
-        else
-          echo "alint action: installing '${ver}' (action_ref='${ACTION_REF}', install.sh ref='${ref}')"
-          # Fetch install.sh with retries: raw.githubusercontent.com can return a
-          # transient 403 (rate-limit / CDN edge) that previously failed the action
-          # outright. Portable retry loop (no curl --retry-all-errors version
-          # dependency), up to 3 attempts before giving up.
-          install_url="https://raw.githubusercontent.com/asamarts/alint/${ref}/install.sh"
-          install_sh="${RUNNER_TEMP:-/tmp}/alint-install.sh"
-          for attempt in 1 2 3; do
-            if curl -fsSL "$install_url" -o "$install_sh"; then
-              break
-            fi
-            if [[ "$attempt" -eq 3 ]]; then
-              echo "::error::failed to fetch install.sh from ${install_url} after 3 attempts (transient raw.githubusercontent error, e.g. rate-limit or CDN)" >&2
-              exit 1
-            fi
-            echo "alint action: install.sh fetch failed (attempt ${attempt}/3), retrying in 2s..." >&2
-            sleep 2
-          done
+        install_sh="$ACTION_PATH/install.sh"
+        echo "alint action: installing '${ver}' (action_ref='${ACTION_REF:-<local>}', install.sh=bundled ${install_sh})"
+        if [[ ! -f "$install_sh" ]]; then
+          echo "::error::action checkout has no bundled install.sh at ${install_sh}" >&2
+          exit 1
         fi
         bash "$install_sh"
         echo "$INSTALL_DIR" >> "$GITHUB_PATH"
@@ -184,12 +163,25 @@ runs:
           cli_args+=(--fail-on-warning)
         fi
 
-        # Intentional word-splitting on user-provided extras.
-        # shellcheck disable=SC2206
-        extra=($ALINT_EXTRA)
+        # Parse extra args with POSIX shell quoting semantics and NO pathname
+        # glob expansion (so `--only lint-*` or `--baseline "my dir/base.json"`
+        # reach `alint` verbatim).
+        extra=()
+        if [ -n "$ALINT_EXTRA" ]; then
+          if command -v python3 >/dev/null 2>&1; then
+            while IFS= read -r -d '' tok; do
+              extra+=("$tok")
+            done < <(python3 -c 'import os, shlex, sys; sys.stdout.buffer.write(b"".join(t.encode("utf-8") + b"\0" for t in shlex.split(os.environ["ALINT_EXTRA"])))')
+          else
+            set -f
+            # shellcheck disable=SC2206
+            extra=($ALINT_EXTRA)
+            set +f
+          fi
+        fi
 
         if [ "$ALINT_FORMAT" = "sarif" ]; then
-          out="${RUNNER_TEMP:-/tmp}/alint.sarif"
+          out="$(mktemp "${RUNNER_TEMP:-/tmp}/alint-XXXXXX.sarif")"
           # A non-zero `alint check` (violations found) is a NORMAL SARIF
           # outcome: the file is still written, and a SARIF consumer wants the
           # path precisely when there ARE violations (to upload to code

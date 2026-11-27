@@ -57,14 +57,22 @@ impl Rule for ShebangHasExecutableRule {
             // metadata check happens after, only on actual
             // shebang files.
             let full = ctx.root.join(&entry.path);
-            let Ok(bytes) = read_prefix_n(&full, 2) else {
-                continue;
+            let bytes = match read_prefix_n(&full, 2) {
+                Ok(b) => b,
+                Err(e) => {
+                    violations.push(crate::io::io_error_violation(&entry.path, &e));
+                    continue;
+                }
             };
             if !bytes.starts_with(b"#!") {
                 continue;
             }
-            let Ok(meta) = std::fs::metadata(&full) else {
-                continue;
+            let meta = match std::fs::metadata(&full) {
+                Ok(m) => m,
+                Err(e) => {
+                    violations.push(crate::io::io_error_violation(&entry.path, &e));
+                    continue;
+                }
             };
             if meta.permissions().mode() & 0o111 == 0 {
                 let msg = self

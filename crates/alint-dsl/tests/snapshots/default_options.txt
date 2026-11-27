@@ -908,7 +908,7 @@ FilenameRegexRule {
     scope: Scope { ... },
     pattern_src: "^test_[a-z0-9_]+$",
     pattern: Regex(
-        "^^test_[a-z0-9_]+$$",
+        "\\A(?:^test_[a-z0-9_]+$)\\z",
     ),
     stem: true,
 }
@@ -1355,7 +1355,7 @@ ImportGateRule {
         "^crate::secrets",
     ),
     import_re: Regex(
-        "^\\s*(?:pub\\s+)?use\\s+([\\w:]+)",
+        "^\\s*(?:pub(?:\\s*\\([^)]*\\))?\\s+)?use\\s+([\\w:]+)",
     ),
     allow: Some(
         Scope { ... },
@@ -2205,9 +2205,12 @@ RegistryPathsResolveRule {
         ),
     ),
     orphans: Some(
-        OrphansSpec {
-            space: "crates/*",
-        },
+        (
+            OrphansSpec {
+                space: "crates/*",
+            },
+            Scope { ... },
+        ),
     ),
     allow_out_of_root: false,
 }

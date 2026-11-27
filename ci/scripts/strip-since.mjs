@@ -21,8 +21,9 @@
 // Keep the two in sync; ci/scripts/strip-since.test.mjs pins the same cases the
 // Rust unit tests cover. ADR-0007; docs/design/v0.14/documentation-drift.md P-REF.
 
-import { readdirSync, readFileSync, writeFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, realpathSync, writeFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const SINCE_OPEN = '<!-- alint:since=';
 const SINCE_CLOSE = '<!-- /alint:since -->';
@@ -143,7 +144,11 @@ function main(argv) {
   console.log(`strip-since: released=${rel}, scanned ${scanned} .md file(s), rewrote ${changed}.`);
 }
 
-// Run only as a CLI, not when imported by the test.
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Run only as a CLI, not when imported by the test. Normalize symlinks, spaces,
+// special URL characters, and Windows paths before comparing to import.meta.url.
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
+) {
   main(process.argv.slice(2));
 }

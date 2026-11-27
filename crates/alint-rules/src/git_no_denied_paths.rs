@@ -113,6 +113,7 @@ impl Rule for GitNoDeniedPathsRule {
             violations.push(Violation::new(msg).with_path(path.clone()));
         }
 
+        violations.sort_by(|a, b| a.path.cmp(&b.path));
         Ok(violations)
     }
 }
@@ -355,5 +356,34 @@ mod tests {
         // full picture.
         let hits = set.matches(std::path::Path::new("secrets/private.pem"));
         assert_eq!(hits.len(), 2);
+    }
+
+    #[test]
+    fn violations_are_emitted_in_deterministic_sorted_path_order() {
+        use std::collections::HashSet;
+        use std::path::PathBuf;
+
+        let rule = build(&spec("denied = [\"*.env\"]\n")).unwrap();
+        let tracked: HashSet<PathBuf> = [
+            PathBuf::from("z/.env"),
+            PathBuf::from("a/.env"),
+            PathBuf::from("m/.env"),
+            PathBuf::from("b/prod.env"),
+        ]
+        .into_iter()
+        .collect();
+        let index = alint_core::FileIndex::default();
+        let ctx = Context::new(std::path::Path::new("."), &index).with_git_tracked(Some(&tracked));
+        let vs = rule.evaluate(&ctx).unwrap();
+        let paths: Vec<_> = vs.iter().filter_map(|v| v.path.as_deref()).collect();
+        assert_eq!(
+            paths,
+            vec![
+                std::path::Path::new("a/.env"),
+                std::path::Path::new("b/prod.env"),
+                std::path::Path::new("m/.env"),
+                std::path::Path::new("z/.env"),
+            ]
+        );
     }
 }

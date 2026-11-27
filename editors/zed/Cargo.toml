@@ -14,6 +14,7 @@ crate-type = ["cdylib"]
 # `cargo build --target wasm32-wasip1`; re-confirm it matches the
 # registry's toolchain before publishing.
 zed_extension_api = "0.7.0"
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 
 # Standalone workspace so the parent alint Cargo workspace doesn't try to
 # absorb this wasm cdylib crate (different target, separate Cargo.lock).

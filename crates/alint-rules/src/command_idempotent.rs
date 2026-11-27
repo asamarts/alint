@@ -297,6 +297,12 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
          (the checker to run in its --check / idempotence mode)",
         ));
     }
+    if opts.timeout == Some(0) {
+        return Err(Error::rule_config(
+            &spec.id,
+            "command_idempotent `timeout` must be >= 1",
+        ));
+    }
     if opts.files_pattern.is_some() && opts.files_from == FilesFrom::None {
         return Err(Error::rule_config(
             &spec.id,
@@ -304,9 +310,18 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         ));
     }
     let files_pattern = match &opts.files_pattern {
-        Some(p) => Some(Regex::new(p).map_err(|e| {
-            Error::rule_config(&spec.id, format!("invalid `files_pattern` regex: {e}"))
-        })?),
+        Some(p) => {
+            let re = Regex::new(p).map_err(|e| {
+                Error::rule_config(&spec.id, format!("invalid `files_pattern` regex: {e}"))
+            })?;
+            if re.captures_len() < 2 {
+                return Err(Error::rule_config(
+                    &spec.id,
+                    "command_idempotent `files_pattern` must contain a capture group `(...)` for the file path",
+                ));
+            }
+            Some(re)
+        }
         None => None,
     };
     Ok(Box::new(CommandIdempotentRule {
@@ -528,6 +543,25 @@ mod tests {
             v[0].message.contains("did not exit within 1s"),
             "{:?}",
             v[0].message
+        );
+    }
+
+    #[test]
+    fn build_rejects_zero_timeout_and_files_pattern_without_capture_group() {
+        let zero = crate::test_support::spec_yaml(
+            "id: t\nkind: command_idempotent\ncommand: [\"true\"]\ntimeout: 0\nlevel: error\n",
+        );
+        assert!(build(&zero).is_err());
+
+        let no_group = crate::test_support::spec_yaml(
+            "id: t\nkind: command_idempotent\ncommand: [\"true\"]\n\
+             files_from: stdout\nfiles_pattern: \"Diff in .+ at\"\nlevel: error\n",
+        );
+        assert!(
+            build(&no_group)
+                .unwrap_err()
+                .to_string()
+                .contains("capture group")
         );
     }
 }

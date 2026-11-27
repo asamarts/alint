@@ -30,7 +30,7 @@ will too.
   any change at any time. Reasons will be stated in the PR or issue
   thread. Common ones: scope creep beyond the project's deliberate
   non-goals (AST-aware linting, IaC scanning, secret scanning; see
-  [`README.md`](README.md) "When alint is NOT the right tool"); a
+  [`README.md`](README.md) "What alint is not"); a
   rule kind without 3 demand sources from the case-study corpus
   (the saturation bar is documented in
   [`docs/development/launch-evidence.md`](docs/development/launch-evidence.md));
@@ -47,8 +47,8 @@ will too.
   runs automatically). See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 - **New rule kinds:** open an issue first using the feature-request
   template. The bar is documented at
-  [`CONTRIBUTING.md` § Proposing a new rule kind](CONTRIBUTING.md).
-  Two real-repo demand sources is the floor; three is preferred.
+  [`CONTRIBUTING.md` § Proposing a new rule kind](CONTRIBUTING.md):
+  at least three real production repositories converging on the same convention.
 - **New bundled rulesets:** same bar of three or more real repos
   converging on the same set of conventions.
 - **DSL or schema changes:** issue first; these affect every

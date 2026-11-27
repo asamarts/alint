@@ -1146,6 +1146,7 @@ mod registry_tests {
             kinds_where(&|m| matches!(m.dispatch, DispatchClass::FullIndex { path_scope: true })),
             BTreeSet::from([
                 "constraint",
+                "editorconfig_conforms",
                 "file_absent",
                 "file_exists",
                 "key_parity",

@@ -28,10 +28,6 @@ impl Rule for FileIsTextRule {
             if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }
-            if entry.size == 0 {
-                // Empty files are text by convention.
-                continue;
-            }
             // Bounded read: only the first TEXT_INSPECT_LEN
             // bytes feed `classify_bytes`. Solo runs read
             // just that prefix; the dispatch-flip path receives
@@ -234,5 +230,19 @@ mod tests {
             .map(|x| x.path.as_deref().unwrap().to_str().unwrap())
             .collect();
         assert_eq!(paths, ["bom_pdf.dat", "nul_inside.dat"]);
+    }
+
+    #[test]
+    fn rule_major_missing_zero_byte_file_emits_resource_read_failure() {
+        let spec = spec_yaml("id: t\nkind: file_is_text\npaths: \"**/*\"\nlevel: warning\n");
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("empty.txt", b"")]);
+        std::fs::remove_file(tmp.path().join("empty.txt")).unwrap();
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert_eq!(
+            v[0].analysis_failure_kind(),
+            Some(alint_core::AnalysisFailureKind::ResourceRead)
+        );
     }
 }

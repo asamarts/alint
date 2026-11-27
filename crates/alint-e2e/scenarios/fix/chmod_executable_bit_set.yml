@@ -1,0 +1,31 @@
+test_version: 1
+name: chmod sets +x on a file executable_bit says must be executable
+# Unix-only. Regular file starts without +x; `require: true` requires +x, so
+# the chmod fix sets the executable bits and the follow-up check is clean.
+tags: [fix, executable_bit, chmod, unix_metadata, unix-only]
+
+given:
+  tree:
+    scripts:
+      run.sh: "#!/usr/bin/env bash\necho ok\n"
+  config: |
+    version: 1
+    rules:
+      - id: scripts-must-be-exec
+        kind: executable_bit
+        paths: "scripts/*.sh"
+        level: error
+        require: true
+        fix:
+          chmod: {}
+
+when: [check, fix, check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: scripts-must-be-exec, level: error, path: scripts/run.sh}
+  - exit: success
+    applied: [scripts-must-be-exec]
+  - exit: success
+    violations: []

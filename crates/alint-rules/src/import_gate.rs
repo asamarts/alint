@@ -57,8 +57,8 @@ impl Language {
             Self::Go => r#"^\s*(?:import\s+)?(?:_\s+|[A-Za-z][\w.]*\s+)?"([^"]+)"\s*(?://.*)?$"#,
             // `import a.b` or `from a.b import c` -> `a.b`.
             Self::Python => r"^\s*(?:from|import)\s+([\w.]+)",
-            // `use a::b::c;` / `pub use a::{b, c};` -> `a::b::c` / `a::`.
-            Self::Rust => r"^\s*(?:pub\s+)?use\s+([\w:]+)",
+            // `use a::b::c;` / `pub use a::{b, c};` / `pub(crate) use a::b;` -> `a::b::c` / `a::`.
+            Self::Rust => r"^\s*(?:pub(?:\s*\([^)]*\))?\s+)?use\s+([\w:]+)",
             // `import x from "m"`, `import "m"`, `require("m")`,
             // `import("m")` -> `m`.
             Self::Js => r#"(?:from\s*|require\s*\(\s*|import\s*\(\s*|import\s+)['"]([^'"]+)['"]"#,
@@ -181,24 +181,27 @@ impl PerFileRule for ImportGateRule {
         }
         let mut violations = Vec::new();
         for (i, line) in scan_text.lines().enumerate() {
-            let Some(caps) = self.import_re.captures(line) else {
-                continue;
-            };
-            let Some(target) = caps.get(1).map(|m| m.as_str()) else {
-                continue;
-            };
-            if self.forbid.is_match(target) {
-                let msg = self.message.clone().unwrap_or_else(|| {
-                    format!(
-                        "forbidden import {target:?} at this scope (matches /{}/)",
-                        self.forbid_src
-                    )
-                });
-                violations.push(
-                    Violation::new(msg)
-                        .with_path(std::sync::Arc::<Path>::from(path))
-                        .with_location(i + 1, 1),
-                );
+            for caps in self.import_re.captures_iter(line) {
+                let Some(m) = caps.get(1) else {
+                    continue;
+                };
+                let target = m.as_str();
+                if self.forbid.is_match(target) {
+                    let msg = self.message.clone().unwrap_or_else(|| {
+                        format!(
+                            "forbidden import {target:?} at this scope (matches /{}/)",
+                            self.forbid_src
+                        )
+                    });
+                    let col = caps
+                        .get(0)
+                        .map_or(1, |whole| line[..whole.start()].chars().count() + 1);
+                    violations.push(
+                        Violation::new(msg)
+                            .with_path(std::sync::Arc::<Path>::from(path))
+                            .with_location(i + 1, col),
+                    );
+                }
             }
         }
         Ok(violations)
@@ -333,6 +336,12 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     };
     let import_re = Regex::new(&pattern_src)
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid `import_pattern`: {e}")))?;
+    if import_re.captures_len() < 2 {
+        return Err(Error::rule_config(
+            &spec.id,
+            "import_gate `import_pattern` must include capture group 1 for the imported target",
+        ));
+    }
     let forbid = Regex::new(&opts.forbid)
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid `forbid` regex: {e}")))?;
     let allow = if opts.allow.is_empty() {
@@ -571,5 +580,36 @@ mod tests {
             "id: t\nkind: import_gate\npaths: \"**/*\"\nlanguage: rust\nforbid: \"[\"\nlevel: error\n",
         );
         assert!(build(&spec).unwrap_err().to_string().contains("forbid"));
+    }
+
+    #[test]
+    fn captures_multiple_imports_per_line_rust_pub_crate_and_requires_capture_group() {
+        let js_rule = rule(Language::Js, r"^evil", &[]);
+        let v = eval(
+            &js_rule,
+            "src/a.js",
+            "const a = require('ok'); const b = require('evil');\n",
+        );
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert_eq!(v[0].column, Some(36), "exact column of second import");
+
+        let rust_rule = rule(Language::Rust, r"^crate::internal", &[]);
+        let v = eval(
+            &rust_rule,
+            "src/lib.rs",
+            "pub(crate) use crate::internal::Secret;\n",
+        );
+        assert_eq!(v.len(), 1, "pub(crate) use must be caught: {v:?}");
+
+        let no_group = crate::test_support::spec_yaml(
+            "id: t\nkind: import_gate\npaths: \"**/*\"\nlanguage: generic\n\
+             import_pattern: \"import foo\"\nforbid: foo\nlevel: error\n",
+        );
+        assert!(
+            build(&no_group)
+                .unwrap_err()
+                .to_string()
+                .contains("capture group")
+        );
     }
 }

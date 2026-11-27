@@ -263,7 +263,9 @@ case "$url" in
     [[ "$count" -gt 1 ]] || exit 35
     printf 'archive\n' > "$out"
     ;;
-  *.tar.gz.sha256) printf 'checksum\n' > "$out" ;;
+  *.tar.gz.sha256)
+    printf '0000000000000000000000000000000000000000000000000000000000000000  %s\n' "$(basename "${url%.sha256}")" > "$out"
+    ;;
   *) exit 22 ;;
 esac
 STUB
@@ -294,6 +296,103 @@ if ! env -i PATH="$sandbox/retrybin:/usr/bin:/bin" HOME="$sandbox" \
   echo "[test-install-sh] release archive transport failure was not retried:" >&2
   sed 's/^/    | /' "$sandbox/retry-out" >&2
   fail=1
+fi
+
+# M5 hardening checks:
+# 1. Invalid ALINT_REPO is rejected before any network call.
+: > "$sandbox/log"
+if env -i PATH="$sandbox/latestbin:/usr/bin:/bin" HOME="$sandbox" STUB_LOG="$sandbox/log" \
+  INSTALL_DIR="$sandbox/install" ALINT_REPO="evil/repo/extra" ALINT_VERSION=v9.8.7 \
+  bash install.sh > "$sandbox/out" 2>&1 ||
+  ! grep -q "error: invalid ALINT_REPO" "$sandbox/out" || [[ -s "$sandbox/log" ]]; then
+  echo "[test-install-sh] invalid ALINT_REPO was not rejected early:" >&2
+  cat "$sandbox/out" "$sandbox/log" >&2
+  fail=1
+fi
+
+# 2. Sidecar .sha256 naming a different file is rejected even when sha256sum passes.
+mkdir -p "$sandbox/m5-badsha"
+cp "$sandbox/retrybin/"* "$sandbox/m5-badsha/"
+cat > "$sandbox/m5-badsha/curl" <<'STUB'
+#!/usr/bin/env bash
+out=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in -o) out=$2; shift 2 ;; *) url=$1; shift ;; esac
+done
+case "$url" in
+  *.tar.gz) printf 'archive\n' > "$out" ;;
+  *.tar.gz.sha256) printf '0000000000000000000000000000000000000000000000000000000000000000  decoy.tar.gz\n' > "$out" ;;
+  *) exit 22 ;;
+esac
+STUB
+chmod +x "$sandbox/m5-badsha/curl"
+if env -i PATH="$sandbox/m5-badsha:/usr/bin:/bin" HOME="$sandbox" \
+  INSTALL_DIR="$sandbox/m5-install" ALINT_VERSION=v9.8.7 \
+  bash install.sh > "$sandbox/m5-out" 2>&1 ||
+  ! grep -q "names 'decoy.tar.gz'" "$sandbox/m5-out"; then
+  echo "[test-install-sh] mismatched .sha256 sidecar filename was not rejected:" >&2
+  cat "$sandbox/m5-out" >&2
+  fail=1
+fi
+
+# 3. Cosign without leading `v` in GitVersion (e.g. `GitVersion: 3.0.2`), exact
+#    `--certificate-identity`, atomic replace over a running binary, and
+#    regex metacharacters (`+`, `[1]`) in INSTALL_DIR.
+mkdir -p "$sandbox/m5-cosign" "$sandbox/m5-dir+regex[1]"
+cp "$sandbox/retrybin/uname" "$sandbox/retrybin/tar" "$sandbox/retrybin/sleep" "$sandbox/m5-cosign/"
+cat > "$sandbox/m5-cosign/curl" <<'STUB'
+#!/usr/bin/env bash
+out=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in -o) out=$2; shift 2 ;; *) url=$1; shift ;; esac
+done
+case "$url" in
+  *.tar.gz) printf 'archive-payload\n' > "$out" ;;
+  *.tar.gz.sha256)
+    h=$(sha256sum "${out%.sha256}" | awk '{print $1}')
+    printf '%s  %s\n' "$h" "$(basename "${url%.sha256}")" > "$out"
+    ;;
+  */SHA256SUMS)
+    h=$(sha256sum "alint-v9.8.7-x86_64-unknown-linux-musl.tar.gz" | awk '{print $1}')
+    printf '%s  alint-v9.8.7-x86_64-unknown-linux-musl.tar.gz\n' "$h" > "$out"
+    ;;
+  */SHA256SUMS.cosign.bundle) printf '{"bundle":true}\n' > "$out" ;;
+  *) exit 22 ;;
+esac
+STUB
+cat > "$sandbox/m5-cosign/cosign" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$1" == "version" ]]; then
+  echo "GitVersion:    3.0.2"
+  exit 0
+fi
+printf '%s\n' "$*" > "$COSIGN_ARGS_FILE"
+exit 0
+STUB
+chmod +x "$sandbox/m5-cosign/curl" "$sandbox/m5-cosign/cosign"
+# Hold an existing ELF binary executing at INSTALL_DIR/alint so non-atomic cp would fail with ETXTBSY.
+cp "$(command -v sleep)" "$sandbox/m5-dir+regex[1]/alint"
+"$sandbox/m5-dir+regex[1]/alint" 15 &
+busy_pid=$!
+if ! env -i PATH="$sandbox/m5-cosign:/usr/bin:/bin" HOME="$sandbox" \
+  COSIGN_ARGS_FILE="$sandbox/cosign.args" \
+  INSTALL_DIR="$sandbox/m5-dir+regex[1]" ALINT_VERSION=v9.8.7 ALINT_REQUIRE_VERIFY=1 \
+  bash install.sh > "$sandbox/m5-cosign-out" 2>&1; then
+  kill "$busy_pid" 2>/dev/null || true
+  wait "$busy_pid" 2>/dev/null || true
+  echo "[test-install-sh] M5 cosign/atomic-install/metachar INSTALL_DIR failed:" >&2
+  cat "$sandbox/m5-cosign-out" >&2
+  fail=1
+else
+  kill "$busy_pid" 2>/dev/null || true
+  wait "$busy_pid" 2>/dev/null || true
+  if ! grep -Fq -- '--certificate-identity https://github.com/asamarts/alint/.github/workflows/release.yml@refs/tags/v9.8.7' "$sandbox/cosign.args" ||
+     grep -Fq -- '--certificate-identity-regexp' "$sandbox/cosign.args" ||
+     ! grep -q '==> Signature OK' "$sandbox/m5-cosign-out"; then
+    echo "[test-install-sh] M5 cosign did not pass exact --certificate-identity:" >&2
+    cat "$sandbox/cosign.args" "$sandbox/m5-cosign-out" >&2
+    fail=1
+  fi
 fi
 
 [[ "$fail" -eq 0 ]] && echo "[test-install-sh] OK - every truncated prefix of install.sh executes nothing"

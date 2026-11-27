@@ -768,7 +768,7 @@ fn skip_jsonc_ws_and_comments(bytes: &[u8], mut at: usize) -> usize {
             at += 1;
         } else if bytes.get(at..at + 2) == Some(b"//") {
             at += 2;
-            while at < bytes.len() && bytes[at] != b'\n' {
+            while at < bytes.len() && bytes[at] != b'\n' && bytes[at] != b'\r' {
                 at += 1;
             }
         } else if bytes.get(at..at + 2) == Some(b"/*") {
@@ -822,7 +822,20 @@ fn json_strip_root_shape(text: &str) -> StripRootShape {
                 Some(b'{') => {
                     let after_open = skip_jsonc_ws_and_comments(bytes, cursor + 1);
                     if bytes.get(after_open) == Some(&b'}') {
-                        StripRootShape::SingleRootEmptyObject
+                        // Only `SingleRootEmptyObject` when this is the sole
+                        // member of the top-level object (`{"k": {}}` or with a
+                        // JSONC trailing comma `{"k": {},}`). A second member
+                        // (e.g. `{"a": {}, "b": 1}` or duplicate `{"en": {}, "en": "bad"}`)
+                        // is NOT a single-root empty object.
+                        let mut after_val = skip_jsonc_ws_and_comments(bytes, after_open + 1);
+                        if bytes.get(after_val) == Some(&b',') {
+                            after_val = skip_jsonc_ws_and_comments(bytes, after_val + 1);
+                        }
+                        if bytes.get(after_val) == Some(&b'}') {
+                            StripRootShape::SingleRootEmptyObject
+                        } else {
+                            StripRootShape::Object
+                        }
                     } else {
                         StripRootShape::Object
                     }
@@ -838,6 +851,41 @@ fn json_strip_root_shape(text: &str) -> StripRootShape {
 
 fn toml_strip_root_shape(text: &str) -> StripRootShape {
     let stripped = text.trim_start_matches('\u{feff}');
+    if stripped
+        .trim_matches(|c: char| c == '\u{feff}' || c.is_whitespace())
+        .is_empty()
+    {
+        return StripRootShape::EmptyDocument;
+    }
+    if let Ok(doc) = toml_edit::Document::parse(stripped) {
+        let root = doc.as_table();
+        let mut iter = root.iter();
+        let Some((_, first)) = iter.next() else {
+            return StripRootShape::EmptyDocument;
+        };
+        if iter.next().is_some() {
+            return StripRootShape::Object;
+        }
+        return match first {
+            toml_edit::Item::Table(t) => {
+                if t.is_empty() {
+                    StripRootShape::SingleRootEmptyObject
+                } else {
+                    StripRootShape::Object
+                }
+            }
+            toml_edit::Item::Value(toml_edit::Value::InlineTable(t)) => {
+                if t.is_empty() {
+                    StripRootShape::SingleRootEmptyObject
+                } else {
+                    StripRootShape::Object
+                }
+            }
+            toml_edit::Item::ArrayOfTables(_)
+            | toml_edit::Item::Value(toml_edit::Value::Array(_)) => StripRootShape::SingleRootArray,
+            _ => StripRootShape::SingleRootValue,
+        };
+    }
     let bytes = stripped.as_bytes();
     let mut at = 0;
     while at < bytes.len() {
@@ -860,58 +908,7 @@ fn toml_strip_root_shape(text: &str) -> StripRootShape {
     if bytes[at] == b'[' {
         return StripRootShape::SingleRootEmptyObject;
     }
-    // Scan past key (handling single/double-quoted TOML keys) to `=`.
-    let mut cursor = at;
-    while cursor < bytes.len() {
-        match bytes[cursor] {
-            b'"' => {
-                cursor += 1;
-                while cursor < bytes.len() {
-                    match bytes[cursor] {
-                        b'\\' => cursor = (cursor + 2).min(bytes.len()),
-                        b'"' => {
-                            cursor += 1;
-                            break;
-                        }
-                        _ => cursor += 1,
-                    }
-                }
-            }
-            b'\'' => {
-                cursor += 1;
-                while cursor < bytes.len() && bytes[cursor] != b'\'' {
-                    cursor += 1;
-                }
-                if cursor < bytes.len() {
-                    cursor += 1;
-                }
-            }
-            b'=' => {
-                cursor += 1;
-                break;
-            }
-            b'\n' => return StripRootShape::SingleRootValue,
-            _ => cursor += 1,
-        }
-    }
-    while cursor < bytes.len() && matches!(bytes[cursor], b' ' | b'\t') {
-        cursor += 1;
-    }
-    match bytes.get(cursor).copied() {
-        Some(b'{') => {
-            let mut inner = cursor + 1;
-            while inner < bytes.len() && bytes[inner].is_ascii_whitespace() {
-                inner += 1;
-            }
-            if bytes.get(inner) == Some(&b'}') {
-                StripRootShape::SingleRootEmptyObject
-            } else {
-                StripRootShape::Object
-            }
-        }
-        Some(b'[') => StripRootShape::SingleRootArray,
-        _ => StripRootShape::SingleRootValue,
-    }
+    StripRootShape::SingleRootValue
 }
 
 fn json_entry_table(
@@ -941,6 +938,12 @@ fn json_ast_entry_table(
     let stripped = if strict {
         text
     } else {
+        if text
+            .trim_matches(|c: char| c == '\u{feff}' || c.is_whitespace())
+            .is_empty()
+        {
+            return Ok(EntryTable::default());
+        }
         text.trim_start_matches('\u{feff}')
     };
     let offset = text.len() - stripped.len();
@@ -1072,10 +1075,6 @@ fn dotenv_entry_rows(
     Ok(rows)
 }
 
-const fn next_line_start(newline: usize, len: usize) -> usize {
-    if newline < len { newline + 1 } else { len }
-}
-
 fn ini_entry_rows(
     text: &str,
     max_rows: Option<usize>,
@@ -1091,6 +1090,12 @@ fn ini_entry_table(
     max_rows: Option<usize>,
 ) -> std::result::Result<EntryTable, EntryRowsError> {
     Format::Ini.parse(text).map_err(EntryRowsError::Parse)?;
+    if text
+        .trim_matches(|c: char| c == '\u{feff}' || c.is_whitespace())
+        .is_empty()
+    {
+        return Ok(EntryTable::default());
+    }
     let stripped = text.trim_start_matches('\u{feff}');
     let base = text.len() - stripped.len();
     let bytes = stripped.as_bytes();
@@ -1100,23 +1105,25 @@ fn ini_entry_table(
     let mut current_indent = 0;
     let mut at = 0;
     while at < bytes.len() {
-        let newline = bytes[at..]
-            .iter()
-            .position(|byte| *byte == b'\n')
-            .map_or(bytes.len(), |index| at + index);
-        let content_end = if newline > at && bytes[newline - 1] == b'\r' {
-            newline - 1
+        let mut line_end = at;
+        while line_end < bytes.len() && bytes[line_end] != b'\n' && bytes[line_end] != b'\r' {
+            line_end += 1;
+        }
+        let next_at = if line_end >= bytes.len() {
+            bytes.len()
+        } else if bytes[line_end] == b'\r' && bytes.get(line_end + 1) == Some(&b'\n') {
+            line_end + 2
         } else {
-            newline
+            line_end + 1
         };
-        let raw = &stripped[at..content_end];
+        let raw = &stripped[at..line_end];
         let indent = raw
             .bytes()
             .take_while(|byte| matches!(byte, b' ' | b'\t'))
             .count();
         let trimmed = raw.trim();
         if trimmed.is_empty() || trimmed.starts_with(';') || trimmed.starts_with('#') {
-            at = next_line_start(newline, bytes.len());
+            at = next_at;
             continue;
         }
         if let Some(row) = current_row
@@ -1125,19 +1132,21 @@ fn ini_entry_table(
             // A continued INI value is discontiguous after trimming indentation;
             // retaining no span is safer than claiming a partial value token.
             table.rows[row].value_span = None;
-            at = next_line_start(newline, bytes.len());
+            at = next_at;
             continue;
         }
         let trim_start = raw.len() - raw.trim_start().len();
         if let Some(rest) = trimmed.strip_prefix('[') {
             let name = rest
                 .strip_suffix(']')
-                .expect("validated INI section")
+                .ok_or_else(|| EntryRowsError::Parse("unclosed INI section header".to_string()))?
                 .trim();
             section_path = table.paths.child(PathId::ROOT, Segment::Key(name.into()));
             current_row = None;
         } else {
-            let separator = trimmed.find(['=', ':']).expect("validated INI assignment");
+            let separator = trimmed
+                .find(['=', ':'])
+                .ok_or_else(|| EntryRowsError::Parse("expected INI key = value".to_string()))?;
             let before = &trimmed[..separator];
             let key_lead = before.len() - before.trim_start().len();
             let key = before.trim();
@@ -1156,7 +1165,7 @@ fn ini_entry_table(
             current_row = Some(table.rows.len() - 1);
             current_indent = indent;
         }
-        at = next_line_start(newline, bytes.len());
+        at = next_at;
     }
     Ok(table)
 }
@@ -2003,5 +2012,76 @@ flow: [é, 🚀]
             extract_entry_rows(Format::Yaml, "before: visible\0after: hidden\n"),
             Err(EntryRowsError::Parse(_))
         ));
+    }
+
+    #[test]
+    fn ini_and_json_handle_lone_cr_and_interleaved_bom_whitespace() {
+        let rows = extract_entry_rows(Format::Ini, "[s]\rk=v\ra=1\rb=2").unwrap();
+        assert_eq!(
+            rows.iter().map(|r| r.key.as_str()).collect::<Vec<_>>(),
+            ["k", "a", "b"]
+        );
+        assert_eq!(rows[0].parent, [EntryPathSegment::Key("s".into())]);
+        assert_eq!(
+            span_text("[s]\rk=v\ra=1\rb=2", rows[0].value_span.unwrap()),
+            "v"
+        );
+
+        for format in [Format::Ini, Format::Json] {
+            let rows = extract_entry_rows(format, " \u{feff} \t ").unwrap();
+            assert!(rows.is_empty(), "{format:?} whitespace+BOM should be empty");
+        }
+        // JSONC line comment ending in lone `\r` must not eat the next member.
+        let jsonc = "{\"a\": 1, // comment\r\"b\": 2}";
+        let rows = extract_entry_rows(Format::Json, jsonc).unwrap();
+        assert_eq!(
+            rows.iter().map(|r| r.key.as_str()).collect::<Vec<_>>(),
+            ["a", "b"]
+        );
+    }
+
+    #[test]
+    fn strip_root_shape_checks_multi_key_and_duplicate_roots_for_json_and_toml() {
+        use crate::extract::{StripRootShape, strip_root_shape};
+        assert_eq!(
+            strip_root_shape(Format::Json, r#"{"en": {}, "fr": {}}"#),
+            StripRootShape::Object
+        );
+        assert_eq!(
+            strip_root_shape(Format::Json, r#"{"en": {}, "en": {}}"#),
+            StripRootShape::Object
+        );
+        assert_eq!(
+            strip_root_shape(Format::Json, r#"{"en": {}}"#),
+            StripRootShape::SingleRootEmptyObject
+        );
+        assert_eq!(
+            strip_root_shape(Format::Json, r#"{"en": {},}"#),
+            StripRootShape::SingleRootEmptyObject
+        );
+        assert_eq!(
+            strip_root_shape(Format::Toml, "[en]\n[fr]\n"),
+            StripRootShape::Object
+        );
+        assert_eq!(
+            strip_root_shape(Format::Toml, "[en]\nk = 1\n"),
+            StripRootShape::Object
+        );
+        assert_eq!(
+            strip_root_shape(Format::Toml, "[en]\n"),
+            StripRootShape::SingleRootEmptyObject
+        );
+    }
+
+    #[test]
+    fn strict_yaml_entry_rows_distinguish_tagged_merge_keys() {
+        // Explicit `!!str` on `<<` makes it a literal string key, not a merge key.
+        let rows = extract_entry_rows_strict_yaml(Format::Yaml, "!!str <<: 1\n").unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].key, "<<");
+        // Explicit `!!merge` on quoted `"<<"` IS a merge key and rejected in strict mode.
+        let err =
+            extract_entry_rows_strict_yaml(Format::Yaml, "!!merge \"<<\": {a: 1}\n").unwrap_err();
+        assert!(err.to_string().contains("merge keys"), "{err}");
     }
 }

@@ -15,7 +15,8 @@
 // restricted settings (package.json), so a workspace cannot choose the binary
 // or its arguments while untrusted.
 
-import { execFile, spawn } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
+import * as fs from "node:fs";
 
 import { type Disposable, type ExtensionContext, type LogOutputChannel, Uri, commands, window, workspace } from "vscode";
 import {
@@ -27,7 +28,12 @@ import {
 
 import { resolveAlintBinary } from "./binary";
 
+const CONFIG_FILE_NAMES = [".alint.yml", ".alint.yaml", "alint.yml", "alint.yaml"] as const;
+const CONFIG_WATCH_GLOB =
+  "**/{.alint.yml,.alint.yaml,alint.yml,alint.yaml,.alint.d/*.yml,.alint.d/*.yaml}";
+
 let client: LanguageClient | undefined;
+let serverProcess: ChildProcess | undefined;
 let configWatcher: Disposable | undefined;
 let channel: LogOutputChannel | undefined;
 let lifecycle: Promise<void> = Promise.resolve();
@@ -50,9 +56,52 @@ export async function activate(context: ExtensionContext): Promise<void> {
     commands.registerCommand("alint.showRules", () => showRules(context)),
     commands.registerCommand("alint.openConfig", openConfig),
     // The server reads trust at `initialize`, so a grant restarts it.
-    workspace.onDidGrantWorkspaceTrust(() => restart(context)),
+    workspace.onDidGrantWorkspaceTrust(() => {
+      void restart(context).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        channel?.appendLine(`alint restart after trust change failed: ${msg}`);
+      });
+    }),
   );
   await enqueueLifecycle((gen) => start(context, gen));
+}
+
+async function terminateProcess(proc: ChildProcess | undefined): Promise<void> {
+  if (!proc || proc.exitCode !== null || proc.signalCode !== null) {
+    return;
+  }
+  const waitExit = (ms: number): Promise<boolean> =>
+    new Promise((resolve) => {
+      if (proc.exitCode !== null || proc.signalCode !== null) {
+        resolve(true);
+        return;
+      }
+      const timer = setTimeout(() => {
+        proc.removeListener("exit", onExit);
+        resolve(false);
+      }, ms);
+      const onExit = () => {
+        clearTimeout(timer);
+        resolve(true);
+      };
+      proc.once("exit", onExit);
+    });
+  if (await waitExit(500)) {
+    return;
+  }
+  try {
+    proc.kill("SIGTERM");
+  } catch {
+    return;
+  }
+  if (await waitExit(500)) {
+    return;
+  }
+  try {
+    proc.kill("SIGKILL");
+  } catch {
+    // Already exited.
+  }
 }
 
 async function start(context: ExtensionContext, gen: number): Promise<void> {
@@ -66,23 +115,45 @@ async function start(context: ExtensionContext, gen: number): Promise<void> {
     return;
   }
   const extraArgs = workspace.getConfiguration("alint").get<string[]>("serverArgs") ?? [];
+  const cwd = workspace.workspaceFolders?.[0]?.uri.fsPath;
   // Spawn the server ourselves and hand the client the streams
   // (StreamInfo), rather than the Executable/stdio form where
   // vscode-languageclient spawns it. The Executable path triggers an
   // "Unexpected SIGPIPE" in the extension host that disposes the
   // connection during start() under headless test hosts; spawning
   // directly is stable. alint speaks LSP over stdio either way.
-  const serverOptions: ServerOptions = (): Promise<StreamInfo> => {
-    const server = spawn(binary, ["lsp", ...extraArgs], {
-      stdio: ["pipe", "pipe", "pipe"],
+  const serverOptions: ServerOptions = (): Promise<StreamInfo> =>
+    new Promise((resolve, reject) => {
+      const server = spawn(binary, ["lsp", ...extraArgs], {
+        stdio: ["pipe", "pipe", "pipe"],
+        cwd,
+      });
+      serverProcess = server;
+      server.stderr.on("data", (chunk: Buffer) => log.append(chunk.toString()));
+      const onSpawn = () => {
+        server.removeListener("error", onStartupError);
+        server.on("error", (err: Error) => {
+          log.appendLine(`alint lsp error: ${err.message}`);
+        });
+        resolve({ reader: server.stdout, writer: server.stdin });
+      };
+      const onStartupError = (err: Error) => {
+        server.removeListener("spawn", onSpawn);
+        if (serverProcess === server) {
+          serverProcess = undefined;
+        }
+        log.appendLine(`alint lsp spawn error: ${err.message}`);
+        reject(err);
+      };
+      server.once("spawn", onSpawn);
+      server.once("error", onStartupError);
+      server.once("exit", () => {
+        if (serverProcess === server) {
+          serverProcess = undefined;
+        }
+      });
     });
-    server.on("error", (err: Error) => {
-      log.appendLine(`alint lsp spawn error: ${err.message}`);
-    });
-    server.stderr.on("data", (chunk: Buffer) => log.append(chunk.toString()));
-    return Promise.resolve({ reader: server.stdout, writer: server.stdin });
-  };
-  const watcher = workspace.createFileSystemWatcher("**/.alint.yml");
+  const watcher = workspace.createFileSystemWatcher(CONFIG_WATCH_GLOB);
   configWatcher = watcher;
   const clientOptions: LanguageClientOptions = {
     // alint is repo-structural, not language-specific — watch every
@@ -98,7 +169,21 @@ async function start(context: ExtensionContext, gen: number): Promise<void> {
   };
   const nextClient = new LanguageClient("alint", "alint", serverOptions, clientOptions);
   client = nextClient;
-  await nextClient.start();
+  try {
+    await nextClient.start();
+  } catch (err) {
+    if (client === nextClient) {
+      client = undefined;
+    }
+    if (configWatcher === watcher) {
+      configWatcher.dispose();
+      configWatcher = undefined;
+    }
+    const proc = serverProcess;
+    serverProcess = undefined;
+    await terminateProcess(proc);
+    throw err;
+  }
   if (gen !== lifecycleGen && client === nextClient) {
     await stopUnlocked();
     return;
@@ -111,10 +196,18 @@ async function stopUnlocked(): Promise<void> {
     configWatcher.dispose();
     configWatcher = undefined;
   }
+  const proc = serverProcess;
+  serverProcess = undefined;
   if (client) {
     const current = client;
     client = undefined;
-    await current.stop();
+    try {
+      await current.stop();
+    } finally {
+      await terminateProcess(proc);
+    }
+  } else {
+    await terminateProcess(proc);
   }
 }
 
@@ -159,13 +252,29 @@ async function openConfig(): Promise<void> {
     window.showWarningMessage("No workspace folder is open.");
     return;
   }
-  const uri = Uri.joinPath(folders[0].uri, ".alint.yml");
-  try {
-    const doc = await workspace.openTextDocument(uri);
-    await window.showTextDocument(doc);
-  } catch {
-    window.showWarningMessage("No .alint.yml found in the workspace root.");
+  const activeFolder = window.activeTextEditor
+    ? workspace.getWorkspaceFolder(window.activeTextEditor.document.uri)
+    : undefined;
+  const orderedFolders = activeFolder
+    ? [activeFolder, ...folders.filter((f) => f !== activeFolder)]
+    : [...folders];
+  for (const folder of orderedFolders) {
+    for (const name of CONFIG_FILE_NAMES) {
+      const uri = Uri.joinPath(folder.uri, name);
+      if (fs.existsSync(uri.fsPath)) {
+        try {
+          const doc = await workspace.openTextDocument(uri);
+          await window.showTextDocument(doc);
+          return;
+        } catch {
+          // Try next candidate.
+        }
+      }
+    }
   }
+  window.showWarningMessage(
+    `No alint config (${CONFIG_FILE_NAMES.join(", ")}) found in the workspace root.`,
+  );
 }
 
 export async function deactivate(): Promise<void> {

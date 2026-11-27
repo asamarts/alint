@@ -41,9 +41,10 @@ crate::options_schema_for!(Options);
 /// Parse one `allow:` entry into an inclusive codepoint range.
 fn parse_allow_entry(s: &str) -> std::result::Result<(u32, u32), String> {
     let s = s.trim();
-    // A range is `U+XXXX-U+YYYY` — detected by the `-U+` separator,
-    // so a literal `-` (ASCII, never needs allowing) isn't ambiguous.
-    if let Some(idx) = s.find("-U+") {
+    // A range is `U+XXXX-U+YYYY` (or lowercase `u+`) — detected by the
+    // `-U+` / `-u+` separator, so a literal `-` (ASCII, never needs allowing)
+    // isn't ambiguous.
+    if let Some(idx) = s.find("-U+").or_else(|| s.find("-u+")) {
         let lo = parse_codepoint(&s[..idx])?;
         let hi = parse_codepoint(&s[idx + 1..])?;
         if lo > hi {
@@ -61,8 +62,17 @@ fn parse_allow_entry(s: &str) -> std::result::Result<(u32, u32), String> {
 fn parse_codepoint(s: &str) -> std::result::Result<u32, String> {
     let s = s.trim();
     if let Some(hex) = s.strip_prefix("U+").or_else(|| s.strip_prefix("u+")) {
-        return u32::from_str_radix(hex, 16)
-            .map_err(|_| format!("allow entry {s:?}: not a valid `U+XXXX` codepoint"));
+        if hex.is_empty() || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(format!("allow entry {s:?}: not a valid `U+XXXX` codepoint"));
+        }
+        let cp = u32::from_str_radix(hex, 16)
+            .map_err(|_| format!("allow entry {s:?}: not a valid `U+XXXX` codepoint"))?;
+        if char::from_u32(cp).is_none() {
+            return Err(format!(
+                "allow entry {s:?}: U+{cp:04X} is not a valid Unicode scalar value"
+            ));
+        }
+        return Ok(cp);
     }
     let mut chars = s.chars();
     match (chars.next(), chars.next()) {
@@ -306,7 +316,14 @@ mod tests {
             parse_allow_entry("U+00A0-U+00FF").unwrap(),
             (0x00A0, 0x00FF)
         );
+        assert_eq!(
+            parse_allow_entry("u+00a0-u+00ff").unwrap(),
+            (0x00A0, 0x00FF)
+        );
         assert!(parse_allow_entry("U+00FF-U+00A0").is_err()); // reversed range
+        assert!(parse_allow_entry("U++41").is_err()); // leading plus
+        assert!(parse_allow_entry("U+D800").is_err()); // surrogate
+        assert!(parse_allow_entry("U+110000").is_err()); // out of Unicode range
         assert!(parse_allow_entry("nope").is_err()); // multi-char, not U+
     }
 }

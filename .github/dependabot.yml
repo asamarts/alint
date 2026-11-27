@@ -69,10 +69,11 @@ updates:
 
   # ── Distribution + editor packaging ecosystems ─────────────────────
   # Same cadence, grouping and commit style as the two lanes above. Each
-  # of these ships to users (the VS Code / Open VSX extension, the npm
-  # shim's runtime `tar` dep, the Zed wasm extension, the JetBrains
-  # plugin's Gradle build, the release image's base), so letting them
-  # rot is a supply-chain risk, not just hygiene.
+  # of these ships to users (the VS Code / Open VSX extension, the Zed wasm
+  # extension, the JetBrains plugin's Gradle build, the release image's
+  # base), so letting them rot is a supply-chain risk, not just hygiene.
+  # (`/npm` has zero external dependencies and no lockfile per ADR-0031, so
+  # it intentionally has no Dependabot lane.)
   - package-ecosystem: npm
     directory: /editors/vscode
     schedule:
@@ -100,22 +101,6 @@ updates:
       # build (VS Code >= 1.101, Electron 35, Node 22.15).
       - dependency-name: "mocha"
         versions: [">=12"]
-    commit-message:
-      prefix: "chore(deps)"
-
-  - package-ecosystem: npm
-    directory: /npm
-    schedule:
-      interval: weekly
-      day: monday
-      time: "07:00"
-      timezone: America/New_York
-    open-pull-requests-limit: 5
-    groups:
-      npm-shim-patch-and-minor:
-        update-types:
-          - patch
-          - minor
     commit-message:
       prefix: "chore(deps)"
 

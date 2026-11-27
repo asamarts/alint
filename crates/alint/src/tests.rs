@@ -426,3 +426,25 @@ fn broken_pipe_is_detected_through_context_and_tolerated() {
     assert!(tolerate_broken_pipe(Err(epipe())).is_ok());
     assert!(tolerate_broken_pipe(Err(std::io::Error::other("disk full"))).is_err());
 }
+
+#[test]
+fn panic_issue_url_redacts_registered_environment_secrets_before_url_encoding() {
+    let secret = "canary\"secret\\token=42";
+    remember_environment_value_slice(&[secret.to_string()]);
+    let url = format_panic_issue_url(&format!("boom {secret}"), &format!("src/{secret}.rs:1:1"));
+    assert!(
+        !url.contains("canary") && !url.contains("secret") && !url.contains("token"),
+        "panic URL leaked secret before/after encoding: {url}"
+    );
+    assert!(
+        url.contains("%3Credacted%3E"),
+        "expected encoded redaction: {url}"
+    );
+}
+
+#[test]
+fn only_flag_accepts_leading_hyphen_rule_ids() {
+    use clap::Parser as _;
+    let cli = Cli::try_parse_from(["alint", "fix", "--only", "-leading-dash"]).unwrap();
+    assert_eq!(cli.only, vec!["-leading-dash".to_string()]);
+}

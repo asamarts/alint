@@ -101,7 +101,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     let opts: Options = spec
         .deserialize_options()
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
-    let anchored = format!("^{}$", opts.pattern);
+    let anchored = format!(r"\A(?:{})\z", opts.pattern);
     let pattern = Regex::new(&anchored)
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid pattern: {e}")))?;
     Ok(Box::new(FilenameRegexRule {
@@ -249,5 +249,28 @@ mod tests {
         let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
         assert_eq!(v.len(), 1, "only in-scope file should fire: {v:?}");
         assert_eq!(v[0].path.as_deref(), Some(Path::new("pkg/bad.rs")));
+    }
+
+    #[test]
+    fn alternation_pattern_is_fully_anchored() {
+        // Without non-capturing grouping, `foo|bar` became `^foo|bar$` which
+        // allowed `foobar_extra.rs` and `prefix_bar.rs`.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: filename_regex\n\
+             paths: \"**/*\"\n\
+             pattern: \"foo|bar\"\n\
+             stem: true\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index(&["foo.rs", "bar.rs", "foo_extra.rs", "prefix_bar.rs"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        let flagged: Vec<_> = v.iter().filter_map(|x| x.path.as_deref()).collect();
+        assert_eq!(
+            flagged,
+            vec![Path::new("foo_extra.rs"), Path::new("prefix_bar.rs")],
+            "{v:?}"
+        );
     }
 }

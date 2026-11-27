@@ -15,7 +15,8 @@
 #     (a flow mapping, a quoted key, the value on the next line): it fails
 #     closed rather than skip a pin it did not see;
 #   - there is no workflow or action file to check.
-# Local (`./`) and `docker://` references are not Actions in a repository.
+# Local (`./`) references are not Actions in a repository. `docker://`
+# references must carry a full `@sha256:<64 hex>` digest pin.
 # Files: .github/workflows/*.y*ml, composite actions under .github/actions/,
 # and the root action.yml. Text inside a block scalar (a `run: |` script) is
 # not YAML structure, so it is not scanned for `uses`.
@@ -80,9 +81,13 @@ for path in FILES:
                               '`uses: owner/repo@<sha> # <tag or branch>` on one line')
             continue
         ref, comment = m.group('ref').strip('\'"'), (m.group('comment') or '').strip()
-        if ref.startswith('./') or ref.startswith('docker://'):
+        if ref.startswith('./'):
             continue
         where = f'{path}:{number}'
+        if ref.startswith('docker://'):
+            if not re.search(r'@sha256:[0-9a-f]{64}$', ref):
+                errors.append(f'{where}: `{ref}` must be digest-pinned with `@sha256:<64 hex>`')
+            continue
         p = PINNED.match(ref)
         if not p:
             errors.append(f'{where}: `{ref}` is not pinned to a full commit SHA')

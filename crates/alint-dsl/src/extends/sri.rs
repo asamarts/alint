@@ -1,8 +1,8 @@
 //! Subresource Integrity hashes for remote `extends:` entries.
 //!
-//! Format: `sha256-<64 lowercase hex chars>`. The prefix doubles
-//! as the algorithm discriminator so future additions (sha384,
-//! sha512) slot in without breaking existing configs.
+//! Format: `sha256-<64 hex chars>` (case-insensitive on input, normalized to
+//! lowercase on output). The prefix doubles as the algorithm discriminator so
+//! future additions (sha384, sha512) slot in without breaking existing configs.
 
 use sha2::{Digest, Sha256};
 

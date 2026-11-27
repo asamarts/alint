@@ -29,7 +29,10 @@
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
-    "workspaceContains:**/.alint.yml"
+    "workspaceContains:**/.alint.yml",
+    "workspaceContains:**/.alint.yaml",
+    "workspaceContains:**/alint.yml",
+    "workspaceContains:**/alint.yaml"
   ],
   "capabilities": {
     "untrustedWorkspaces": {

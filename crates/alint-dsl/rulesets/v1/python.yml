@@ -37,12 +37,17 @@ rules:
     # `setup.py` + `setup.cfg` are still the reality in older code
     # bases. Any one of the three satisfies the rule.
     kind: file_exists
-    paths: ["pyproject.toml", "setup.py", "setup.cfg"]
-    root_only: true
+    paths:
+      - pyproject.toml
+      - "**/pyproject.toml"
+      - setup.py
+      - "**/setup.py"
+      - setup.cfg
+      - "**/setup.cfg"
     level: error
     message: >-
       Python project: a `pyproject.toml` (preferred), `setup.py`,
-      or `setup.cfg` at the repo root is required.
+      or `setup.cfg` manifest is required.
     policy_url: "https://packaging.python.org/en/latest/guides/writing-pyproject-toml/"
 
   - id: python-has-lockfile
@@ -72,9 +77,9 @@ rules:
   - id: python-pyproject-declares-name
     when: facts.has_python
     kind: toml_path_matches
-    paths: pyproject.toml
+    paths: ["pyproject.toml", "**/pyproject.toml"]
     path: "$.project.name"
-    matches: '^[A-Za-z][A-Za-z0-9._-]*$'
+    matches: '^[A-Za-z0-9][A-Za-z0-9._-]*$'
     level: warning
     message: >-
       `pyproject.toml` has no `project.name` (PEP 621). Declare
@@ -86,7 +91,7 @@ rules:
     # Bracket notation is required on keys with dashes — JSONPath
     # dot-notation segments are restricted to [A-Za-z_][A-Za-z0-9_]*.
     kind: toml_path_matches
-    paths: pyproject.toml
+    paths: ["pyproject.toml", "**/pyproject.toml"]
     path: "$.project['requires-python']"
     matches: '^.+$'
     level: info
@@ -135,7 +140,7 @@ rules:
         - "Lib/test/**"
         - "crates/**/resources/**"
     scope_filter:
-      has_ancestor: [pyproject.toml, setup.py, requirements.txt]
+      has_ancestor: [pyproject.toml, setup.py, setup.cfg, requirements.txt]
     level: info
     fix:
       file_append_final_newline: {}
@@ -153,7 +158,7 @@ rules:
         - "Lib/test/**"
         - "crates/**/resources/**"
     scope_filter:
-      has_ancestor: [pyproject.toml, setup.py, requirements.txt]
+      has_ancestor: [pyproject.toml, setup.py, setup.cfg, requirements.txt]
     level: info
     fix:
       file_trim_trailing_whitespace: {}
@@ -164,7 +169,7 @@ rules:
     kind: no_bidi_controls
     paths: "**/*.py"
     scope_filter:
-      has_ancestor: [pyproject.toml, setup.py, requirements.txt]
+      has_ancestor: [pyproject.toml, setup.py, setup.cfg, requirements.txt]
     level: error
     message: "Trojan Source (CVE-2021-42574): bidi override chars in Python sources are rejected."
     policy_url: "https://trojansource.codes/"

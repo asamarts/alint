@@ -44,6 +44,9 @@ facts:
     any_file_exists:
       - composer.json
       - "**/composer.json"
+  - id: has_root_php
+    any_file_exists:
+      - composer.json
 
 rules:
   # --- composer.json metadata -------------------------------------
@@ -69,7 +72,7 @@ rules:
 
   # --- "Composer fatals" invariants (cross-file path resolve) -----
   - id: php-composer-psr4-dirs-resolve
-    when: facts.has_php
+    when: facts.has_root_php
     # Every PSR-4 autoload namespace root must exist as a directory
     # — Composer fails to build its autoloader otherwise. (Array-
     # valued PSR-4 entries, the rare multi-dir form, are skipped.)
@@ -84,7 +87,7 @@ rules:
     policy_url: "https://getcomposer.org/doc/04-schema.md#psr-4"
 
   - id: php-composer-autoload-files-resolve
-    when: facts.has_php
+    when: facts.has_root_php
     # `autoload.files` are eagerly require()'d on every request;
     # a missing one is a hard fatal.
     kind: registry_paths_resolve
@@ -98,7 +101,7 @@ rules:
     policy_url: "https://getcomposer.org/doc/04-schema.md#files"
 
   - id: php-composer-autoload-dev-files-resolve
-    when: facts.has_php
+    when: facts.has_root_php
     # The dev counterpart (test bootstraps / fixtures). Info-level
     # because it only loads under `--dev`.
     kind: registry_paths_resolve
@@ -112,7 +115,7 @@ rules:
     policy_url: "https://getcomposer.org/doc/04-schema.md#files"
 
   - id: php-composer-bin-resolve
-    when: facts.has_php
+    when: facts.has_root_php
     # Declared console binaries (`composer global require`
     # symlinks them into the bin-dir); a missing target breaks the
     # installed command.
@@ -135,6 +138,8 @@ rules:
     # deployment.
     kind: dir_absent
     paths: ["vendor", "**/vendor"]
+    scope_filter:
+      has_ancestor: composer.json
     level: warning
     message: >-
       PHP: Composer's `vendor/` directory must not be committed;

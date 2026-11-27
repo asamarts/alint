@@ -6,7 +6,8 @@
 # `node@v1`. Adopt with:
 #
 #     extends:
-#       - alint://bundled/monorepo@v1
+#       - url: alint://bundled/monorepo@v1
+#         except: [monorepo-packages-have-readme]
 #       - alint://bundled/node@v1
 #       - alint://bundled/monorepo/yarn-workspace@v1
 #
@@ -26,22 +27,21 @@ facts:
 
 rules:
   # The workspaces field must be present and non-empty —
-  # a bare `"workspaces": []` doesn't actually declare
-  # anything. `$.workspaces[*]` returns each entry of the
-  # array form (`["packages/*"]`), and matches `.+` checks
-  # each is a non-empty string. The object form
-  # (`{"packages": [...]}`) is rarer and not validated here;
-  # the fact gate ensures the field at least exists.
+  # a bare `"workspaces": []` or `"workspaces": { "packages": [] }`
+  # doesn't actually declare anything. `$.workspaces..[?match(@, '.*')]`
+  # selects every string entry under either the array form
+  # (`["packages/*"]`) or the object form (`{"packages": ["packages/*"]}`),
+  # and `matches: ".+"` checks each is a non-empty string.
   - id: yarn-workspace-declares-workspaces
     when: facts.is_yarn_workspace
     kind: json_path_matches
     paths: package.json
-    path: "$.workspaces[*]"
+    path: "$.workspaces..[?match(@, '.*')]"
     matches: ".+"
     level: error
     message: >-
       Yarn / npm workspace's root `package.json` must declare
-      a non-empty `workspaces` array.
+      a non-empty `workspaces` array or `workspaces.packages` list.
     policy_url: "https://yarnpkg.com/features/workspaces"
 
   # Every actual workspace member (a `packages/*` or `apps/*`

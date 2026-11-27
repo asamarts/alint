@@ -60,7 +60,7 @@ for tool in valgrind strace; do
   fi
 done
 if [[ "$(gungraun-runner --version 2>/dev/null | awk '{print $NF}')" != "$GUNGRAUN_VERSION" ]]; then
-  cargo install gungraun-runner --version "$GUNGRAUN_VERSION" --locked \
+  RUSTFLAGS='' cargo install gungraun-runner --version "$GUNGRAUN_VERSION" --locked \
     || tooling_failure "could not install gungraun-runner v${GUNGRAUN_VERSION}"
 fi
 

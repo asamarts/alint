@@ -73,7 +73,7 @@ ensure() {
   local bin="$1" crate="$2" version="$3"; shift 3
   if ! cargo "${bin#cargo-}" --version 2>/dev/null | grep -qF "$version"; then
     echo "==> installing ${crate} =${version}"
-    cargo install --locked --force "$crate" --version "=${version}" "$@"
+    RUSTFLAGS='' cargo install --locked --force "$crate" --version "=${version}" "$@"
   fi
 }
 

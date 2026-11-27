@@ -88,8 +88,9 @@ pub(crate) fn discover_nested(
     opts: &crate::LoadOptions<'_>,
     running_version: RunningVersion,
     field_source_names: &mut Vec<String>,
+    environment_values: &[String],
 ) -> Result<NestedRules> {
-    let (catalog, environment) = (opts.kind_catalog, opts.environment.as_ref());
+    let catalog = opts.kind_catalog;
     let walk_opts = alint_core::WalkOptions::default()
         .with_global_git_excludes(opts.global_git_excludes)
         .with_respect_gitignore(root.respect_gitignore.unwrap_or(true))
@@ -107,8 +108,7 @@ pub(crate) fn discover_nested(
 
     let mut discovered: Vec<Mapping> = Vec::new();
     let mut compatibility = Vec::new();
-    let mut environment_values = Vec::new();
-    let mut seen_env_values: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut when_var_reads = Vec::new();
     for entry in &index.entries {
         if entry.is_dir {
             continue;
@@ -141,26 +141,21 @@ pub(crate) fn discover_nested(
         // field sources ([`RawConfig::field_source_names`]), not by its path.
         let field_source = ayaml::Value::from(field_source_names.len());
         field_source_names.push(source.clone());
-        let (nested_rules, nested_compatibility, nested_environment_values) = load_nested_config(
+        let (nested_rules, nested_compatibility, nested_when_var_reads) = load_nested_config(
             &abs,
             &rel_dir,
             (&source, &field_source),
             root.version,
             running_version,
             catalog,
-            environment,
         )?;
         compatibility.extend(nested_compatibility);
-        for value in nested_environment_values {
-            if !value.is_empty() && seen_env_values.insert(value.clone()) {
-                environment_values.push(value);
-            }
-        }
+        when_var_reads.extend(nested_when_var_reads);
         for rule in nested_rules {
             if let Some(id) = rule.get("id").and_then(|v| v.as_str())
                 && !seen_ids.insert(id.to_string())
             {
-                return Err(Error::rule_config(
+                let err = Error::rule_config(
                     id,
                     format!(
                         "nested config {} redefines rule id {id:?} - \
@@ -169,18 +164,26 @@ pub(crate) fn discover_nested(
                              and define it per-subtree",
                         abs.display()
                     ),
+                );
+                return Err(alint_core::redact_environment_values_in_error(
+                    err,
+                    environment_values,
                 ));
             }
             discovered.push(rule);
         }
     }
-    Ok((discovered, compatibility, environment_values))
+    Ok((discovered, compatibility, when_var_reads))
 }
 
-/// The nested configs' rule mappings, their compatibility records, and the
-/// values their top-level fields read from the environment
-/// ([`RawConfig::environment_values`]).
-pub(crate) type NestedRules = (Vec<Mapping>, Vec<ConfigCompatibility>, Vec<String>);
+/// The nested configs' rule mappings, their compatibility records, and any
+/// `vars.*` reads in their `when:` / `when_iter:` clauses (judged against
+/// env-derived root vars in `finalize`).
+pub(crate) type NestedRules = (
+    Vec<Mapping>,
+    Vec<ConfigCompatibility>,
+    Vec<crate::trust::UntrustedWhenVarRead>,
+);
 
 /// Load a nested config and return its rule mappings, each
 /// scoped to `rel_dir` (the path, relative to the root config's
@@ -194,28 +197,18 @@ fn load_nested_config(
     consumer_version: Option<u32>,
     running_version: RunningVersion,
     catalog: Option<KindCatalog<'_>>,
-    environment: &dyn crate::EnvironmentProvider,
 ) -> Result<NestedRules> {
     let contents =
         crate::ConfigSourceProvider::read_to_string(&crate::FilesystemConfigSource, abs_path)
             .map_err(|source| crate::loader::config_read_error(abs_path, source))?;
-    // Route through the shared parse path so nested configs get the
-    // same `{{env.X}}` interpolation as the top-level config and
-    // drop-ins. Its errors already name the file.
-    // A nested config must be version 1 (design section 3 item 6); the parse
-    // reads its `version:` first and refuses a version 2 one.
+    // A nested config is untrusted (authored by anyone who can open a PR
+    // against a subdirectory), so it may not interpolate host `{{env.*}}`
+    // variables. It must also be version 1 (design section 3 item 6).
     let origin =
         crate::v2::Origin::new(ConfigSourceClass::Nested, source).consumer(consumer_version, None);
-    let config: RawConfig = crate::loader::parse_config_interpolated_with_environment(
-        &contents,
-        abs_path,
-        environment,
-        &origin,
-    )?;
-    // A value the nested config's top-level fields read from the environment
-    // (its `version:`) stays out of its errors, as the root config's does.
-    let environment_values = config.environment_values.clone();
-    let (rules, compatibility) = nested_config_rules(
+    let config: RawConfig =
+        crate::loader::parse_nested_config_without_environment(&contents, abs_path, &origin)?;
+    nested_config_rules(
         config,
         rel_dir,
         (source, field_source),
@@ -223,8 +216,6 @@ fn load_nested_config(
         running_version,
         catalog,
     )
-    .map_err(|error| alint_core::redact_environment_values_in_error(error, &environment_values))?;
-    Ok((rules, compatibility, environment_values))
 }
 
 /// Check a parsed nested config and scope its rule mappings to `rel_dir`.
@@ -235,7 +226,7 @@ fn nested_config_rules(
     consumer_version: Option<u32>,
     running_version: RunningVersion,
     catalog: Option<KindCatalog<'_>>,
-) -> Result<(Vec<Mapping>, Vec<ConfigCompatibility>)> {
+) -> Result<NestedRules> {
     crate::loader::validate_source_compatibility(
         &mut config,
         source,
@@ -292,7 +283,7 @@ fn nested_config_rules(
              content fixers); declare it in the top-level config"
         )));
     }
-    if !config.allow_out_of_root.is_confined() {
+    if config.allow_out_of_root.is_some() {
         return Err(Error::Other(format!(
             "nested config {source} declares `allow_out_of_root:` - the out-of-root \
              escape hatch is a trusted, root-only grant; declare it in the top-level \
@@ -325,6 +316,9 @@ fn nested_config_rules(
     crate::reject_spawning_fix_ops_in(&config.rules, source, catalog)?;
     // ...and no inherited rule may promote a destructive fix to auto-apply.
     crate::reject_fix_promotion_in(&config.rules, source)?;
+    // ...and no environment reads via legacy `${VAR}` or `when:` / `when_iter:`.
+    crate::reject_env_expansion_in(&config.rules, &config.templates, source)?;
+    let when_var_reads = crate::reject_env_reads_in_when(&config.rules, &config.templates, source)?;
     // ...and every CONTENT-INJECTING fixer is demoted to a suggestion, EXACTLY as
     // for an `extends:`'d remote (loader.rs). Without this a subtree `.alint.yml`
     // -- untrusted, "anyone who can open a PR" -- could auto-apply a content fixer
@@ -336,6 +330,11 @@ fn nested_config_rules(
     // `extends:`'d ruleset" trust model (audit: nested-config HIGH).
     crate::demote_content_fixers_in(&mut config.rules, catalog);
     crate::mark_field_sources_in(&mut config.rules, field_source);
+    crate::trust::mark_provenance_in(
+        &mut config.rules,
+        crate::trust::SourceClass::UntrustedNested,
+        field_source,
+    );
     // Preserve that source trust through root-template expansion. Without this
     // marker a nested rule with `extends_template:` could acquire a root template's
     // content fixer only after the source-local demotion above had already run.
@@ -359,7 +358,7 @@ fn nested_config_rules(
         rule.insert(NESTED_SCOPE_MARKER.into(), ayaml::Value::Mapping(marker));
         out.push(rule);
     }
-    Ok((out, compatibility))
+    Ok((out, compatibility, when_var_reads))
 }
 
 fn reject_nested_execution_settings(config: &RawConfig, source: &str) -> Result<()> {
@@ -449,26 +448,6 @@ fn scope_rule(
     let any_scoped =
         scope_kind_fields(rule, &kind, meta, prefix, &id_hint, source, false, catalog)?;
 
-    // A manifest predicate's `source:` is relative to this config's directory.
-    // These common scope-filter paths are not selector metadata.
-    if let Some(sf) = rule.get_mut("scope_filter").and_then(Value::as_mapping_mut) {
-        for key in ["include_manifest_paths", "exclude_manifest_paths"] {
-            if let Some(src) = sf
-                .get_mut(key)
-                .and_then(Value::as_mapping_mut)
-                .and_then(|mp| mp.get_mut("source"))
-                && let Value::String(s) = src
-            {
-                *s = scope_glob(s, prefix).map_err(|e| {
-                    Error::rule_config(
-                        &id_hint,
-                        format!("scoping `scope_filter.{key}.source` in {source}: {e}"),
-                    )
-                })?;
-            }
-        }
-    }
-
     if !any_scoped {
         return Err(Error::rule_config(
             &id_hint,
@@ -494,14 +473,27 @@ fn repository_path_selector(selector_type: SelectorType) -> bool {
     )
 }
 
+fn selector_is_glob(selector_type: SelectorType) -> bool {
+    matches!(
+        selector_type,
+        SelectorType::Glob | SelectorType::GlobList | SelectorType::DiffGlob
+    )
+}
+
 fn kind_is_unconfinable(meta: &KindMeta) -> bool {
     if meta.paths != PathsSupport::Forbidden {
         return false;
     }
-    let has_path_selector = meta
-        .selectors
-        .iter()
-        .any(|selector| repository_path_selector(selector.selector_type));
+    let has_non_rerootable_file_selector = meta.selectors.iter().any(|selector| {
+        !selector.rerootable
+            && matches!(
+                selector.selector_type,
+                SelectorType::Glob
+                    | SelectorType::GlobList
+                    | SelectorType::LiteralPath
+                    | SelectorType::DiffGlob
+            )
+    });
     let has_rerootable_path_selector = meta
         .selectors
         .iter()
@@ -510,7 +502,7 @@ fn kind_is_unconfinable(meta: &KindMeta) -> bool {
         .capabilities
         .iter()
         .any(|entry| matches!(entry.capability, alint_core::Capability::Git { .. }));
-    !has_rerootable_path_selector && (has_path_selector || has_git_scope)
+    has_non_rerootable_file_selector || (!has_rerootable_path_selector && has_git_scope)
 }
 
 fn field_mut<'a>(mapping: &'a mut Mapping, path: &str) -> Option<&'a mut Value> {
@@ -520,9 +512,9 @@ fn field_mut<'a>(mapping: &'a mut Mapping, path: &str) -> Option<&'a mut Value> 
     field_mut(mapping.get_mut(head)?.as_mapping_mut()?, tail)
 }
 
-/// Re-root metadata-declared path selectors and recurse into metadata-declared
-/// nested-rule fields.
-#[allow(clippy::too_many_arguments)]
+/// Re-root metadata-declared path selectors, `scope_filter` manifest sources,
+/// and recurse into metadata-declared nested-rule fields.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn scope_kind_fields(
     rule: &mut Mapping,
     kind: &str,
@@ -556,7 +548,8 @@ fn scope_kind_fields(
     if meta.paths != PathsSupport::Forbidden
         && let Some(value) = rule.get_mut("paths")
     {
-        scope_paths_value_in(value, prefix, in_require).map_err(|e| scope_err("paths", e))?;
+        scope_paths_value_in(value, prefix, in_require, true, true)
+            .map_err(|e| scope_err("paths", e))?;
         any_scoped = true;
     }
 
@@ -570,14 +563,43 @@ fn scope_kind_fields(
             continue;
         };
         let template_anchored = in_require || selector.selector_type == SelectorType::PathTemplate;
+        let is_glob = selector_is_glob(selector.selector_type);
+        let require_positive = matches!(
+            selector.selector_type,
+            SelectorType::Glob | SelectorType::GlobList
+        );
         if name == "root.dir" && value.as_str() == Some(".") {
-            *value = Value::String(prefix.to_string());
+            *value = Value::String(if prefix.is_empty() {
+                ".".to_string()
+            } else {
+                prefix.to_string()
+            });
         } else {
-            scope_paths_value_in(value, prefix, template_anchored)
+            scope_paths_value_in(value, prefix, template_anchored, is_glob, require_positive)
                 .map_err(|e| scope_err(name, e))?;
         }
-        if matches!(name, "select" | "primary") {
+        if matches!(name, "select" | "primary" | "reference" | "peers") {
             any_scoped = true;
+        }
+    }
+
+    // A manifest predicate's `source:` is a literal path relative to this
+    // config's directory (top-level rules and nested `require:` children alike).
+    if let Some(sf) = rule.get_mut("scope_filter").and_then(Value::as_mapping_mut) {
+        for key in ["include_manifest_paths", "exclude_manifest_paths"] {
+            if let Some(src) = sf
+                .get_mut(key)
+                .and_then(Value::as_mapping_mut)
+                .and_then(|mp| mp.get_mut("source"))
+                && let Value::String(s) = src
+            {
+                *s = scope_value_in(s, prefix, in_require, false).map_err(|e| {
+                    Error::rule_config(
+                        id_hint,
+                        format!("scoping `scope_filter.{key}.source` in {source}: {e}"),
+                    )
+                })?;
+            }
         }
     }
 
@@ -643,10 +665,21 @@ fn has_parent_escape(path: &str) -> bool {
         .any(|segment| segment == ".." || segment.split(['{', '}', ',']).any(|part| part == ".."))
 }
 
+/// Escape glob metacharacters in a nested directory prefix (including a
+/// leading `!` so a directory named `!app` is never parsed as a negation).
+fn escape_glob_prefix(prefix: &str) -> String {
+    let escaped = alint_core::template::glob_escape(prefix);
+    if let Some(rest) = escaped.strip_prefix('!') {
+        format!("{{!}}{rest}")
+    } else {
+        escaped
+    }
+}
+
 /// Re-root one path or glob, leaving a `{path}` / `{dir}/`-anchored value inside
 /// a `require:` block or `PathTemplate` selector untouched (still rejecting any
 /// `..` escape inside it; see [`scope_kind_fields`]).
-fn scope_value_in(value: &str, prefix: &str, in_require: bool) -> Result<String> {
+fn scope_value_in(value: &str, prefix: &str, in_require: bool, is_glob: bool) -> Result<String> {
     if in_require && is_subtree_anchored_token(value) {
         let rest = value.strip_prefix('!').unwrap_or(value);
         if has_parent_escape(rest) {
@@ -656,59 +689,44 @@ fn scope_value_in(value: &str, prefix: &str, in_require: bool) -> Result<String>
         }
         Ok(value.to_string())
     } else {
-        scope_glob(value, prefix)
+        scope_path_or_glob(value, prefix, is_glob)
     }
 }
 
-/// [`scope_paths_value`] with the `require:`-block token rule applied to every
-/// string in the value.
-fn scope_paths_value_in(value: &mut ayaml::Value, prefix: &str, in_require: bool) -> Result<()> {
-    if !in_require {
-        return scope_paths_value(value, prefix);
-    }
-    match value {
-        ayaml::Value::String(s) => *s = scope_value_in(s, prefix, true)?,
-        ayaml::Value::Sequence(seq) => {
-            for item in seq {
-                if let ayaml::Value::String(s) = item {
-                    *s = scope_value_in(s, prefix, true)?;
-                } else {
-                    return Err(Error::Other(
-                        "path array contains a non-string entry; nested scoping only \
-                         supports strings"
-                            .into(),
-                    ));
-                }
-            }
-        }
-        ayaml::Value::Mapping(m) => {
-            for key in &["include", "exclude"] {
-                if let Some(inner) = m.get_mut(*key) {
-                    scope_paths_value_in(inner, prefix, true)?;
-                }
-            }
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
-/// Re-root a YAML value representing a paths-spec. Accepts:
-/// - a single string (plain glob, possibly `!`-negated)
+/// Re-root a YAML value representing a paths-spec or path selector. Accepts:
+/// - a single string (plain path/glob, possibly `!`-negated)
 /// - an array of strings
 /// - an `{include, exclude}` mapping (each list gets prefixed)
 ///
-/// Absolute paths and `..`-prefixed globs are rejected; they'd
-/// escape the subtree the nested config is supposed to confine.
-fn scope_paths_value(value: &mut ayaml::Value, prefix: &str) -> Result<()> {
+/// When `require_positive_include` is true, refuses empty or exclude-only
+/// shapes (`[]`, `["!x"]`, `"!x"`, `{ exclude: [...] }`, `{ include: [] }`)
+/// because `Scope::from_paths_spec` treats exclude-only patterns as match-all
+/// across the whole repository.
+fn scope_paths_value_in(
+    value: &mut ayaml::Value,
+    prefix: &str,
+    in_require: bool,
+    is_glob: bool,
+    require_positive_include: bool,
+) -> Result<()> {
+    const EMPTY_INCLUDE_ERR: &str = "paths in a nested config must include at least one \
+        non-negated pattern under the nested directory (empty or exclude-only paths \
+        would match outside the subtree)";
     match value {
         ayaml::Value::String(s) => {
-            *s = scope_glob(s, prefix)?;
+            if require_positive_include && (s.is_empty() || s.starts_with('!')) {
+                return Err(Error::Other(EMPTY_INCLUDE_ERR.into()));
+            }
+            *s = scope_value_in(s, prefix, in_require, is_glob)?;
         }
         ayaml::Value::Sequence(seq) => {
+            let mut has_positive = false;
             for item in seq {
-                if let Some(s) = item.as_str() {
-                    *item = ayaml::Value::String(scope_glob(s, prefix)?);
+                if let ayaml::Value::String(s) = item {
+                    if !s.is_empty() && !s.starts_with('!') {
+                        has_positive = true;
+                    }
+                    *s = scope_value_in(s, prefix, in_require, is_glob)?;
                 } else {
                     return Err(Error::Other(
                         "path array contains a non-string entry; nested scoping only \
@@ -717,13 +735,19 @@ fn scope_paths_value(value: &mut ayaml::Value, prefix: &str) -> Result<()> {
                     ));
                 }
             }
+            if require_positive_include && !has_positive {
+                return Err(Error::Other(EMPTY_INCLUDE_ERR.into()));
+            }
         }
         ayaml::Value::Mapping(m) => {
-            // include / exclude form — prefix each list in place.
-            for key in &["include", "exclude"] {
-                if let Some(inner) = m.get_mut(*key) {
-                    scope_paths_value(inner, prefix)?;
-                }
+            if require_positive_include && !m.contains_key("include") {
+                return Err(Error::Other(EMPTY_INCLUDE_ERR.into()));
+            }
+            if let Some(inner) = m.get_mut("include") {
+                scope_paths_value_in(inner, prefix, in_require, is_glob, require_positive_include)?;
+            }
+            if let Some(inner) = m.get_mut("exclude") {
+                scope_paths_value_in(inner, prefix, in_require, is_glob, false)?;
             }
         }
         _ => {
@@ -737,13 +761,15 @@ fn scope_paths_value(value: &mut ayaml::Value, prefix: &str) -> Result<()> {
     Ok(())
 }
 
-/// Join `prefix` to a single glob. Preserves leading `!` for
-/// negations. Rejects absolute paths (including Windows drive/UNC prefixes)
-/// and `..` escapes anywhere in the pattern.
+/// Join `prefix` to a single glob (glob-escaping metacharacters in `prefix`).
+/// Preserves leading `!` for negations. Rejects absolute paths (including
+/// Windows drive/UNC prefixes) and `..` escapes anywhere in the pattern.
+#[cfg(test)]
 pub(crate) fn scope_glob(glob: &str, prefix: &str) -> Result<String> {
-    if prefix.is_empty() {
-        return Ok(glob.to_string());
-    }
+    scope_path_or_glob(glob, prefix, true)
+}
+
+fn scope_path_or_glob(glob: &str, prefix: &str, is_glob: bool) -> Result<String> {
     let (negate, rest) = match glob.strip_prefix('!') {
         Some(r) => (true, r),
         None => (false, glob),
@@ -759,10 +785,18 @@ pub(crate) fn scope_glob(glob: &str, prefix: &str) -> Result<String> {
             "parent-directory escape {glob:?} isn't allowed in a nested config"
         )));
     }
-    let joined = if negate {
-        format!("!{prefix}/{rest}")
+    if prefix.is_empty() {
+        return Ok(glob.to_string());
+    }
+    let effective_prefix = if is_glob {
+        escape_glob_prefix(prefix)
     } else {
-        format!("{prefix}/{rest}")
+        prefix.to_string()
+    };
+    let joined = if negate {
+        format!("!{effective_prefix}/{rest}")
+    } else {
+        format!("{effective_prefix}/{rest}")
     };
     Ok(joined)
 }

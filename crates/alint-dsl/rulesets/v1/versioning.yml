@@ -54,7 +54,7 @@ rules:
         regex: '\A[ \t]*((?:[0-9][0-9A-Za-z._+!~-]{0,255}|[vV][0-9][0-9A-Za-z._+!~-]{0,254}))[ \t]*(?:\r?\n)?\z'
     targets:
       files: "**/Cargo.toml"
-      extract: { toml: "$.package.version" }
+      extract: { toml: "$[?@ == $.package && match(@.version, '.*')].version" }
     relation: equals
     allow_missing_target: true
     level: error
@@ -186,7 +186,7 @@ rules:
       - file: CHANGELOG.md
         extract:
           regex: >-
-            (?m)\A[^`~<]*?^##[ \t]+(?:Version[ \t]+)?(?:\[[ \t]*)?([vV]?[0-9][-0-9A-Za-z._+!~]{0,255})(?:[ \t]*\])?(?:[ \t]+|$)
+            (?m)\A(?:[^`~<]|`{1,2}(?:[^`~<]|<[^!`~<])|~{1,2}[^`~<]|<[^!`~<]|<![^-`~<]|<!-[^-`~<])*?^##[ \t]+(?:Version[ \t]+)?(?:\[[ \t]*)?([vV]?[0-9][-0-9A-Za-z._+!~]{0,255})(?:[ \t]*\])?(?:[ \t]+|$)
     relation: equals
     allow_missing_target: false
     level: error

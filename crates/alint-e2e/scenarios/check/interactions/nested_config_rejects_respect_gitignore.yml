@@ -1,0 +1,29 @@
+test_version: 1
+name: nested config declaring root-only respect_gitignore fails to load
+tags: [check, interactions, nested, failing]
+
+given:
+  config: |
+    version: 1
+    nested_configs: true
+    rules: []
+  tree:
+    packages:
+      sub:
+        ".alint.yml": |
+          version: 1
+          respect_gitignore: false
+          rules:
+            - id: sub-readme
+              kind: file_exists
+              paths: README.md
+              level: error
+        README.md: "# sub\n"
+
+when: [check]
+
+expect:
+  - exit: configuration_error
+    configuration_error:
+      message:
+        regex: "respect_gitignore"

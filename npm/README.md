@@ -35,7 +35,7 @@ runs alint v0.23.0.
 | `@asamarts/alint-win32-arm64`  | Windows | arm64 |
 
 For other platforms, install via `cargo install alint`,
-[Homebrew](https://github.com/asamarts/alint#homebrew-macos--linuxbrew), or a
+[Homebrew](https://github.com/asamarts/alint#install), or a
 tarball from [GitHub Releases](https://github.com/asamarts/alint/releases), or
 point `ALINT_BINARY` at a binary (below).
 

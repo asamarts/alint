@@ -322,6 +322,13 @@ impl FileIndex {
         &self.walk_warnings
     }
 
+    /// The [`WalkOptions`] that [`walk`] used to build this index, or `None`
+    /// for an index constructed directly from entries.
+    #[must_use]
+    pub fn walk_options(&self) -> Option<&WalkOptions> {
+        self.walk_options.as_ref()
+    }
+
     /// Symlinks whose target escapes the repo root or leads into a Git directory
     /// in it: pruned from `entries` (so no content rule reads through them) but
     /// surfaced here for `no_symlinks` (M4). Relative paths.
@@ -1273,6 +1280,15 @@ impl Listings {
     }
 }
 
+/// Validate a config's `ignore:` glob patterns without touching the filesystem.
+/// Compiles the same override set [`walk`] builds, so `alint validate-config`
+/// catches malformed `ignore:` patterns with the exact same error.
+pub fn validate_ignore_patterns(patterns: &[String]) -> Result<()> {
+    let opts = WalkOptions::default().with_extra_ignores(patterns.to_vec());
+    let _ = build_overrides(Path::new("."), &opts)?;
+    Ok(())
+}
+
 /// The walk's override set: `.git/` plus every config `ignore:` pattern, each
 /// an exclusion.
 fn build_overrides(root: &Path, opts: &WalkOptions) -> Result<ignore::overrides::Override> {
@@ -1632,7 +1648,7 @@ impl<'a> WalkSkips<'a> {
         let Ok(metadata) = path.symlink_metadata() else {
             return Reach::Missing;
         };
-        let symlink = metadata.file_type().is_symlink();
+        let symlink = crate::pathsafe::metadata_is_symlink_or_reparse(&metadata);
         if !symlink && !descends {
             return Reach::Missing;
         }
@@ -1691,6 +1707,15 @@ impl<'a> WalkSkips<'a> {
             .collect();
         if parts.is_empty() {
             return false;
+        }
+        // Mirror `walker_parallel`: every spelling a filesystem could open as
+        // `.git` (`.GIT`, `.git.`, `GIT~1`, `.g\u{200c}it`, etc.) is always
+        // skipped regardless of `ignore:` overrides or `git ls-files`.
+        if parts.iter().any(|c| {
+            matches!(c, std::path::Component::Normal(name)
+                if crate::pathsafe::names_git_directory(&name.to_string_lossy()))
+        }) {
+            return true;
         }
         let SharedIgnores {
             overrides,
@@ -1763,6 +1788,7 @@ impl<'a> WalkSkips<'a> {
 
 #[path = "walker_ignore_files.rs"]
 mod ignore_files;
+pub(crate) use ignore_files::open_nonblocking;
 
 #[path = "walker_parallel.rs"]
 mod parallel;

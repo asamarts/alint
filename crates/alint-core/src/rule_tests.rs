@@ -1061,3 +1061,20 @@ fn every_context_setter_sets_its_field() {
         &raw const environment
     ));
 }
+
+#[cfg(unix)]
+#[test]
+fn write_atomic_sets_owner_only_temp_permissions_and_preserves_existing_mode() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("out.txt");
+    write_atomic(&path, b"hello").unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"hello");
+    let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "newly created atomic temp file uses 0o600");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    write_atomic(&path, b"updated").unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"updated");
+    let updated_mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(updated_mode, 0o644);
+}

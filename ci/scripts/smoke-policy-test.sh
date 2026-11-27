@@ -58,7 +58,21 @@ if ! (cd "$root" && "${command[@]}" test --format json >"$stdout" 2>"$stderr"); 
   exit 1
 fi
 
-python3 - "$stdout" <<'PY'
+# `python3` on Windows runners can resolve to the Microsoft Store alias stub;
+# probe candidates for a working Python 3.8+ interpreter.
+PY=""
+for candidate in python3 python; do
+  if "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 8))' >/dev/null 2>&1; then
+    PY="$candidate"
+    break
+  fi
+done
+if [[ -z "$PY" ]]; then
+  echo "  [smoke] FAIL: Python 3.8+ is required to validate policy-test JSON output" >&2
+  exit 1
+fi
+
+"$PY" - "$stdout" <<'PY'
 import json
 import sys
 

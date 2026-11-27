@@ -14,7 +14,7 @@
 
 use std::path::Path;
 
-use alint_core::{Engine, FileEntry, FileIndex, Rule};
+use alint_core::{Engine, FileEntry, FileIndex};
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
 fn build_paired_index(n_modules: usize) -> FileIndex {
@@ -86,12 +86,15 @@ fn build_unique_by_index(n_files: usize) -> FileIndex {
 fn build_engine(yaml: &str) -> Engine {
     let config = alint_dsl::parse(yaml).expect("bench config parses");
     let registry = alint_rules::builtin_registry();
-    let rules: Vec<Box<dyn Rule>> = config
+    let entries: Vec<alint_core::RuleEntry> = config
         .rules
-        .iter()
-        .map(|spec| registry.build(spec).expect("bench rule builds"))
+        .into_iter()
+        .map(|spec| {
+            let rule = registry.build(&spec).expect("bench rule builds");
+            alint_core::RuleEntry::new(rule).with_spec(std::sync::Arc::new(spec))
+        })
         .collect();
-    Engine::new(rules, alint_rules::builtin_registry())
+    Engine::from_entries(entries, registry)
 }
 
 fn bench_pair(c: &mut Criterion) {

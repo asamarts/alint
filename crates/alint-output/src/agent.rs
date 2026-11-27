@@ -125,7 +125,12 @@ struct AgentAnalysisFailure<'a> {
 
 #[allow(clippy::too_many_lines)]
 pub fn write_agent(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
-    let total_violations: usize = report.results.iter().map(|r| r.violations.len()).sum();
+    let total_violations: usize = report
+        .results
+        .iter()
+        .filter(|r| r.level != Level::Off)
+        .map(|r| r.violations.len())
+        .sum();
     let total_failures: usize = report
         .results
         .iter()
@@ -141,7 +146,7 @@ pub fn write_agent(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
     let mut analysis_failures = Vec::with_capacity(total_failures);
 
     for r in &report.results {
-        if !r.violations.is_empty() {
+        if r.level != Level::Off && !r.violations.is_empty() {
             let severity = severity_str(r.level);
             let safe_rule_id = crate::sanitize::sanitize_terminal(&r.rule_id);
             let safe_policy_url = r
@@ -638,5 +643,38 @@ mod tests {
         assert!(!af_msg.contains('\u{202E}'));
         assert!(af_msg.contains("\\x1b"));
         assert!(af_msg.contains("\\u{202e}"));
+    }
+
+    #[test]
+    fn level_off_violations_are_skipped_and_excluded_from_counts() {
+        let results = vec![
+            RuleResult {
+                rule_id: "active".into(),
+                level: Level::Warning,
+                policy_url: None,
+                violations: vec![Violation::new("warn")],
+                notes: Vec::new(),
+                is_fixable: false,
+                analysis_failures: Vec::new(),
+            },
+            RuleResult {
+                rule_id: "disabled".into(),
+                level: Level::Off,
+                policy_url: None,
+                violations: vec![Violation::new("should not appear")],
+                notes: Vec::new(),
+                is_fixable: false,
+                analysis_failures: Vec::new(),
+            },
+        ];
+        let out = run(results);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["summary"]["total_violations"], 1);
+        assert_eq!(v["summary"]["by_severity"]["warning"], 1);
+        assert_eq!(v["summary"]["by_severity"]["error"], 0);
+        assert_eq!(v["summary"]["by_severity"]["info"], 0);
+        let violations = v["violations"].as_array().unwrap();
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0]["rule_id"], "active");
     }
 }

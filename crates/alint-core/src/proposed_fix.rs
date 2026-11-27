@@ -289,45 +289,55 @@ pub fn attach_proposed_edits(engine: &Engine, report: &mut Report, root: &Path, 
         .results
         .iter()
         .flat_map(|result| result.violations.iter().chain(&result.notes))
-        .filter(|finding| finding.is_sensitive())
+        .filter(|finding| finding.is_sensitive() || finding.path_is_sensitive())
         .filter_map(|finding| finding.path.as_deref().map(Path::to_path_buf))
         .chain(
             report
                 .results
                 .iter()
                 .flat_map(|result| &result.analysis_failures)
-                .filter(|failure| failure.is_sensitive())
+                .filter(|failure| failure.is_sensitive() || failure.path_is_sensitive())
                 .filter_map(|failure| failure.path.as_deref().map(Path::to_path_buf)),
         )
         .collect();
 
-    // In-place content changes, composed exactly as `fix` composes them (one
-    // single-pass compose; the `--diff` fidelity caveat about multi-pass cascades
-    // applies here identically). Best-effort: a hard error -> no advertised fixes.
+    // In-place content changes and approved creates, composed/gated exactly as
+    // `fix` does (including `extended_source` config refusal, `.git/` refusal,
+    // unresolved-create prediction, and missing-directory declines). Best-effort:
+    // a hard error -> no advertised fixes.
     let mut modify: BTreeMap<PathBuf, ProposedEdit> = BTreeMap::new();
+    let mut staged_creates: HashSet<PathBuf> = HashSet::new();
     if let Ok((_fix_report, staged)) = engine.stage_fixes(root, index, Applicability::Safe) {
         for sf in staged {
-            // Creates handled below; delete / rename / chmod carry no text region.
-            if !matches!(sf.kind, StagedKind::Modify) {
-                continue;
-            }
-            if sensitive_files.contains(&sf.path) {
-                continue;
-            }
-            if let Some(pe) = whole_file_edit_to_proposed(
-                &sf.old,
-                &FixEdit::SetContent {
-                    path: sf.path.clone(),
-                    content: sf.new,
-                },
-            ) {
-                modify.insert(sf.path, pe);
+            match sf.kind {
+                StagedKind::Create => {
+                    if !sensitive_files.contains(&sf.path) {
+                        staged_creates.insert(sf.path);
+                    }
+                }
+                StagedKind::Modify => {
+                    if sensitive_files.contains(&sf.path) {
+                        continue;
+                    }
+                    if let Some(pe) = whole_file_edit_to_proposed(
+                        &sf.old,
+                        &FixEdit::SetContent {
+                            path: sf.path.clone(),
+                            content: sf.new,
+                        },
+                    ) {
+                        modify.insert(sf.path, pe);
+                    }
+                }
+                // Delete / rename / chmod carry no text region.
+                _ => {}
             }
         }
     }
 
     // Create fixers: standalone, keyed by result index (their violation has no
-    // path; a create composes with nothing this pass).
+    // path; a create composes with nothing this pass), gated to edits that
+    // passed `stage_fixes`'s security and preview checks above.
     let mut creates: BTreeMap<usize, ProposedEdit> = BTreeMap::new();
     for (ri, rr) in report.results.iter().enumerate() {
         let Some(fixer) = engine.fixer_for(&rr.rule_id) else {
@@ -336,12 +346,11 @@ pub fn attach_proposed_edits(engine: &Engine, report: &mut Report, root: &Path, 
         if fixer.collects_located_edits() {
             continue;
         }
-        for v in rr
-            .violations
-            .iter()
-            .filter(|v| v.is_fixable && !v.is_sensitive() && v.path.is_none())
-        {
+        for v in rr.violations.iter().filter(|v| {
+            v.is_fixable && !v.is_sensitive() && !v.path_is_sensitive() && v.path.is_none()
+        }) {
             if let Some(edit) = fixer.fix_edit(v, &[], root)
+                && matches!(&edit, FixEdit::CreateFile { path, .. } if staged_creates.contains(path))
                 && let Some(pe) = whole_file_edit_to_proposed(&[], &edit)
             {
                 creates.entry(ri).or_insert(pe);
@@ -356,7 +365,7 @@ pub fn attach_proposed_edits(engine: &Engine, report: &mut Report, root: &Path, 
     let mut done_creates: HashSet<usize> = HashSet::new();
     for (ri, rr) in report.results.iter_mut().enumerate() {
         for v in &mut rr.violations {
-            if !v.is_fixable || v.is_sensitive() {
+            if !v.is_fixable || v.is_sensitive() || v.path_is_sensitive() {
                 continue;
             }
             if let Some(p) = v.path.as_deref() {

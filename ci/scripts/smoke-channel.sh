@@ -118,7 +118,18 @@ smoke_policy_test() {
 # signature actually verified (the workflow installs cosign v3 for this leg),
 # and the log is kept so the caller can prove the verification ran instead of
 # being silently skipped.
+# Track temporary files/dirs created during smoke runs and clean them up on exit.
+SMOKE_TMP_PATHS=()
+cleanup_smoke_tmp() {
+  local p
+  for p in "${SMOKE_TMP_PATHS[@]}"; do
+    [[ -n "$p" ]] && rm -rf "$p"
+  done
+}
+trap cleanup_smoke_tmp EXIT
+
 INSTALL_LOG="$(mktemp)"
+SMOKE_TMP_PATHS+=("$INSTALL_LOG")
 install_via_script() {
   curl -fsSL https://alint.org/install.sh \
     | ALINT_VERSION="$TAG" ALINT_REQUIRE_VERIFY="$REQUIRE_VERIFY" bash 2>&1 | tee "$INSTALL_LOG"
@@ -135,6 +146,7 @@ smoke_npm_project() {
   local proj omitted audit platform_pkg attested
   proj="$(mktemp -d)"
   omitted="$(mktemp -d)"
+  SMOKE_TMP_PATHS+=("$proj" "$omitted")
   (cd "$proj" && npm init -y >/dev/null && retry npm install --no-fund --no-audit "@asamarts/alint@${VER}")
   (cd "$proj" && assert_version npx --no-install alint --version)
   if ! version_ge "$VER" "$FIRST_NPM_PLATFORM_RELEASE"; then
@@ -263,14 +275,40 @@ case "$CHANNEL" in
     # toolchain. See docs/design/distribution-pypi.md.
     export PATH="${HOME}/.local/bin:${PATH}"
     if ! command -v uvx >/dev/null 2>&1; then
-      retry bash -c 'curl -fsSL https://astral.sh/uv/install.sh | sh'
+      uv_ver="0.13.10"
+      case "$(uname -s)-$(uname -m)" in
+        Linux-x86_64)
+          uv_asset="uv-x86_64-unknown-linux-gnu.tar.gz"
+          uv_sha256="bf65ac1a0af10f92c522d91ac096c7c0a39657647b155577e7836c2cbbb4526c"
+          ;;
+        Linux-aarch64|Linux-arm64)
+          uv_asset="uv-aarch64-unknown-linux-gnu.tar.gz"
+          uv_sha256="14590f644805a6234ffe071154340669e38137f38e60aa9629690119704107d2"
+          ;;
+        *)
+          echo "  [smoke] FAIL: uvx not installed and no pinned uv tarball for $(uname -s)-$(uname -m)" >&2
+          exit 1
+          ;;
+      esac
+      uv_tmp="$(mktemp -d)"
+      SMOKE_TMP_PATHS+=("$uv_tmp")
+      mkdir -p "${HOME}/.local/bin"
+      retry curl -fsSL -o "${uv_tmp}/${uv_asset}" \
+        "https://github.com/astral-sh/uv/releases/download/${uv_ver}/${uv_asset}"
+      echo "${uv_sha256}  ${uv_tmp}/${uv_asset}" | sha256sum -c -
+      tar -xzf "${uv_tmp}/${uv_asset}" -C "${uv_tmp}"
+      uv_dir="${uv_tmp}/${uv_asset%.tar.gz}"
+      install -m 0755 "${uv_dir}/uv" "${HOME}/.local/bin/uv"
+      install -m 0755 "${uv_dir}/uvx" "${HOME}/.local/bin/uvx"
     fi
     retry uvx "alint@${VER}" --version
     assert_version uvx "alint@${VER}" --version
-    python3 -m venv /tmp/alint-pypi-smoke
-    retry /tmp/alint-pypi-smoke/bin/pip install --quiet "alint==${VER}"
-    assert_version /tmp/alint-pypi-smoke/bin/alint --version
-    smoke_policy_test /tmp/alint-pypi-smoke/bin/alint
+    pypi_venv="$(mktemp -d)"
+    SMOKE_TMP_PATHS+=("$pypi_venv")
+    python3 -m venv "$pypi_venv"
+    retry "$pypi_venv/bin/pip" install --quiet "alint==${VER}"
+    assert_version "$pypi_venv/bin/alint" --version
+    smoke_policy_test "$pypi_venv/bin/alint"
     # Unversioned resolve must serve VER when smoking the latest (no-op otherwise).
     check_floating "$(uvx alint --version 2>&1 | awk '/^alint [0-9]/ { print $2; exit }')"
     ;;

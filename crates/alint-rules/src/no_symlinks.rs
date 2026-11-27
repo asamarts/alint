@@ -51,8 +51,12 @@ impl Rule for NoSymlinksRule {
                 continue;
             }
             let full = ctx.root.join(&entry.path);
-            let Ok(meta) = std::fs::symlink_metadata(&full) else {
-                continue;
+            let meta = match std::fs::symlink_metadata(&full) {
+                Ok(m) => m,
+                Err(e) => {
+                    violations.push(crate::io::io_error_violation(&entry.path, &e));
+                    continue;
+                }
             };
             if meta.file_type().is_symlink() {
                 let msg = self
@@ -335,5 +339,57 @@ mod tests {
         let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
         assert_eq!(v.len(), 1, "only in-scope symlink should fire: {v:?}");
         assert_eq!(v[0].path.as_deref(), Some(std::path::Path::new("pkg/link")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn changed_mode_flags_escaping_dangling_and_cyclic_symlinks() {
+        use std::collections::HashSet;
+        use std::os::unix::fs::symlink;
+        use std::path::PathBuf;
+
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret.txt"), b"x").unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::write(root.join("ok.txt"), b"ok").unwrap();
+        symlink(outside.path().join("secret.txt"), root.join("esc")).unwrap();
+        symlink("nonexistent", root.join("dangling")).unwrap();
+        symlink("self_loop", root.join("self_loop")).unwrap();
+
+        let full = alint_core::walk(root, &crate::test_support::walk_options()).unwrap();
+        let changed: HashSet<PathBuf> = [
+            PathBuf::from("esc"),
+            PathBuf::from("dangling"),
+            PathBuf::from("self_loop"),
+        ]
+        .into_iter()
+        .collect();
+        let spec = std::sync::Arc::new(spec_yaml(
+            "id: t\nkind: no_symlinks\npaths: \"**/*\"\nlevel: error\n",
+        ));
+        let registry = crate::builtin_registry();
+        let rule = registry.build(&spec).unwrap();
+        let engine = alint_core::Engine::from_entries(
+            vec![alint_core::RuleEntry::new(rule).with_spec(spec)],
+            registry,
+        )
+        .with_changed_paths(changed);
+        let report = engine.run(root, &full).unwrap();
+        let mut flagged: Vec<_> = report.results[0]
+            .violations
+            .iter()
+            .filter_map(|v| v.path.as_deref())
+            .collect();
+        flagged.sort();
+        assert_eq!(
+            flagged,
+            vec![
+                std::path::Path::new("dangling"),
+                std::path::Path::new("esc"),
+                std::path::Path::new("self_loop"),
+            ],
+            "{report:?}"
+        );
     }
 }

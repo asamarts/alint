@@ -73,7 +73,7 @@ row() {
   row "Deny"         "$DENY_RESULT"        "$( [[ "$RUST_CHANGED" == true || "$SUPPLY_CHAIN_CHANGED" == true ]] && echo true || echo false )"
   row "Supply chain" "$SUPPLY_CHAIN_RESULT" "$SUPPLY_CHAIN_CHANGED"
   row "Build"        "$BUILD_RESULT"       "$RUST_CHANGED"
-  row "Docs"         "$DOCS_JOB_RESULT"    "$RUST_CHANGED"
+  row "Docs"         "$DOCS_JOB_RESULT"    "$( [[ "$RUST_CHANGED" == true || "$DOCS_CHANGED" == true ]] && echo true || echo false )"
   row "Dogfood"      "$DOGFOOD_RESULT"     "$RUST_CHANGED"
   # Shell tests route on their own `shell` flag (detect-changes.sh), which
   # also fires for packaging / docs / supply-chain / repo-config paths.
@@ -133,34 +133,63 @@ for check in "Secrets inventory=${SECRETS_INVENTORY_RESULT:-}" "Action pins=${AC
     FAILED=true
   fi
 done
-for result in \
-  "$FMT_RESULT" "$MSRV_RESULT" "$CLIPPY_RESULT" "$TEST_RESULT" \
-  "${YAML_COMPARE_RESULT:-skipped}" "$AUDIT_RESULT" \
-  "$DENY_RESULT" "$SUPPLY_CHAIN_RESULT" "$BUILD_RESULT" "$DOCS_JOB_RESULT" \
-  "$DOGFOOD_RESULT" "$BENCH_SMOKE_RESULT" "$EXAMPLES_RESULT" \
-  "$SHELL_TESTS_RESULT" "$EDITORS_RESULT" "${PACKAGING_RESULT:-skipped}" \
-  "${PERF_REFERENCE_RESULT:-skipped}" "${WITFORGE_RESULT:-skipped}"; do
-  if [[ "$result" == "failure" ]]; then
+# Any job whose outcome is neither `success` nor `skipped` (including `failure`,
+# `cancelled` from a timeout/preemption, or unset) fails the aggregate gate.
+for job in \
+  "Format=${FMT_RESULT:-}" \
+  "MSRV=${MSRV_RESULT:-}" \
+  "Clippy=${CLIPPY_RESULT:-}" \
+  "Test=${TEST_RESULT:-}" \
+  "YAML compare=${YAML_COMPARE_RESULT:-skipped}" \
+  "Audit=${AUDIT_RESULT:-}" \
+  "Deny=${DENY_RESULT:-}" \
+  "Supply chain=${SUPPLY_CHAIN_RESULT:-}" \
+  "Build=${BUILD_RESULT:-}" \
+  "Docs=${DOCS_JOB_RESULT:-}" \
+  "Dogfood=${DOGFOOD_RESULT:-}" \
+  "Bench smoke=${BENCH_SMOKE_RESULT:-}" \
+  "Examples=${EXAMPLES_RESULT:-}" \
+  "Shell tests=${SHELL_TESTS_RESULT:-}" \
+  "Editors=${EDITORS_RESULT:-}" \
+  "Packaging=${PACKAGING_RESULT:-skipped}" \
+  "Perf gate (v0.18.2 reference)=${PERF_REFERENCE_RESULT:-skipped}" \
+  "Plugin contract (witforge)=${WITFORGE_RESULT:-skipped}"; do
+  name="${job%%=*}"
+  result="${job#*=}"
+  if [[ "$result" != "success" && "$result" != "skipped" ]]; then
+    echo "==> ${name} did not pass (result: ${result:-unset})" >&2
     FAILED=true
   fi
 done
 
-# The reference perf gate is blocking: a timeout cancels the job, and a
-# cancelled gate has not shown the budget holds.
-if [[ "${PERF_REFERENCE_RESULT:-skipped}" == "cancelled" ]]; then
-  echo "==> The v0.18.2 reference perf gate was cancelled (a timeout?); it did not pass" >&2
-  FAILED=true
-fi
-
-# The plugin contract job is the only CI check of the WIT against the generated
-# consumer (W2-7). A cancel (a timeout) never passed, whatever changed; and
-# whenever `rust` changed it must have run and passed, since a skip (an
-# upstream failure, a runner problem) means the WIT went unchecked.
-if [[ "${WITFORGE_RESULT:-skipped}" == "cancelled" ]] \
-  || [[ "${RUST_CHANGED:-false}" == "true" && "${WITFORGE_RESULT:-skipped}" != "success" ]]; then
-  echo "==> The plugin contract check did not pass (result: ${WITFORGE_RESULT:-skipped}); the WIT went unchecked" >&2
-  FAILED=true
-fi
+# Every job whose change trigger fired must have run and succeeded (an
+# unexpected skip means a gate went unchecked). `Bench smoke` (skipped on
+# hosted runners) and `Perf gate` (PR-only) are checked above for failure/cancel.
+AUDIT_TRIGGERED="$( [[ "${RUST_CHANGED:-false}" == true || "${SUPPLY_CHAIN_CHANGED:-false}" == true ]] && echo true || echo false )"
+DOCS_TRIGGERED="$( [[ "${RUST_CHANGED:-false}" == true || "${DOCS_CHANGED:-false}" == true ]] && echo true || echo false )"
+for check in \
+  "Format:${RUST_CHANGED:-false}:${FMT_RESULT:-}" \
+  "MSRV:${RUST_CHANGED:-false}:${MSRV_RESULT:-}" \
+  "Clippy:${RUST_CHANGED:-false}:${CLIPPY_RESULT:-}" \
+  "Test:${RUST_CHANGED:-false}:${TEST_RESULT:-}" \
+  "YAML compare:${RUST_CHANGED:-false}:${YAML_COMPARE_RESULT:-skipped}" \
+  "Audit:${AUDIT_TRIGGERED}:${AUDIT_RESULT:-}" \
+  "Deny:${AUDIT_TRIGGERED}:${DENY_RESULT:-}" \
+  "Supply chain:${SUPPLY_CHAIN_CHANGED:-false}:${SUPPLY_CHAIN_RESULT:-}" \
+  "Build:${RUST_CHANGED:-false}:${BUILD_RESULT:-}" \
+  "Docs:${DOCS_TRIGGERED}:${DOCS_JOB_RESULT:-}" \
+  "Dogfood:${RUST_CHANGED:-false}:${DOGFOOD_RESULT:-}" \
+  "Examples:${EXAMPLES_CHANGED:-false}:${EXAMPLES_RESULT:-}" \
+  "Shell tests:${SHELL_CHANGED:-false}:${SHELL_TESTS_RESULT:-}" \
+  "Editors:${EDITORS_CHANGED:-false}:${EDITORS_RESULT:-}" \
+  "Packaging:${PACKAGING_CHANGED:-false}:${PACKAGING_RESULT:-skipped}" \
+  "Plugin contract (witforge):${RUST_CHANGED:-false}:${WITFORGE_RESULT:-skipped}"; do
+  IFS=: read -r name triggered result <<< "$check"
+  if [[ "$triggered" == "true" && "$result" != "success" ]]; then
+    echo "==> ${name} was triggered but did not succeed (result: ${result:-unset})" >&2
+    FAILED=true
+  fi
+done
 
 echo ""
 if [[ "$FAILED" == "true" ]]; then

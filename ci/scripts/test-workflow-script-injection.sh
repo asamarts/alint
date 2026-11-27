@@ -12,6 +12,9 @@
 #                       a function (toJSON(github.event), format(...)), since
 #                       inputs, PR titles/bodies and commit messages live there
 #   github.head_ref     (PR branch name), in dot or bracket form
+#   github.base_ref     (PR base branch name), in dot or bracket form
+#   github.ref          (git ref, e.g. refs/heads/<branch> or refs/tags/<tag>)
+#   github.ref_name     (short branch/tag name; may carry shell metacharacters)
 #   inputs              (workflow_dispatch / workflow_call / action inputs)
 #   steps.<id>.outputs  (often derived from the above)
 #   needs.<id>.outputs  (ditto, across jobs)
@@ -39,6 +42,9 @@ def prop(name):
 UNSAFE = re.compile(
     r'(?<![\w.-])github' + prop('event') +            # github.event / github['event'] (+ any accessor or none)
     r'|(?<![\w.-])github' + prop('head_ref') +
+    r'|(?<![\w.-])github' + prop('base_ref') +
+    r'|(?<![\w.-])github' + prop('ref') +
+    r'|(?<![\w.-])github' + prop('ref_name') +
     r'|(?<![\w.-])inputs(?![\w-])' +             # inputs.x / inputs['x'] / toJSON(inputs)
     r"|(?<![\w.-])(?:steps|needs)(?:\s*\.\s*[\w-]+|\s*\[\s*['\"][^'\"]+['\"]\s*\])" + prop('outputs'),
     re.IGNORECASE,
@@ -113,9 +119,12 @@ jobs:
           echo ${{ github.event.comment.body }}
       - run: echo ${{ fromJSON(needs.changes.outputs.runner) && 'x' }}
       - run: echo ${{ github.event-name }} ${{ inputs-x }} ${{ github.eventual }}
-      - run: echo ${{ matrix.target }} ${{ runner.temp }} ${{ github.ref_name }}
+      - run: echo ${{ matrix.target }} ${{ runner.temp }}
+      - run: echo ${{ github.ref_name }}
+      - run: echo ${{ github.ref }}
+      - run: echo ${{ github.base_ref }}
 '''.splitlines()
-want = {3, 7, 11, 12, 13, 15, 18, 19, 20, 21, 22, 23, 25, 28, 29}
+want = {3, 7, 11, 12, 13, 15, 18, 19, 20, 21, 22, 23, 25, 28, 29, 32, 33, 34}
 got = {line for line, _ in findings(fixture)}
 if got != want:
     print(f'[script-injection] internal fixture mismatch: missed {sorted(want - got)}, '
@@ -125,6 +134,17 @@ if got != want:
 paths = sorted(Path('.github/workflows').glob('*.y*ml')) + [Path('action.yml')]
 problems = [msg for path in paths if path.exists()
             for _, msg in findings(path.read_text(encoding='utf-8').splitlines(), path)]
+# Also reject double-quoted `node -e "..."` / `python3 -c "..."` interpolating
+# shell `$var` directly into JS/Python source in release workflows (use env:).
+INLINE_INTERP = re.compile(r'\b(?:node\s+-e|python3?\s+-c)\s+"[^"]*\$[A-Za-z_{]')
+for path in paths:
+    if not path.exists():
+        continue
+    for lineno, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
+        if line.lstrip().startswith('#'):
+            continue
+        if INLINE_INTERP.search(line):
+            problems.append(f'{path}:{lineno}: shell variable interpolated into double-quoted node -e / python -c string; pass via env')
 if problems:
     print('[script-injection] untrusted ${{ }} expansion inside run: (move it to env: and validate):',
           file=sys.stderr)

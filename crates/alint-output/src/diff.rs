@@ -173,11 +173,17 @@ fn git_mode(st_mode: u32) -> u32 {
 /// paths. `ESC` (0x1b) and `BEL` (0x07) -- the screen-clear / banner-forge /
 /// OSC-injection vectors -- are the ones that matter.
 fn has_terminal_control(bytes: &[u8]) -> bool {
-    if bytes
-        .iter()
-        .any(|&c| (c < 0x20 && c != b'\t' && c != b'\n' && c != b'\r') || c == 0x7f)
-    {
-        return true;
+    for (i, &c) in bytes.iter().enumerate() {
+        if c == b'\r' {
+            // Allow Windows CRLF (`\r\n`), but treat a bare `\r` as a terminal
+            // control byte: `similar` splits lines on bare `\r` without
+            // emitting `\n`, which lets a diff line visually overwrite itself.
+            if bytes.get(i + 1) != Some(&b'\n') {
+                return true;
+            }
+        } else if (c < 0x20 && c != b'\t' && c != b'\n') || c == 0x7f {
+            return true;
+        }
     }
     // Also treat UTF-8 C1 controls (U+0080..=U+009F, e.g. 8-bit CSI U+009B)
     // and display-deceptive Unicode characters (bidi overrides/isolates,
@@ -592,5 +598,30 @@ mod tests {
         )]);
         assert!(!bidi_path.contains('\u{202e}'), "{bidi_path:?}");
         assert!(!bidi_path.contains('\u{009b}'), "{bidi_path:?}");
+    }
+
+    #[test]
+    fn bare_cr_is_summarized_as_binary_while_crlf_stays_unified_diff() {
+        assert!(has_terminal_control(b"evil();\r// ok\n"));
+        assert!(has_terminal_control(b"trailing\r"));
+        assert!(!has_terminal_control(b"line1\r\nline2\r\n"));
+
+        let out = render(&[fix(
+            "trojan.rs",
+            "evil();\r// ok  \n",
+            "evil();\r// ok\n",
+            StagedKind::Modify,
+        )]);
+        assert!(!out.contains('\r'), "bare CR must not reach diff: {out:?}");
+        assert!(out.to_lowercase().contains("binary"), "{out}");
+
+        let crlf = render(&[fix(
+            "win.rs",
+            "hello  \r\n",
+            "hello\r\n",
+            StagedKind::Modify,
+        )]);
+        assert!(crlf.contains("--- a/win.rs"), "{crlf}");
+        assert!(!crlf.to_lowercase().contains("binary"), "{crlf}");
     }
 }

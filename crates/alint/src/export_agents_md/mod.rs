@@ -77,15 +77,24 @@ pub struct RunOptions {
 }
 
 pub fn run(opts: &RunOptions, cli: &crate::cli::Cli) -> Result<ExitCode> {
+    if opts.inline && opts.format != OutputFormat::Markdown {
+        bail!("--inline requires --format markdown (JSON output has no HTML splice markers)");
+    }
     let cwd = std::env::current_dir().context("resolving current directory")?;
-    let resolved_config_path = match cli.config.first() {
-        Some(p) => p.clone(),
-        None => crate::config_cmd::discover_config(&cwd).ok_or_else(|| {
+    let (resolved_config_path, repo_root) = if let Some(p) = cli.config.first() {
+        (p.clone(), cwd.clone())
+    } else {
+        let found = crate::config_cmd::discover_config(&cwd).ok_or_else(|| {
             anyhow::anyhow!("no .alint.yml found (searched from {})", cwd.display())
-        })?,
+        })?;
+        let root = found
+            .parent()
+            .map_or_else(|| cwd.clone(), std::path::Path::to_path_buf);
+        (found, root)
     };
-    let config = crate::config_cmd::load_for_export(&resolved_config_path, &cli.registry(), cli)
-        .with_context(|| format!("loading {}", resolved_config_path.display()))?;
+    let config =
+        crate::config_cmd::load_for_export(&resolved_config_path, &repo_root, &cli.registry(), cli)
+            .with_context(|| format!("loading {}", resolved_config_path.display()))?;
     crate::config_cmd::warn_if_experimental(&config, &resolved_config_path);
 
     let directives = collect_directives(&config, opts.include_info);
@@ -103,8 +112,32 @@ pub fn run(opts: &RunOptions, cli: &crate::cli::Cli) -> Result<ExitCode> {
         OutputFormat::Json => render_json(&directives, plan, redact, &opts.section_title)?,
     };
 
-    write_output(&body, opts)?;
+    write_output(&body, opts, &repo_root)?;
     Ok(ExitCode::SUCCESS)
+}
+
+fn constraint_fallback_directive(spec: &alint_core::RuleSpec) -> String {
+    let relation = spec
+        .extra
+        .get("relation")
+        .or_else(|| spec.extra.get("from"))
+        .and_then(alint_core::yaml::Value::as_str);
+    let assertion = spec
+        .extra
+        .get("assert")
+        .and_then(alint_core::yaml::Value::as_mapping)
+        .and_then(|map| map.keys().next())
+        .and_then(alint_core::yaml::Value::as_str);
+    match (assertion, relation) {
+        (Some(assert_kind), Some(rel)) if !spec.field_is_sensitive("extra") => {
+            format!("constraint rule ({assert_kind} on {rel})")
+        }
+        (Some(assert_kind), _) => format!("constraint rule ({assert_kind})"),
+        (None, Some(rel)) if !spec.field_is_sensitive("extra") => {
+            format!("constraint rule on {rel}")
+        }
+        _ => "constraint rule".to_string(),
+    }
 }
 
 /// Convert every config rule into a [`Directive`], filtering by
@@ -118,7 +151,8 @@ fn collect_directives(config: &alint_core::Config, include_info: bool) -> Vec<Di
         .filter(|spec| !matches!(spec.level, Level::Off))
         .filter(|spec| include_info || !matches!(spec.level, Level::Info))
         .map(|spec| {
-            let directive = spec.message.as_ref().map_or_else(
+            let explicit_message = spec.message.as_deref().filter(|m| !m.trim().is_empty());
+            let directive = explicit_message.map_or_else(
                 || match &spec.paths {
                     // No author message: fall back to the kind AND the scope it
                     // applies to, so a generated AGENTS.md directive stays
@@ -128,13 +162,14 @@ fn collect_directives(config: &alint_core::Config, include_info: bool) -> Vec<Di
                         format!("{} rule on <redacted>", spec.kind)
                     }
                     Some(paths) => format!("{} rule on {}", spec.kind, paths.render_scope()),
+                    None if spec.kind == "constraint" => constraint_fallback_directive(spec),
                     None => format!("{} rule", spec.kind),
                 },
                 |message| {
                     if spec.field_is_sensitive("message") {
                         "<redacted>".to_string()
                     } else {
-                        message.clone()
+                        message.to_string()
                     }
                 },
             );
@@ -231,7 +266,7 @@ fn severity_label(level: Level) -> &'static str {
 
 // ─── output dispatch ──────────────────────────────────────────
 
-fn write_output(body: &str, opts: &RunOptions) -> Result<()> {
+fn write_output(body: &str, opts: &RunOptions, repo_root: &std::path::Path) -> Result<()> {
     match (&opts.output, opts.inline) {
         (None, false) => {
             // stdout — `cmd_export_agents_md` configured the
@@ -254,10 +289,14 @@ fn write_output(body: &str, opts: &RunOptions) -> Result<()> {
             Ok(())
         }
         (Some(path), false) => {
-            crate::safe_write::write_replacing(path, body.as_bytes(), "AGENTS.md")?;
+            let checked = crate::safe_write::check_output(repo_root, path, true, "AGENTS.md")?;
+            crate::safe_write::write_replacing(&checked, body.as_bytes(), "AGENTS.md")?;
             Ok(())
         }
-        (Some(path), true) => splice::splice_inline(path, body),
+        (Some(path), true) => {
+            let checked = crate::safe_write::check_output(repo_root, path, true, "AGENTS.md")?;
+            splice::splice_inline(&checked, body)
+        }
         (None, true) => bail!("--inline requires --output to point at the target file"),
     }
 }
@@ -448,5 +487,29 @@ mod tests {
                 "section_title"
             ]
         );
+    }
+
+    #[test]
+    fn whitespace_only_message_falls_back_and_constraint_names_assertion_and_relation() {
+        let mut ws_spec = spec("blank-msg", Level::Error, Some("   \t "));
+        ws_spec.kind = "file_exists".into();
+        ws_spec.paths = Some(alint_core::PathsSpec::Single("README.md".into()));
+        let mut constraint_spec = spec("unique-names", Level::Error, None);
+        constraint_spec.kind = "constraint".into();
+        constraint_spec.extra.insert(
+            "relation",
+            alint_core::yaml::from_str::<alint_core::yaml::Value>("\"packages\"").unwrap(),
+        );
+        constraint_spec.extra.insert(
+            "assert",
+            alint_core::yaml::from_str::<alint_core::yaml::Value>("unique: true").unwrap(),
+        );
+        let mut cfg = alint_core::Config::default();
+        cfg.rules = vec![ws_spec, constraint_spec];
+        let dirs = collect_directives(&cfg, false);
+        let blank = dirs.iter().find(|d| d.rule_id == "blank-msg").unwrap();
+        assert_eq!(blank.directive, "file_exists rule on README.md");
+        let constr = dirs.iter().find(|d| d.rule_id == "unique-names").unwrap();
+        assert_eq!(constr.directive, "constraint rule (unique on packages)");
     }
 }

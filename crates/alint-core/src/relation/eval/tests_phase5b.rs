@@ -911,3 +911,136 @@ fn join_propagates_matching_stub_rows_under_join_outputs_budget() {
         Some(Value::String("French".into()))
     );
 }
+
+#[test]
+fn join_excludes_unmatched_resources_and_detects_stub_probe_key_type_clash() {
+    // 1. Inner join on path-derived key must drop unmatched resources from
+    // `resources_kept` so downstream path-token `group_by` never invents a
+    // phantom empty group for dropped files.
+    let files = tree(&[
+        ("locales/en.yml", "a: 1\n"),
+        ("locales/fr.yml", "a: 1\n"),
+        ("allow.txt", "en\n"),
+    ]);
+    let locales = named(
+        "locales",
+        Rows::Part(Part {
+            from: from("locales/*.yml"),
+            reader: Reader::Entries(Entries {
+                format: EntriesFormat::Yaml,
+                at: vec!["$".into()],
+                leaves: true,
+                strict: false,
+            }),
+            fields: None,
+        }),
+        &[
+            ("stem", FieldSource::Path(PathToken::Stem)),
+            ("key", FieldSource::EntryPath),
+        ],
+    );
+    let allow = named(
+        "allow",
+        Rows::Part(Part {
+            from: from("allow.txt"),
+            reader: Reader::Read {
+                read: Read::Lines { comment: None },
+                optional: false,
+            },
+            fields: None,
+        }),
+        &[("stem", FieldSource::Value)],
+    );
+    let joined = named(
+        "joined",
+        Rows::Join(crate::relation::plan::JoinDef {
+            left: crate::relation::plan::Reached {
+                id: RelationId(0),
+                alias: None,
+            },
+            right: crate::relation::plan::Reached {
+                id: RelationId(1),
+                alias: None,
+            },
+            on: vec![("stem".into(), "stem".into())],
+            unique: JoinSide::Right,
+        }),
+        &[
+            ("stem", FieldSource::Side(JoinSide::Left, "stem".into())),
+            ("key", FieldSource::Side(JoinSide::Left, "key".into())),
+        ],
+    );
+    let p = Arc::new(plan(vec![locales, allow, joined]));
+    let index = crate::walk(files.dir.path(), &crate::WalkOptions::test_default()).unwrap();
+    let ctx = crate::Context::new(files.dir.path(), &index);
+    let rows = evaluate(&p, RelationId(2), &ctx).expect("join succeeds");
+    assert_eq!(rows.rows.len(), 1);
+    let kept = crate::relation::eval::resources_kept(&p, RelationId(2), &rows, &ctx);
+    let kept_paths: Vec<&str> = rows
+        .resources
+        .iter()
+        .zip(kept)
+        .filter_map(|(r, keep)| keep.then_some(r.path().as_str()))
+        .collect();
+    assert_eq!(
+        kept_paths,
+        vec!["locales/en.yml"],
+        "unmatched `fr.yml` must be filtered out by resources_kept"
+    );
+
+    // 2. A probe side holding only a stub row (`fr: {}`, string key `"fr"`)
+    // joined against a numeric key (`1`) must still raise a key-type clash.
+    let clash_files = tree(&[("locales/fr.yml", "fr: {}\n"), ("nums.json", r#"{"a": 1}"#)]);
+    let mut stub_only = named(
+        "stub_only",
+        Rows::Part(Part {
+            from: from("locales/*.yml"),
+            reader: Reader::Entries(Entries {
+                format: EntriesFormat::Yaml,
+                at: vec!["$".into()],
+                leaves: true,
+                strict: false,
+            }),
+            fields: None,
+        }),
+        &[("k", FieldSource::EntryRoot), ("p", FieldSource::EntryPath)],
+    );
+    stub_only.relation.transforms = vec![("p".into(), vec![Transform::StripRoot])];
+    let nums = named(
+        "nums",
+        Rows::Part(Part {
+            from: from("nums.json"),
+            reader: Reader::Entries(Entries {
+                format: EntriesFormat::Json,
+                at: vec!["$".into()],
+                leaves: false,
+                strict: false,
+            }),
+            fields: None,
+        }),
+        &[("k", FieldSource::EntryValue)],
+    );
+    let clash_join = named(
+        "clash",
+        Rows::Join(crate::relation::plan::JoinDef {
+            left: crate::relation::plan::Reached {
+                id: RelationId(0),
+                alias: None,
+            },
+            right: crate::relation::plan::Reached {
+                id: RelationId(1),
+                alias: None,
+            },
+            on: vec![("k".into(), "k".into())],
+            unique: JoinSide::Right,
+        }),
+        &[("k", FieldSource::Side(JoinSide::Left, "k".into()))],
+    );
+    let p_clash = plan(vec![stub_only, nums, clash_join]);
+    let errs = messages(&run(&p_clash, 2, &clash_files, Limits::default()));
+    assert!(
+        errs.iter()
+            .any(|m| m.contains("join keys compare within one type")),
+        "stub-only probe key type clash must fail loudly: {errs:?}"
+    );
+}

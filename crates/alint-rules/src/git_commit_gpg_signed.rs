@@ -20,7 +20,7 @@
 //! Check-only — alint can't sign the user's commits.
 
 use alint_core::git::verify_commit;
-use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Violation};
+use alint_core::{AnalysisFailureKind, Context, Error, Level, Result, Rule, RuleSpec, Violation};
 use serde::Deserialize;
 
 use crate::commit_range::{collect_commits, format_commit_violation};
@@ -66,18 +66,28 @@ impl Rule for GitCommitGpgSignedRule {
             &self.id,
         )?;
         for commit in &commits {
-            // `Some(false)` = git says the signature doesn't verify
-            // (unsigned or untrusted). `None` = git vanished mid-run;
-            // don't fire on inability to check (advisory posture).
-            if verify_commit(ctx.root, &commit.sha) == Some(false) {
-                let msg = self.message_override.clone().unwrap_or_else(|| {
-                    format_commit_violation(
-                        commit,
-                        "is not signed (or its signature did not verify)",
-                    )
-                });
-                // No path; one finding per commit → key on the commit id.
-                violations.push(Violation::new(msg).with_baseline_key(commit.sha.clone()));
+            match verify_commit(ctx.root, &commit.sha) {
+                Some(true) => {}
+                Some(false) => {
+                    let msg = self.message_override.clone().unwrap_or_else(|| {
+                        format_commit_violation(
+                            commit,
+                            "is not signed (or its signature did not verify)",
+                        )
+                    });
+                    // No path; one finding per commit → key on the commit id.
+                    violations.push(Violation::new(msg).with_baseline_key(commit.sha.clone()));
+                }
+                None => {
+                    violations.push(
+                        Violation::new(format_commit_violation(
+                            commit,
+                            "could not be verified because `git verify-commit` failed to run",
+                        ))
+                        .with_baseline_key(commit.sha.clone())
+                        .as_analysis_failure(AnalysisFailureKind::Evaluation),
+                    );
+                }
             }
         }
         Ok(violations)

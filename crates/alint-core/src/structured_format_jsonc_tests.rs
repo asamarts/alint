@@ -9,8 +9,12 @@
 
 use super::*;
 
-/// The `strip_jsonc` alint shipped through v0.22, unchanged.
-fn two_passes(src: &str) -> String {
+/// Two-pass reference implementation for `strip_jsonc` matching `jsonc-parser`:
+/// lone `\r` ends `//` comments, `/*...*/` emits a space separator and errors
+/// on unterminated block comments, and leading/consecutive commas are preserved
+/// so `serde_json` rejects invalid JSONC.
+#[allow(clippy::too_many_lines)]
+fn two_passes(src: &str) -> Result<String, &'static str> {
     // Pass 1: remove comments.
     let mut decommented = String::with_capacity(src.len());
     let mut chars = src.chars().peekable();
@@ -33,9 +37,20 @@ fn two_passes(src: &str) -> String {
                 decommented.push(c);
             }
             '/' if chars.peek() == Some(&'/') => {
+                chars.next();
                 for n in chars.by_ref() {
                     if n == '\n' {
                         decommented.push('\n');
+                        break;
+                    }
+                    if n == '\r' {
+                        if chars.peek() == Some(&'\n') {
+                            chars.next();
+                            decommented.push('\r');
+                            decommented.push('\n');
+                        } else {
+                            decommented.push('\n');
+                        }
                         break;
                     }
                 }
@@ -43,20 +58,27 @@ fn two_passes(src: &str) -> String {
             '/' if chars.peek() == Some(&'*') => {
                 chars.next();
                 let mut prev = '\0';
+                let mut closed = false;
                 for n in chars.by_ref() {
                     if prev == '*' && n == '/' {
+                        closed = true;
                         break;
                     }
                     prev = n;
                 }
+                if !closed {
+                    return Err("unterminated block comment");
+                }
+                decommented.push(' ');
             }
             _ => decommented.push(c),
         }
     }
-    // Pass 2: drop trailing commas (`,` then whitespace then `]`/`}`).
+    // Pass 2: drop trailing commas (after a value/closing delim, then whitespace, then `]`/`}`).
     let cs: Vec<char> = decommented.chars().collect();
     let mut out = String::with_capacity(cs.len());
     let mut in_string = false;
+    let mut can_trail_comma = false;
     let mut i = 0;
     while i < cs.len() {
         let c = cs[i];
@@ -69,32 +91,44 @@ fn two_passes(src: &str) -> String {
                 }
             } else if c == '"' {
                 in_string = false;
+                can_trail_comma = true;
             }
             i += 1;
             continue;
         }
         if c == '"' {
             in_string = true;
+            can_trail_comma = false;
             out.push(c);
             i += 1;
             continue;
         }
         if c == ',' {
-            let mut j = i + 1;
-            while j < cs.len() && cs[j].is_whitespace() {
-                j += 1;
+            if can_trail_comma {
+                let mut j = i + 1;
+                while j < cs.len() && cs[j].is_whitespace() {
+                    j += 1;
+                }
+                if j < cs.len() && (cs[j] == ']' || cs[j] == '}') {
+                    // Drop the comma; keep the intervening whitespace.
+                    out.extend(&cs[i + 1..j]);
+                    can_trail_comma = false;
+                    i = j;
+                    continue;
+                }
             }
-            if j < cs.len() && (cs[j] == ']' || cs[j] == '}') {
-                // Drop the comma; keep the intervening whitespace.
-                out.extend(&cs[i + 1..j]);
-                i = j;
-                continue;
-            }
+            can_trail_comma = false;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if !c.is_whitespace() {
+            can_trail_comma = !matches!(c, '[' | '{' | ':');
         }
         out.push(c);
         i += 1;
     }
-    out
+    Ok(out)
 }
 
 /// Texts that exercise each rule of the stripping, one at a time.
@@ -180,8 +214,9 @@ fn jsonc_parses_as_before() {
     for text in EDGES {
         let before =
             serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')).or_else(|strict| {
-                serde_json::from_str::<Value>(&two_passes(text.trim_start_matches('\u{feff}')))
+                two_passes(text.trim_start_matches('\u{feff}'))
                     .map_err(|_| strict.to_string())
+                    .and_then(|s| serde_json::from_str::<Value>(&s).map_err(|_| strict.to_string()))
             });
         let empty = text
             .trim_matches(|c: char| c == '\u{feff}' || c.is_whitespace())
@@ -189,5 +224,29 @@ fn jsonc_parses_as_before() {
         if !empty {
             assert_eq!(Format::Json.parse(text), before, "{text:?}");
         }
+    }
+}
+
+#[test]
+fn strip_jsonc_handles_lone_cr_block_comment_separators_unterminated_and_invalid_commas() {
+    // Lone CR ends `//` comment without eating the following token.
+    assert_eq!(
+        Format::Json
+            .parse("{\"a\": 1, // comment\r\"b\": 2}")
+            .unwrap(),
+        serde_json::json!({"a": 1, "b": 2})
+    );
+    // Block comment between tokens acts as whitespace, never fusing `1` and `2` into `12`.
+    assert!(Format::Json.parse("[1/*c*/2]").is_err());
+    assert!(Format::Json.parse("{\"a\": true/*c*/false}").is_err());
+    // Unterminated block comments are rejected.
+    assert!(strip_jsonc("{\"a\": 1 /* unterminated").is_err());
+    assert!(Format::Json.parse("{\"a\": 1 /* unterminated").is_err());
+    // Leading and consecutive commas are NOT stripped as trailing commas.
+    for invalid in ["[,]", "{,}", "[1,,]", "[1, ,]", "{\"a\": 1,,}"] {
+        assert!(
+            Format::Json.parse(invalid).is_err(),
+            "invalid JSONC {invalid:?} must not parse"
+        );
     }
 }

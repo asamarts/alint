@@ -45,12 +45,15 @@ impl Fixer for FileRemoveFixer {
             return Ok(FixOutcome::Skipped(reason));
         }
         let abs = ctx.root.join(path);
-        if !abs.exists() {
+        // Use `symlink_metadata` rather than `abs.exists()` so a dangling
+        // symlink (including one whose target was deleted earlier in this pass)
+        // is still seen and removed rather than silently orphaned.
+        let Ok(meta) = std::fs::symlink_metadata(&abs) else {
             return Ok(FixOutcome::Skipped(format!(
                 "{} does not exist",
                 path.display()
             )));
-        }
+        };
         // Yield to a pending content edit: if a content fixer earlier in this
         // pass composed this file, removing it now would let the post-loop flush
         // resurrect it. Skip; the remove applies on a rerun once the edit lands.
@@ -73,7 +76,21 @@ impl Fixer for FileRemoveFixer {
                 path.display()
             )));
         }
-        std::fs::remove_file(&abs).map_err(|source| Error::Io {
+        #[cfg(windows)]
+        let remove_res = {
+            use std::os::windows::fs::FileTypeExt as _;
+            if meta.file_type().is_symlink_dir() {
+                std::fs::remove_dir(&abs)
+            } else {
+                std::fs::remove_file(&abs)
+            }
+        };
+        #[cfg(not(windows))]
+        let remove_res = {
+            let _ = &meta;
+            std::fs::remove_file(&abs)
+        };
+        remove_res.map_err(|source| Error::Io {
             path: abs.clone(),
             source,
         })?;
@@ -240,7 +257,7 @@ impl Fixer for FileRenameFixer {
 
         let abs_from = ctx.root.join(path);
         let abs_to = ctx.root.join(&new_path);
-        if abs_to.exists() {
+        if abs_to.symlink_metadata().is_ok() {
             // On a case-INSENSITIVE filesystem (macOS/Windows) a pure case flip
             // (`Foo.rs` -> `foo.rs`) reports the target as "existing" because it
             // IS the source file (same inode), which would wrongly abort the
@@ -259,12 +276,13 @@ impl Fixer for FileRenameFixer {
             }
         }
         // In a stage/preview pass (`--diff`), the disk is NOT mutated, so the
-        // `exists()` check above can't see a rename an EARLIER fixer already
-        // staged onto this same target. Two distinct source names can convert to
-        // one target (`fooBar` and `foo_Bar` both -> `foo_bar`); without this the
-        // preview would emit two `rename to <same>` hunks -- a self-conflicting
-        // patch `git apply` rejects/clobbers. Treat an already-staged target as a
-        // collision, mirroring the direct-fix behaviour (the second is skipped).
+        // `symlink_metadata()` check above can't see a rename an EARLIER fixer
+        // already staged onto this same target. Two distinct source names can
+        // convert to one target (`fooBar` and `foo_Bar` both -> `foo_bar`);
+        // without this the preview would emit two `rename to <same>` hunks -- a
+        // self-conflicting patch `git apply` rejects/clobbers. Treat an
+        // already-staged target as a collision, mirroring the direct-fix
+        // behaviour (the second is skipped).
         if let Some(sink) = ctx.stage_ops
             && sink
                 .borrow()
@@ -276,11 +294,10 @@ impl Fixer for FileRenameFixer {
                 new_path.display()
             )));
         }
-        // Yield to a pending content edit on the source: if a content fixer
-        // earlier in this pass composed it, renaming now would strand the
-        // composed bytes at the vacated old path when the flush runs (a
-        // file-duplication corruption). Skip; the rename applies on a rerun.
-        if ctx.has_pending_write(&abs_from) {
+        // Yield to a pending content edit on either source or destination: if a
+        // content fixer earlier in this pass composed either path, renaming now
+        // would strand or clobber the composed bytes when the flush runs.
+        if ctx.has_pending_write(&abs_from) || ctx.has_pending_write(&abs_to) {
             return Ok(FixOutcome::Skipped(format!(
                 "{} has a pending content edit this pass; rerun to rename it",
                 path.display()
@@ -324,7 +341,7 @@ impl Fixer for FileRenameFixer {
         // the same file); allow that through -- mirrors apply()'s A5 same-file
         // check -- so the editor can still offer `Foo.rs` -> `foo.rs`.
         let abs_to = root.join(&new_path);
-        if abs_to.exists() {
+        if std::fs::symlink_metadata(&abs_to).is_ok() {
             let from_canon = std::fs::canonicalize(root.join(path)).ok();
             let to_canon = std::fs::canonicalize(&abs_to).ok();
             let same_file = from_canon.is_some() && from_canon == to_canon;
@@ -1582,18 +1599,74 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn dir_create_refuses_a_broken_symlink_target_with_a_clean_skip() {
-        // Audit M1: a broken symlink at the target -> a clean "not a directory"
-        // skip, not a raw errno (`exists()` reads a broken symlink as absent, so
-        // the guard is `symlink_metadata`-based).
+        // Audit M1 + D1#1: an in-tree broken symlink at the target -> a clean
+        // "not a directory (a symlink)" skip; an escaping broken symlink is
+        // refused even earlier by path confinement.
         let tmp = TempDir::new().unwrap();
-        std::os::unix::fs::symlink("/nonexistent-target-xyz", tmp.path().join("docs")).unwrap();
+        std::os::unix::fs::symlink("nonexistent-local", tmp.path().join("docs")).unwrap();
         let out = DirCreateFixer::new(PathBuf::from("docs"), Applicability::Safe)
             .apply(&Violation::new("x"), &make_ctx(&tmp, false))
             .unwrap();
         assert!(
             matches!(out, FixOutcome::Skipped(ref r) if r.contains("symlink")),
-            "a broken symlink is a clean skip, got {out:?}"
+            "an in-tree broken symlink is a clean skip, got {out:?}"
         );
+        std::os::unix::fs::symlink("/nonexistent-target-xyz", tmp.path().join("escape")).unwrap();
+        let out = DirCreateFixer::new(PathBuf::from("escape"), Applicability::Safe)
+            .apply(&Violation::new("x"), &make_ctx(&tmp, false))
+            .unwrap();
+        assert!(
+            matches!(out, FixOutcome::Skipped(ref r) if r.contains("escapes")),
+            "an escaping broken symlink is refused by confinement, got {out:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn file_remove_deletes_dangling_and_directory_symlinks() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir(tmp.path().join("realdir")).unwrap();
+        std::os::unix::fs::symlink("nonexistent-target", tmp.path().join("dangling")).unwrap();
+        std::os::unix::fs::symlink(tmp.path().join("realdir"), tmp.path().join("linkdir")).unwrap();
+
+        for name in ["dangling", "linkdir"] {
+            let v = Violation::new("symlink").with_path(Path::new(name));
+            let out = FileRemoveFixer::new(Applicability::Safe)
+                .apply(&v, &make_ctx(&tmp, false))
+                .unwrap();
+            assert!(matches!(out, FixOutcome::Applied(_)), "{name}: {out:?}");
+            assert!(
+                tmp.path().join(name).symlink_metadata().is_err(),
+                "{name} must be removed"
+            );
+        }
+        assert!(tmp.path().join("realdir").is_dir(), "target dir untouched");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn file_rename_refuses_dangling_symlink_collision_and_pending_write() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("BadName.txt"), b"hello").unwrap();
+        std::os::unix::fs::symlink("nonexistent-target", tmp.path().join("bad_name.txt")).unwrap();
+        let v = Violation::new("case").with_path(Path::new("BadName.txt"));
+        let fixer = FileRenameFixer::new(CaseConvention::Snake);
+        let out = fixer.apply(&v, &make_ctx(&tmp, false)).unwrap();
+        assert!(
+            matches!(out, FixOutcome::Skipped(ref r) if r.contains("already exists")),
+            "dangling symlink at destination must not be clobbered: {out:?}"
+        );
+        assert!(tmp.path().join("BadName.txt").exists());
+        assert!(
+            tmp.path()
+                .join("bad_name.txt")
+                .symlink_metadata()
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        // `fix_edit` must also decline when a dangling symlink occupies the destination.
+        assert!(fixer.fix_edit(&v, b"hello", tmp.path()).is_none());
     }
 
     #[test]

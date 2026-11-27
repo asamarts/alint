@@ -503,6 +503,7 @@
                 "const": "."
               },
               {
+                "type": "string",
                 "allOf": [
                   {
                     "not": {
@@ -568,7 +569,8 @@
         },
         "kind": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "pattern": "\\S"
         },
         "order": {
           "type": "integer",
@@ -577,7 +579,8 @@
         },
         "title": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "pattern": "\\S"
         }
       },
       "additionalProperties": false,
@@ -601,6 +604,7 @@
                 "const": "."
               },
               {
+                "type": "string",
                 "allOf": [
                   {
                     "not": {
@@ -643,6 +647,7 @@
                 "const": "."
               },
               {
+                "type": "string",
                 "allOf": [
                   {
                     "not": {
@@ -694,17 +699,99 @@
           "default": true
         }
       },
-      "additionalProperties": false
-    },
-    "PolicyTestDocs": {
-      "properties": {
-        "kind": {
-          "pattern": "\\S"
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "not": {
+            "allOf": [
+              {
+                "properties": {
+                  "commits": {
+                    "minItems": 1
+                  }
+                },
+                "required": [
+                  "commits"
+                ]
+              },
+              {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "add": {
+                        "minItems": 1
+                      }
+                    },
+                    "required": [
+                      "add"
+                    ]
+                  },
+                  {
+                    "properties": {
+                      "add_force": {
+                        "minItems": 1
+                      }
+                    },
+                    "required": [
+                      "add_force"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
         },
-        "title": {
-          "pattern": "\\S"
+        {
+          "not": {
+            "allOf": [
+              {
+                "properties": {
+                  "init": {
+                    "const": false
+                  }
+                },
+                "required": [
+                  "init"
+                ]
+              },
+              {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "add": {
+                        "minItems": 1
+                      }
+                    },
+                    "required": [
+                      "add"
+                    ]
+                  },
+                  {
+                    "properties": {
+                      "add_force": {
+                        "minItems": 1
+                      }
+                    },
+                    "required": [
+                      "add_force"
+                    ]
+                  },
+                  {
+                    "properties": {
+                      "commits": {
+                        "minItems": 1
+                      }
+                    },
+                    "required": [
+                      "commits"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
         }
-      }
+      ]
     },
     "RelatedLocationMatcher": {
       "description": "Related-location matcher. A present related list is exact after canonical ordering.",

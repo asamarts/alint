@@ -79,7 +79,7 @@ fi
 # persist and mismatch the library. Compare versions and (re)install on drift.
 have_gungraun="$(gungraun-runner --version 2>/dev/null | awk '{print $NF}')"
 if [[ "$have_gungraun" != "$GUNGRAUN_VERSION" ]]; then
-  cargo install gungraun-runner --version "$GUNGRAUN_VERSION" --locked \
+  RUSTFLAGS='' cargo install gungraun-runner --version "$GUNGRAUN_VERSION" --locked \
     || tooling_failure "could not install gungraun-runner v${GUNGRAUN_VERSION}"
 fi
 

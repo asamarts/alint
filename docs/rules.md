@@ -286,7 +286,7 @@ Nonempty dotenv documents are limited to **4 MiB of original UTF-8 bytes**, incl
 
 A Java `.properties` file likewise maps to a flat object: assigned values are literal strings; dotted keys stay ONE key, so query with bracket notation (`$['db.host']`). An INI / `.cfg` file maps to a 2-level `{ section: { key: "value" } }` object of literal string values (pre-section keys hoist to the top level, and a key repeated within one scope becomes a file-order array), so a `[server]` section's `port` is `$['server']['port']`. INI records recognize LF, CRLF, and lone-CR physical separators.
 
-HCL (Terraform / Nomad / Packer) maps via `hcl-rs` 0.20 (`hcl-edit` 0.10), which is JSON-native: a block nests by its type then labels (`resource "aws_instance" "web" { ... }` is `$.resource.aws_instance.web`), values keep their HCL type (a number stays a number, so a numeric `equals:` needs no quotes -- but write whole numbers as integers: `hcl-rs` normalizes a `1.0` in the file to `1`, and a JSON integer does not equal a float, so `equals: 1.0` would not match), and an unevaluated expression (`var.x`, `${...}`, a function call) arrives as an opaque string. A block label containing a dash needs bracket notation (`$.resource.aws_instance['my-web']`). A block type appearing once is an object but repeated is an array (the same cardinality footgun as [XML](#xml-mapping)). `hcl-edit` 0.10 enforces native recursion and operator-depth bounds (64 nesting levels, 128 chained binary operators), and `alint` enforces a 4 MiB input size cap, a 64-level cumulative block-and-label depth cap, and object-literal width/complexity bounds (1,024 entries per object expression and a file-wide work budget); any HCL document exceeding those bounds or containing invalid syntax is rejected as one non-baselinable `resource_parse` analysis failure.
+HCL (Terraform / Nomad / Packer) maps via `hcl-rs` 0.20 (`hcl-edit` 0.10), which is JSON-native: a block nests by its type then labels (`resource "aws_instance" "web" { ... }` is `$.resource.aws_instance.web`), values keep their HCL type (a number stays a number, so a numeric `equals:` needs no quotes; numbers compare by exact mathematical value across integer/float spellings since v0.18), and an unevaluated expression (`var.x`, `${...}`, a function call) arrives as an opaque string. A block label containing a dash needs bracket notation (`$.resource.aws_instance['my-web']`). A block type appearing once is an object but repeated is an array (the same cardinality footgun as [XML](#xml-mapping)). `hcl-edit` 0.10 enforces native recursion and operator-depth bounds (64 nesting levels, 128 chained binary operators), and `alint` enforces a 4 MiB input size cap, a 64-level cumulative block-and-label depth cap, and object-literal width/complexity bounds (1,024 entries per object expression and a file-wide work budget); any HCL document exceeding those bounds or containing invalid syntax is rejected as one non-baselinable `resource_parse` analysis failure.
 
 JSON parsing is **JSONC-tolerant**: a `.json` file that carries `//` or `/* … */` comments or trailing commas (`tsconfig.json`, `.vscode/*.json`, and other JS/TS-ecosystem files) still parses — strict JSON is tried first (and is byte-identical), the tolerant retry only kicks in on failure, and a genuinely-malformed document still reports the strict parser's error. The same tolerance applies to the `json:` extract used by `cross_file` / `registry_paths_resolve`.
 
@@ -294,7 +294,7 @@ JSON parsing is **JSONC-tolerant**: a `.json` file that carries `//` or `/* … 
 From v0.24, opt-in `strict: true` enforces strict RFC 8259 JSON parsing (rejecting comments, trailing commas, leading UTF-8 BOM, empty/whitespace-only files, and invalid UTF-8 / raw NUL bytes as `resource_parse` analysis failures, cache-isolated from tolerant JSONC reads) across `json_path_equals`, `json_path_matches`, `json_path_absent`, `json_schema_passes`, `key_parity`, `no_duplicate_keys`, `extract: { json: ..., strict: true }` (including `facts:`), and version 2 `entries:`/`records:`/`read:` JSON readers.
 <!-- /alint:since -->
 
-**Value-mapping caveats (all formats).** The eight formats coerce into one `serde_json::Value` tree, but their data models differ, so a rule that works on one format can behave differently on another. Eight sharp edges:
+**Value-mapping caveats (all formats).** The eight formats coerce into one `serde_json::Value` tree, but their data models differ, so a rule that works on one format can behave differently on another. Nine sharp edges:
 
 - **Filter comparators are type-sensitive.** In a `$[?(…)]` filter, RFC 9535 compares by type: a numeric or boolean literal (`$[?(@.port < 1024)]`, `$[?(@.debug == true)]`) matches only a numeric / boolean value. On XML, `.properties`, INI, and **assigned** dotenv values, numeric/boolean source spellings are strings, so such a comparator matches **nothing**. A rule ported from JSON can therefore silently no-op, and a `*_path_absent` built on it can silently pass. Compare against a quoted string (`== '1024'`) or use `*_path_matches` with a regex. A dotenv bare declaration is different: it maps to `null`.
 - **`inf` / `nan` are not numbers you can match normally.** TOML (`inf` / `nan`) and YAML (`.inf` / `.nan`, with the leading dot) accept non-finite floats, but the query tree cannot represent one, so they arrive as `null` (an `equals: null` matches; a "must have a value" check passes). In YAML a bare `nan` / `inf` (no dot) is just the string `"nan"` / `"inf"`. HCL does NOT error on them either: it keeps them as the opaque expression strings `${inf}` / `${nan}`. JSON has no such literal.
@@ -1105,11 +1105,15 @@ Output is drained while the child runs (a child writing more than a pipe buffer 
 
 ## Fix operations
 
-Every `fix:` block uses one of these ops. See [ARCHITECTURE.md](design/ARCHITECTURE.md#fix-operations) for the full cross-reference of which op pairs with which rule kind.
+<!-- alint:since=0.23.0 -->
+Every `fix:` block uses one of these ops (each op also accepts an optional `applicability: safe | unsafe` override). See [ARCHITECTURE.md](https://github.com/asamarts/alint/blob/main/docs/design/ARCHITECTURE.md#fix-operations) for the full cross-reference of which op pairs with which rule kind.
+<!-- /alint:since -->
 
 **Path-only** (ignore `fix_size_limit`):
 
-- `file_create: {content, path?, create_parents?}`
+<!-- alint:since=0.23.0 -->
+- `file_create: {content?, content_from?, path?, create_parents?}`
+<!-- /alint:since -->
 - `file_remove: {}`
 - `file_rename: {}` (target derived from rule config)
 - `dir_create: {}`
@@ -1120,8 +1124,10 @@ Every `fix:` block uses one of these ops. See [ARCHITECTURE.md](design/ARCHITECT
 
 **Content-editing** (skipped on files over `fix_size_limit`; default 1 MiB, `null` disables the cap):
 
-- `file_prepend: {content}`
-- `file_append: {content}`
+<!-- alint:since=0.23.0 -->
+- `file_prepend: {content?, content_from?}`
+- `file_append: {content?, content_from?}`
+<!-- /alint:since -->
 - `file_trim_trailing_whitespace: {}`
 - `file_append_final_newline: {}`
 - `file_normalize_line_endings: {}` (target read from parent rule)
@@ -1129,7 +1135,9 @@ Every `fix:` block uses one of these ops. See [ARCHITECTURE.md](design/ARCHITECT
 - `file_strip_zero_width: {}`
 - `file_strip_bom: {}`
 - `file_collapse_blank_lines: {}` (max read from parent rule)
-- `replace: {replacement}` (pattern from parent rule) — located, one splice per match
+<!-- alint:since=0.23.0 -->
+- `replace: {replacement, pattern?}` (pattern from parent rule, or required `pattern` for the 8 `*_path_matches` kinds) — located, one splice per match
+<!-- /alint:since -->
 - `set_value: {}` (value from the rule's `equals:`) — for the `*_path_equals` kinds
 - `remove_value: {}` (target from parent rule) — for the `*_path_absent` kinds
 - `sync_from: {}` (source + relation from parent rule) — for `cross_file`
@@ -1188,7 +1196,7 @@ The minimal hygiene baseline most open-source repos want. Fifteen rules:
 | `oss-code-of-conduct-exists` | `file_exists` | info | — |
 | `oss-gitignore-exists` | `file_exists` | info | — |
 | `oss-no-merge-conflict-markers` | `no_merge_conflict_markers` | error | — |
-| `oss-no-bidi-controls` | `no_bidi_controls` | error | `file_strip_bidi` |
+| `oss-no-bidi-controls` | `no_bidi_controls` | error | — |
 | `oss-final-newline` | `final_newline` | info | `file_append_final_newline` |
 | `oss-no-trailing-whitespace` | `no_trailing_whitespace` | info | `file_trim_trailing_whitespace` |
 
@@ -1243,7 +1251,7 @@ Hygiene checks for Node.js / npm / pnpm / yarn / bun projects. Tree-level gate: 
 
 ### `alint://bundled/python@v1`
 
-Hygiene checks for Python projects. Tree-level gate: `when: facts.has_python` — any of `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements.txt` (each broadened with a `**/<manifest>` companion) present anywhere in the tree. Per-file content rules layer `scope_filter: { has_ancestor: [pyproject.toml, setup.py, requirements.txt] }` (note: `setup.cfg` stays in the broad fact list but not in scope_filter — `scope_filter` narrows to canonical package markers).
+Hygiene checks for Python projects. Tree-level gate: `when: facts.has_python` — any of `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements.txt` (each broadened with a `**/<manifest>` companion) present anywhere in the tree. Per-file content rules layer `scope_filter: { has_ancestor: [pyproject.toml, setup.py, setup.cfg, requirements.txt] }`.
 
 | Rule id | Kind | Default level | scope_filter | Fix |
 |---|---|---|---|---|
@@ -1252,9 +1260,9 @@ Hygiene checks for Python projects. Tree-level gate: `when: facts.has_python` �
 | `python-pyproject-declares-name` | `toml_path_matches` | warning | — | — |
 | `python-pyproject-declares-requires-python` | `toml_path_matches` | info | — | — |
 | `python-module-snake-case` | `filename_case` | info | — | — |
-| `python-sources-final-newline` | `final_newline` | info | `[pyproject.toml, setup.py, requirements.txt]` | `file_append_final_newline` |
-| `python-sources-no-trailing-whitespace` | `no_trailing_whitespace` | info | `[pyproject.toml, setup.py, requirements.txt]` | `file_trim_trailing_whitespace` |
-| `python-sources-no-bidi` | `no_bidi_controls` | error | `[pyproject.toml, setup.py, requirements.txt]` | — |
+| `python-sources-final-newline` | `final_newline` | info | `[pyproject.toml, setup.py, setup.cfg, requirements.txt]` | `file_append_final_newline` |
+| `python-sources-no-trailing-whitespace` | `no_trailing_whitespace` | info | `[pyproject.toml, setup.py, setup.cfg, requirements.txt]` | `file_trim_trailing_whitespace` |
+| `python-sources-no-bidi` | `no_bidi_controls` | error | `[pyproject.toml, setup.py, setup.cfg, requirements.txt]` | — |
 
 ### `alint://bundled/go@v1`
 
@@ -1345,16 +1353,14 @@ The most-cited gripes about agent-generated code surface as a single one-line `e
 
 ### `alint://bundled/agent-context@v1`
 
-Hygiene rules for agent-context files (`AGENTS.md`, `CLAUDE.md`, `.cursorrules`). Existence recommended, stub guard via `file_min_lines`, bloat guard via `file_max_lines` (per Augment Code research, context files >300 lines correlate with worse agent performance), stale-path heuristic via regex. Subsumes `ctxlint`'s niche with no new rule kinds — composes `file_exists` / `file_min_lines` / `file_max_lines` / `file_content_forbidden`.
+Hygiene rules for agent-context files (`AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `GEMINI.md`, `.github/copilot-instructions.md`). Existence recommended (`info` nudge), stub guard via `file_min_lines`, bloat guard via `file_max_lines` (per Augment Code research, context files >300 lines correlate with worse agent performance), and stale-path verification via `markdown_paths_resolve`. Content rules are gated by `facts.has_agent_context`; `agent-context-recommended` emits a non-blocking `info` reminder when no agent-context file is present.
 
 | Rule id | Kind | Default level | Fix |
 |---|---|---|---|
-| `agent-context-recommended` | `file_exists` (any of `AGENTS.md` / `CLAUDE.md` / `.cursorrules`) | info | — |
+| `agent-context-recommended` | `file_exists` (any of `AGENTS.md` / `CLAUDE.md` / `.cursorrules` / `GEMINI.md` / `.github/copilot-instructions.md`) | info | — |
 | `agent-context-non-stub` | `file_min_lines` (10) | warning | — |
 | `agent-context-not-bloated` | `file_max_lines` (300) | info | — |
-| `agent-context-no-stale-paths` | `file_content_forbidden` (regex heuristic over backticked workspace paths) | info | — |
-
-For precise stale-path detection, layer `markdown_paths_resolve` (a v0.7.1 rule kind) on top of this ruleset — the regex above flags candidates; the rule kind verifies them against the file index.
+| `agent-context-no-stale-paths` | `markdown_paths_resolve` (backticked workspace paths verified against the file index) | info | — |
 
 ### `alint://bundled/monorepo@v1`
 
@@ -1574,7 +1580,9 @@ At load time, alint walks the tree (respecting `.gitignore` + `ignore:`), picks 
 ### Restrictions (MVP)
 
 - Only the root config sets `nested_configs: true`. Nested configs can't spawn further nesting.
-- Nested configs can only declare `version:` and `rules:` — `extends:`, `facts:`, `vars:`, `ignore:`, `respect_gitignore:`, `fix_size_limit:`, and `allow_out_of_root:` are root-only.
+<!-- alint:since=0.23.0 -->
+- Nested configs can only declare `version:`, optional `requires:`, and `rules:` — `extends:`, `facts:`, `vars:`, `ignore:`, `respect_gitignore:`, `fix_size_limit:`, `nested_configs:`, `allow_out_of_root:`, `baseline:`, `trusted_extends:`, `templates:`, and `limits:` are root-only and rejected at load time.
+<!-- /alint:since -->
 - Every rule in a nested config must have a path-like scope field (`paths`, `select`, or `primary`). Rules without any (e.g. `no_submodules`, which is hardcoded to repo root) can't be nested.
 - The regex `select:` of `for_each_match` and `ordered_block` is a line selector, not a path, so it is not prefixed; their `paths:` is.
 - Kinds whose selectors can't be confined to a subdirectory are rejected in nested configs, including inside a `require:` block and when the kind comes from a root template through `extends_template:`: `cross_file` (and `cross_file_value_equals`), `registry_paths_resolve`, `file_graph`, `pair_hash`, `pair_changed_together`, `changeset_requires_path`, `git_no_denied_paths`, and the `git_commit_*` kinds. Declare them in the root config.

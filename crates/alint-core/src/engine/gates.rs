@@ -234,7 +234,13 @@ impl Engine {
             .filter(|e| set.contains(&*e.path) || created.is_some_and(|c| c.contains(&*e.path)))
             .cloned()
             .collect();
-        let filtered = FileIndex::from_entries(entries);
+        let escaping = full
+            .escaping_symlinks()
+            .iter()
+            .filter(|p| set.contains(p.as_ref()) || created.is_some_and(|c| c.contains(p.as_ref())))
+            .cloned()
+            .collect();
+        let filtered = FileIndex::from_entries_with_escaping(entries, escaping);
         full.share_relation_caches(&filtered);
         Some(filtered)
     }
@@ -840,9 +846,9 @@ impl Engine {
             // typed failure before policy evaluation.
             let rep = &group[0];
             let resolution = crate::scope_filter::read_manifest_confined(root, rep.source())
-                .and_then(|text| rep.resolve_set_with_context(cache_ctx, &text));
+                .and_then(|text| rep.resolve_entries_with_context(cache_ctx, &text));
             let set = match resolution {
-                Ok(resolved) => crate::scope_filter::ManifestSet::from_paths(resolved),
+                Ok(resolved) => crate::scope_filter::ManifestSet::from_entries(resolved),
                 Err(failure) => {
                     failures.insert(key.clone(), failure);
                     crate::scope_filter::ManifestSet::from_paths(Vec::new())

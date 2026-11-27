@@ -53,7 +53,7 @@ use serde::{Deserialize, Deserializer};
 
 use crate::error::{Error, Result};
 use crate::extract::{Extract, ExtractSpec, NonStringValueKind, extract_values, is_non_literal};
-use crate::pathsafe::{derive_target, normalize_confined};
+use crate::pathsafe::normalize_confined;
 use crate::rule::AnalysisFailureKind;
 use crate::walker::FileIndex;
 
@@ -124,9 +124,9 @@ pub struct ManifestPathSpec {
     /// by lives in the repo; an escaping `source` is a build-time error). Its
     /// declared paths resolve relative to its own directory.
     pub source: String,
-    /// The `{toml|json|yaml|xml|lines|regex}` extractor shared with
-    /// `registry_paths_resolve` / `file_graph`. Non-literal / interpolated
-    /// entries are dropped, not failed.
+    /// The `{json|toml|yaml|xml|dotenv|properties|ini|hcl|lines|regex|whole_file}`
+    /// extractor shared with `registry_paths_resolve` / `file_graph`. Non-literal /
+    /// interpolated entries are dropped, not failed.
     pub extract: ExtractSpec,
     /// Optional `{from, to}` regex mapping applied to each extracted path — e.g.
     /// map a `package.json` `bin` output (`dist/cli.js`) back to its source
@@ -441,6 +441,26 @@ impl ManifestPredicate {
         ctx: Option<&crate::Context<'_>>,
         text: &str,
     ) -> std::result::Result<Vec<PathBuf>, ManifestFailure> {
+        let entries = self.resolve_entries_with_context(ctx, text)?;
+        Ok(entries
+            .into_iter()
+            .map(|(negated, resolved)| {
+                if negated {
+                    let mut s = std::ffi::OsString::from("!");
+                    s.push(resolved.as_os_str());
+                    PathBuf::from(s)
+                } else {
+                    resolved
+                }
+            })
+            .collect())
+    }
+
+    pub(crate) fn resolve_entries_with_context(
+        &self,
+        ctx: Option<&crate::Context<'_>>,
+        text: &str,
+    ) -> std::result::Result<Vec<(bool, PathBuf)>, ManifestFailure> {
         let base = self.source.parent().unwrap_or_else(|| Path::new(""));
         let raw = match ctx {
             Some(ctx) => {
@@ -466,7 +486,7 @@ impl ManifestPredicate {
                  (types: {kinds}); path entries must be strings"
             )));
         }
-        let resolved: Vec<PathBuf> = raw
+        let resolved: Vec<(bool, PathBuf)> = raw
             .strings
             .into_iter()
             .filter(|e| !is_non_literal(e))
@@ -476,9 +496,19 @@ impl ManifestPredicate {
                     None => (false, entry),
                 };
                 // A non-matching derive_target entry is not a mapped output —
-                // dropped, matching file_graph's derive_target.
+                // dropped, matching file_graph's derive_target. Apply regex
+                // replacement BEFORE `base.join` + `normalize_confined` so a
+                // nested manifest mapping to a sibling (`../shared/...`) stays
+                // valid while anything escaping above the repo root is still
+                // rejected by `normalize_confined`.
                 let mapped = if let Some((from, to)) = &self.derive_target {
-                    derive_target(from, to, &entry)?
+                    let caps = from.captures(&entry)?;
+                    let mut out = String::new();
+                    caps.expand(to, &mut out);
+                    if out.is_empty() {
+                        return None;
+                    }
+                    PathBuf::from(out)
                 } else {
                     PathBuf::from(entry)
                 };
@@ -494,19 +524,14 @@ impl ManifestPredicate {
                 if resolved.as_path() == base {
                     return None;
                 }
-                Some(if negated {
-                    let mut s = std::ffi::OsString::from("!");
-                    s.push(resolved.as_os_str());
-                    PathBuf::from(s)
-                } else {
-                    resolved
-                })
+                Some((negated, resolved))
             })
             .collect();
         // Keep each entry's LAST occurrence (see above): walk backwards, then
         // restore declared order.
-        let mut seen: HashSet<&PathBuf> = HashSet::new();
-        let mut keep: Vec<&PathBuf> = resolved.iter().rev().filter(|p| seen.insert(*p)).collect();
+        let mut seen: HashSet<&(bool, PathBuf)> = HashSet::new();
+        let mut keep: Vec<&(bool, PathBuf)> =
+            resolved.iter().rev().filter(|p| seen.insert(*p)).collect();
         keep.reverse();
         Ok(keep.into_iter().cloned().collect())
     }
@@ -650,14 +675,32 @@ impl ManifestSet {
     /// declared order.
     #[must_use]
     pub(crate) fn from_paths(paths: impl IntoIterator<Item = PathBuf>) -> Self {
-        let paths: Vec<PathBuf> = paths.into_iter().collect();
-        if paths.iter().any(|p| p.to_string_lossy().starts_with('!')) {
-            return Self::ordered(paths);
+        let entries: Vec<(bool, PathBuf)> = paths
+            .into_iter()
+            .map(|p| {
+                let s = p.to_string_lossy();
+                match s.strip_prefix('!') {
+                    Some(rest) => (true, PathBuf::from(rest)),
+                    None => (false, p),
+                }
+            })
+            .collect();
+        Self::from_entries(entries)
+    }
+
+    /// Build a [`ManifestSet`] from explicit `(negated, path)` pairs so a
+    /// non-negated literal entry whose normalized path starts with `!` (such as
+    /// `"./!important"`) is never confused with a negated exclusion.
+    #[must_use]
+    pub(crate) fn from_entries(entries: impl IntoIterator<Item = (bool, PathBuf)>) -> Self {
+        let entries: Vec<(bool, PathBuf)> = entries.into_iter().collect();
+        if entries.iter().any(|(negated, _)| *negated) {
+            return Self::ordered_entries(entries);
         }
         let mut literals = HashSet::new();
         let mut builder = GlobSetBuilder::new();
         let mut glob_patterns = Vec::new();
-        for p in paths {
+        for (_, p) in entries {
             let s = p.to_string_lossy();
             if is_glob_member(&s) {
                 if let Some(glob) = compile_member(&s) {
@@ -678,18 +721,14 @@ impl ManifestSet {
     }
 
     /// The negation-aware form: members indexed by declared position.
-    fn ordered(paths: Vec<PathBuf>) -> Self {
+    fn ordered_entries(entries: Vec<(bool, PathBuf)>) -> Self {
         let mut ordered = OrderedMembers::default();
-        let mut small = (paths.len() <= SMALL_ORDERED).then(Vec::new);
+        let mut small = (entries.len() <= SMALL_ORDERED).then(Vec::new);
         let mut builder = GlobSetBuilder::new();
         let mut glob_patterns = Vec::new();
         let mut literals = HashSet::new();
-        for (pos, p) in paths.into_iter().enumerate() {
-            let s = p.to_string_lossy().into_owned();
-            let (negated, body) = match s.strip_prefix('!') {
-                Some(rest) => (true, rest.to_string()),
-                None => (false, s),
-            };
+        for (pos, (negated, p)) in entries.into_iter().enumerate() {
+            let body = p.to_string_lossy().into_owned();
             if is_glob_member(&body) {
                 let Some(glob) = compile_member(&body) else {
                     continue;

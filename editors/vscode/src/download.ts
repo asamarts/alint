@@ -3,6 +3,7 @@
 // verification, same tarball layout, so it fetches the byte-identical
 // artifact install.sh and the npm platform packages carry.
 
+import * as http from "node:http";
 import * as https from "node:https";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
@@ -25,38 +26,66 @@ export interface DownloadOptions {
 }
 
 /** Follow up to 5 HTTPS redirects (GitHub Releases hops through S3) with a
- * strict upper bound on buffered response bytes. */
-function fetch(url: string, maxBytes: number, redirects = 5): Promise<Buffer> {
+ * strict upper bound on buffered response bytes. Exported with an injectable
+ * `getFn` so unit tests can exercise premature close and `maxBytes` limits
+ * against a local server. */
+export function fetchWithGet(
+  url: string,
+  maxBytes: number,
+  redirects = 5,
+  getFn: (url: string, cb: (res: http.IncomingMessage) => void) => http.ClientRequest = https.get,
+  allowHttp = false,
+): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const req = https.get(url, (res) => {
+    let settled = false;
+    const finishOk = (value: Buffer | Promise<Buffer>) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(value);
+    };
+    const finishErr = (err: Error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      reject(err);
+    };
+
+    const req = getFn(url, (res) => {
       const status = res.statusCode ?? 0;
       if (status >= 300 && status < 400 && res.headers.location) {
         res.resume();
         if (redirects <= 0) {
-          reject(new Error(`too many redirects fetching ${url}`));
+          finishErr(new Error(`too many redirects fetching ${url}`));
           return;
         }
         let nextUrl: URL;
         try {
           nextUrl = new URL(res.headers.location, url);
         } catch {
-          reject(new Error(`invalid redirect URL fetching ${url}`));
+          finishErr(new Error(`invalid redirect URL fetching ${url}`));
           return;
         }
-        if (nextUrl.protocol !== "https:") {
-          reject(
+        const allowedProtocol =
+          nextUrl.protocol === "https:" || (allowHttp && nextUrl.protocol === "http:");
+        if (!allowedProtocol) {
+          finishErr(
             new Error(
               `refusing non-HTTPS redirect (${nextUrl.protocol}) fetching ${url}`,
             ),
           );
           return;
         }
-        resolve(fetch(nextUrl.toString(), maxBytes, redirects - 1));
+        finishOk(
+          fetchWithGet(nextUrl.toString(), maxBytes, redirects - 1, getFn, allowHttp),
+        );
         return;
       }
       if (status !== 200) {
         res.resume();
-        reject(new Error(`HTTP ${status} fetching ${url}`));
+        finishErr(new Error(`HTTP ${status} fetching ${url}`));
         return;
       }
       const chunks: Buffer[] = [];
@@ -64,29 +93,46 @@ function fetch(url: string, maxBytes: number, redirects = 5): Promise<Buffer> {
       res.on("data", (c: Buffer) => {
         total += c.length;
         if (total > maxBytes) {
+          const err = new Error(`response exceeds ${maxBytes} bytes fetching ${url}`);
+          finishErr(err);
           res.destroy();
-          req.destroy(
-            new Error(`response exceeds ${maxBytes} bytes fetching ${url}`),
-          );
+          req.destroy();
           return;
         }
         chunks.push(c);
       });
-      res.on("end", () => resolve(Buffer.concat(chunks)));
-      res.on("error", reject);
+      res.on("end", () => {
+        if (!res.complete) {
+          finishErr(new Error(`truncated response fetching ${url}`));
+          return;
+        }
+        finishOk(Buffer.concat(chunks));
+      });
+      res.on("close", () => {
+        if (!settled && !res.complete) {
+          finishErr(new Error(`connection closed prematurely fetching ${url}`));
+        }
+      });
+      res.on("error", (err) => finishErr(err));
     });
-    req.on("error", reject);
+    req.on("error", (err) => finishErr(err));
     req.setTimeout(30000, () => {
-      req.destroy(new Error(`timeout fetching ${url}`));
+      const err = new Error(`timeout fetching ${url}`);
+      finishErr(err);
+      req.destroy();
     });
   });
+}
+
+function fetch(url: string, maxBytes: number): Promise<Buffer> {
+  return fetchWithGet(url, maxBytes);
 }
 
 function sha256Hex(buf: Buffer): string {
   return crypto.createHash("sha256").update(buf).digest("hex");
 }
 
-function renameWithWindowsRetry(src: string, dest: string): void {
+async function renameWithWindowsRetry(src: string, dest: string): Promise<void> {
   const maxAttempts = process.platform === "win32" ? 4 : 1;
   for (let attempt = 1; ; attempt++) {
     try {
@@ -100,8 +146,9 @@ function renameWithWindowsRetry(src: string, dest: string): void {
       ) {
         throw err;
       }
-      // Brief synchronous backoff for Windows Defender / file-handle release.
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50 * attempt);
+      // Brief async backoff for Windows Defender / file-handle release without
+      // blocking the extension host event loop.
+      await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
     }
   }
 }
@@ -166,7 +213,7 @@ export async function downloadAlint(
     if (platform !== "win32" && process.platform !== "win32") {
       fs.chmodSync(tmpBinary, 0o755);
     }
-    renameWithWindowsRetry(tmpBinary, destBinary);
+    await renameWithWindowsRetry(tmpBinary, destBinary);
   } catch (err) {
     try {
       fs.rmSync(tmpBinary, { force: true });

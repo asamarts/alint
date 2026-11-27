@@ -1,0 +1,49 @@
+test_version: 1
+name: oss-baseline preserves Markdown two-space hard line breaks
+tags: [check, extends, bundled, oss-baseline]
+
+given:
+  tree:
+    README.md: "# demo\n\nLine one with hard break  \nLine two.\n"
+    LICENSE: |
+      MIT License
+
+      Copyright (c) 2026 demo contributors.
+
+      Permission is hereby granted, free of charge, to any
+      person obtaining a copy of this software and associated
+      documentation files (the "Software"), to deal in the
+      Software without restriction...
+    SECURITY.md: |
+      # Security Policy
+
+      ## Reporting
+
+      Report vulnerabilities privately to security@example.com.
+      We aim to acknowledge reports within 72 hours and ship a
+      patch within 14 days for high-severity issues.
+
+      ## Supported versions
+
+      Only the latest minor release receives security updates.
+    CODE_OF_CONDUCT.md: "# Code of Conduct\n\nBe kind.\n"
+    .gitignore: "target/\n"
+    .github:
+      dependabot.yml: |
+        version: 2
+        updates:
+          - package-ecosystem: cargo
+            directory: "/"
+            schedule:
+              interval: weekly
+      CODEOWNERS: "* @demo/maintainers\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/oss-baseline@v1
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

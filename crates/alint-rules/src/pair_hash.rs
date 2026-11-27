@@ -260,25 +260,39 @@ impl PairHashRule {
             }
             Format::SumsLine => {
                 for line in b.lines() {
-                    let mut tok = line.split_whitespace();
-                    let (Some(a), Some(rest)) = (tok.next(), tok.next()) else {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
                         continue;
-                    };
+                    }
                     // The manifest may be hex-first (coreutils / go
                     // `.sum`: `<hex>  <path>`) or path-first (the Go
                     // FIPS snapshot manifest: `<path> <hex>`). The
                     // algorithm fixes the digest's hex length, so
-                    // identify the digest token by shape and either
-                    // order parses; an ambiguous line (both or neither
-                    // hex-shaped) assumes the hex-first default.
+                    // identify the digest token by shape while
+                    // preserving any spaces in the filename; an
+                    // ambiguous line (both or neither hex-shaped)
+                    // assumes the hex-first default.
                     let n = digest.len();
-                    let (hex, path_tok) = if is_hex_digest(a, n) && !is_hex_digest(rest, n) {
-                        (a, rest)
-                    } else if is_hex_digest(rest, n) && !is_hex_digest(a, n) {
-                        (rest, a)
+                    let (hex, path_tok) = if let Some((first, rest)) =
+                        trimmed.split_once(|c: char| c.is_ascii_whitespace())
+                        && is_hex_digest(first, n)
+                    {
+                        (first, rest.trim_start())
+                    } else if let Some((head, last)) =
+                        trimmed.rsplit_once(|c: char| c.is_ascii_whitespace())
+                        && is_hex_digest(last, n)
+                    {
+                        (last, head.trim_end())
+                    } else if let Some((first, rest)) =
+                        trimmed.split_once(|c: char| c.is_ascii_whitespace())
+                    {
+                        (first, rest.trim_start())
                     } else {
-                        (a, rest)
+                        continue;
                     };
+                    if path_tok.is_empty() {
+                        continue;
+                    }
                     // Normalise the coreutils binary-mode `*`
                     // marker and a `find`-style `./` prefix
                     // (`<hex>  ./path`, what `find … -exec
@@ -697,5 +711,29 @@ mod tests {
              fix:\n  file_remove: {}\n",
         );
         assert!(build(&spec).unwrap_err().to_string().contains("no fix op"));
+    }
+
+    #[test]
+    fn sums_line_preserves_spaces_in_filenames_for_both_orders() {
+        let digest = Algorithm::Sha256.hex(b"payload");
+        let hex_first = format!("{digest}  my release artifact.bin\n");
+        let (tmp, idx) = tempdir_with_files(&[
+            ("my release artifact.bin", b"payload"),
+            ("SHA256SUMS", hex_first.as_bytes()),
+        ]);
+        let r = rule(
+            "my release artifact.bin",
+            "SHA256SUMS",
+            Algorithm::Sha256,
+            Format::SumsLine,
+        );
+        assert!(r.evaluate(&ctx(tmp.path(), &idx)).unwrap().is_empty());
+
+        let path_first = format!("my release artifact.bin  {digest}\n");
+        let (tmp2, idx2) = tempdir_with_files(&[
+            ("my release artifact.bin", b"payload"),
+            ("SHA256SUMS", path_first.as_bytes()),
+        ]);
+        assert!(r.evaluate(&ctx(tmp2.path(), &idx2)).unwrap().is_empty());
     }
 }

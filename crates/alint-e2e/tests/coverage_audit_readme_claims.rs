@@ -503,3 +503,119 @@ fn count_enum_variants_skips_doc_attrs_and_nested_struct_fields() {
               }\n";
     assert_eq!(count_enum_variants(src, "Format"), 3);
 }
+
+#[test]
+fn docs_site_never_uses_nonexistent_is_lang_ecosystem_facts() {
+    let site = workspace_root().join("docs/site");
+    let forbidden = [
+        "facts.is_<lang>",
+        "facts.is_rust",
+        "facts.is_node",
+        "facts.is_python",
+        "facts.is_go",
+        "facts.is_java",
+        "facts.is_dotnet",
+        "facts.is_php",
+    ];
+    let mut hits = Vec::new();
+    let mut stack = vec![site];
+    while let Some(dir) = stack.pop() {
+        for entry in fs::read_dir(&dir).unwrap().flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if p.extension().and_then(|e| e.to_str()) == Some("md") {
+                let text = fs::read_to_string(&p).unwrap();
+                for needle in forbidden {
+                    if text.contains(needle) {
+                        hits.push(format!(
+                            "{}: contains `{needle}` (use `facts.has_*`)",
+                            p.display()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        hits.is_empty(),
+        "stale `facts.is_<lang>` references in docs/site:\n  - {}",
+        hits.join("\n  - ")
+    );
+}
+
+#[test]
+fn configuration_index_documents_every_v1_top_level_schema_field() {
+    let root = workspace_root();
+    let schema: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(root.join("schemas/v1/config.json")).unwrap())
+            .unwrap();
+    let props = schema["properties"].as_object().unwrap();
+    let doc = fs::read_to_string(root.join("docs/site/configuration/index.md")).unwrap();
+    let missing: Vec<&String> = props
+        .keys()
+        .filter(|key| !doc.contains(&format!("### `{key}`")))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "docs/site/configuration/index.md is missing `### `<field>`` headings for v1 schema properties: {missing:?}"
+    );
+}
+
+#[test]
+fn architecture_publishing_table_lists_every_workspace_crate() {
+    let root = workspace_root();
+    let cargo_toml = fs::read_to_string(root.join("Cargo.toml")).unwrap();
+    let arch = fs::read_to_string(root.join("docs/design/ARCHITECTURE.md")).unwrap();
+    let start = arch
+        .find("### Publishing intent (crates.io)")
+        .expect("ARCHITECTURE.md publishing table");
+    let end = arch[start..]
+        .find("\n## ")
+        .map_or(arch.len(), |off| start + off);
+    let section = &arch[start..end];
+
+    let mut in_members = false;
+    let mut missing = Vec::new();
+    for line in cargo_toml.lines() {
+        let t = line.trim();
+        if t.starts_with("members = [") {
+            in_members = true;
+            continue;
+        }
+        if in_members {
+            if t.starts_with(']') {
+                break;
+            }
+            if let Some(member) = t
+                .trim_end_matches(',')
+                .strip_prefix('"')
+                .and_then(|s| s.strip_suffix('"'))
+            {
+                let crate_name = member.rsplit('/').next().unwrap_or(member);
+                if !section.contains(&format!("`{crate_name}`")) {
+                    missing.push(crate_name.to_string());
+                }
+            }
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "ARCHITECTURE.md publishing table omits workspace crate(s): {missing:?}"
+    );
+}
+
+#[test]
+fn cross_file_docs_reflect_all_seven_relations() {
+    let root = workspace_root();
+    let doc =
+        fs::read_to_string(root.join("docs/site/concepts/multi-file/cross-file-rules.md")).unwrap();
+    assert!(
+        !doc.contains("Six\nrelations") && !doc.contains("Six relations"),
+        "cross-file-rules.md still claims six relations instead of seven"
+    );
+    assert!(
+        doc.contains("`registered`"),
+        "cross-file-rules.md must document the `registered` relation"
+    );
+}

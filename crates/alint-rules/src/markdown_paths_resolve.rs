@@ -85,7 +85,11 @@ impl PerFileRule for MarkdownPathsResolveRule {
         bytes: &[u8],
     ) -> Result<Vec<Violation>> {
         let Ok(text) = std::str::from_utf8(bytes) else {
-            return Ok(Vec::new()); // non-UTF-8 markdown is degenerate; skip
+            return Ok(vec![
+                Violation::new("Markdown file is not valid UTF-8")
+                    .with_path(std::sync::Arc::<Path>::from(path))
+                    .as_analysis_failure(alint_core::AnalysisFailureKind::ResourceParse),
+            ]);
         };
         let mut violations = Vec::new();
         for cand in scan_markdown_paths(text, &self.prefixes) {
@@ -207,36 +211,36 @@ fn scan_markdown_paths(text: &str, prefixes: &[String]) -> Vec<Candidate> {
             fence_len = 0;
         }
 
+        // Skip 4-space / tab indented code blocks BEFORE checking for fences:
+        // CommonMark §4.5 allows at most 3 leading spaces on a fence line, so
+        // `    ```yaml` is an indented code sample, not an opening fence.
+        if !in_fenced && (content.starts_with("    ") || content.starts_with('\t')) {
+            continue;
+        }
+
         // Detect fenced-code-block boundaries. CommonMark allows
-        // ``` and ~~~ with at least 3 markers; the closing fence
-        // must use the same character and at least as many
-        // markers. `info string` (e.g. ```yaml) follows the
-        // opening fence; we don't care about its content.
+        // ``` and ~~~ with at least 3 markers (indented at most 3 spaces);
+        // backtick opening fences cannot have backticks in their info string
+        // (so ```` ```src/a``` ```` is an inline code span, not a fence).
         let trimmed = content.trim_start();
         if let Some((ch, n)) = detect_fence(trimmed) {
             if !in_fenced {
-                in_fenced = true;
-                fence_marker = Some(ch);
-                fence_len = n;
-                fence_depth = depth;
+                let info = &trimmed[n..];
+                if ch != '`' || !info.contains('`') {
+                    in_fenced = true;
+                    fence_marker = Some(ch);
+                    fence_len = n;
+                    fence_depth = depth;
+                    continue;
+                }
             } else if fence_marker == Some(ch) && n >= fence_len && only_fence(trimmed, ch) {
                 in_fenced = false;
                 fence_marker = None;
                 fence_len = 0;
+                continue;
             }
-            continue;
         }
         if in_fenced {
-            continue;
-        }
-
-        // Skip 4-space indented code blocks. Per CommonMark, only
-        // applies when the indented line is NOT inside a list.
-        // We're conservative — any 4-space-prefixed line is treated
-        // as code unless it's a continuation of a list item, which
-        // we don't track here. Acceptable: false-skip rate >
-        // false-flag rate for our use.
-        if content.starts_with("    ") || content.starts_with('\t') {
             continue;
         }
 
@@ -759,6 +763,33 @@ mod tests {
         assert!(
             (1..=10).contains(&tested),
             "expected narrowed positive candidate count for 4 glob lookups, got {tested}"
+        );
+    }
+
+    #[test]
+    fn four_space_indented_code_fence_and_backtick_info_string_and_invalid_utf8() {
+        let pf = prefixes(&["src/"]);
+        // 4-space indented line is an indented code block, NOT a fence opener;
+        // backtick info string with another backtick is NOT a CommonMark fence.
+        let md = "    ```\nsee `src/real.rs`\n```foo`bar\nsee `src/also_real.rs`\n";
+        let tokens: Vec<String> = scan_markdown_paths(md, &pf)
+            .into_iter()
+            .map(|c| c.token)
+            .collect();
+        assert_eq!(tokens, vec!["src/real.rs", "src/also_real.rs"]);
+
+        let spec = crate::test_support::spec_yaml(
+            "id: t\nkind: markdown_paths_resolve\npaths: \"*.md\"\nprefixes: [\"src/\"]\nlevel: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = crate::test_support::tempdir_with_files(&[("bad.md", b"hi \xff\n")]);
+        let v = rule
+            .evaluate(&crate::test_support::ctx(tmp.path(), &idx))
+            .unwrap();
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert_eq!(
+            v[0].analysis_failure_kind(),
+            Some(alint_core::AnalysisFailureKind::ResourceParse)
         );
     }
 }

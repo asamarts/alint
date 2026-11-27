@@ -21,8 +21,12 @@ LIKEC4_VERSION="1.58.0"
 MODEL_DIR="docs/design/architecture/model"
 
 if ! command -v npx >/dev/null 2>&1; then
+  if [[ "${CI:-}" == "true" || "${CI:-}" == "1" ]]; then
+    echo "[likec4] FAIL: Node/npx is required in CI to validate the architecture model." >&2
+    exit 1
+  fi
   echo "[likec4] WARN: Node/npx not found - SKIPPING architecture-model validation."
-  echo "[likec4] Add Node >= 20 to ci/Containerfile and rebuild the runner to enable this gate."
+  echo "[likec4] Install Node >= 20 to run this gate locally."
   exit 0
 fi
 

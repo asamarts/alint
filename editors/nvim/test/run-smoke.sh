@@ -27,12 +27,16 @@ command -v alint >/dev/null || {
 }
 
 ws="$(mktemp -d)"
+ws_space="$ws/my workspace"
+mkdir -p "$ws_space/.git" "$ws_space/vendor"
 cleanup() { rm -rf "$ws" "$bindir"; }
 trap cleanup EXIT
 
 # A rule on **/*.py (python is in alint.lua's filetypes list, so the
-# server attaches) and a fixture file that trips it.
-cat >"$ws/.alint.yml" <<'YAML'
+# server attaches) and a fixture file that trips it. Placing a vendored
+# `.alint.yml` inside `vendor/` alongside a top-level `.git` also verifies
+# `.git`-first root resolution and paths containing spaces.
+cat >"$ws_space/.alint.yml" <<'YAML'
 version: 1
 rules:
   - id: no-todo
@@ -41,15 +45,20 @@ rules:
     pattern: "TODO"
     level: error
 YAML
-printf 'x = 1  # TODO\n' >"$ws/bad.py"
+cat >"$ws_space/vendor/.alint.yml" <<'YAML'
+version: 1
+rules: []
+YAML
+printf 'x = 1  # TODO\n' >"$ws_space/vendor/bad.py"
 
-cd "$ws"
+cd "$ws_space"
 set +e
+ALINT_NVIM_RTP="$nvim_rtp" \
+ALINT_SMOKE_FILE="$ws_space/vendor/bad.py" \
+ALINT_SMOKE_LUA="$here/smoke.lua" \
 "$nvim_bin" --clean --headless \
-  --cmd "set rtp+=$nvim_rtp" \
-  -c "lua vim.lsp.enable('alint')" \
-  -c "edit $ws/bad.py" \
-  -c "luafile $here/smoke.lua"
+  --cmd "lua vim.opt.rtp:append(vim.env.ALINT_NVIM_RTP)" \
+  -c "lua vim.lsp.enable('alint'); vim.cmd.edit(vim.fn.fnameescape(vim.env.ALINT_SMOKE_FILE)); dofile(vim.env.ALINT_SMOKE_LUA)"
 rc=$?
 set -e
 exit "$rc"

@@ -3,22 +3,23 @@
   description: >-
     Lint repository structure, filenames, and file content with alint.
     Reads `.alint.yml` at the repo root; walks the tree honoring
-    `.gitignore`; reports violations. Non-mutating.
+    `.gitignore`; reports violations. Non-mutating. Requires `alint` on PATH
+    (or use https://github.com/asamarts/alint-pre-commit for a self-contained
+    prebuilt wheel hook).
   entry: alint check
-  language: rust
+  language: system
   pass_filenames: false
   always_run: true
-  types: [text]
 
 - id: alint-fix
   name: alint (fix)
   description: >-
     Apply alint auto-fixes for violations whose rule declares a fix
     strategy. Mutating — defaults to `stages: [manual]` so it runs
-    only when explicitly invoked via `pre-commit run alint-fix`.
+    only when explicitly invoked via `pre-commit run alint-fix`. Requires
+    `alint` on PATH (or use https://github.com/asamarts/alint-pre-commit).
   entry: alint fix
-  language: rust
+  language: system
   pass_filenames: false
   always_run: true
   stages: [manual]
-  types: [text]

@@ -606,49 +606,27 @@ pub(super) fn walk_subtrees_from(
                         .is_ok_and(|m| crate::pathsafe::metadata_is_symlink_or_reparse(&m)));
 
             if is_symlink {
-                let target = match next_abs.canonicalize() {
-                    Ok(target) => target,
-                    Err(err)
-                        if matches!(
-                            err.kind(),
-                            std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
-                        ) || is_eloop_io(&err) =>
-                    {
-                        continue 'subtree;
+                let Ok(target) = next_abs.canonicalize() else {
+                    if !ctx.is_ignored(
+                        &next_abs,
+                        next_canonical.as_deref(),
+                        false,
+                        chain.as_deref(),
+                    ) {
+                        ctx.push_escaping(Arc::from(next_rel.as_path()));
                     }
-                    Err(_) => {
-                        if !ctx.is_ignored(
-                            &next_abs,
-                            next_canonical.as_deref(),
-                            false,
-                            chain.as_deref(),
-                        ) {
-                            ctx.push_escaping(Arc::from(next_rel.as_path()));
-                        }
-                        continue 'subtree;
-                    }
+                    continue 'subtree;
                 };
-                let meta = match std::fs::metadata(&target) {
-                    Ok(meta) => meta,
-                    Err(err)
-                        if matches!(
-                            err.kind(),
-                            std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
-                        ) || is_eloop_io(&err) =>
-                    {
-                        continue 'subtree;
+                let Ok(meta) = std::fs::metadata(&target) else {
+                    if !ctx.is_ignored(
+                        &next_abs,
+                        next_canonical.as_deref(),
+                        false,
+                        chain.as_deref(),
+                    ) {
+                        ctx.push_escaping(Arc::from(next_rel.as_path()));
                     }
-                    Err(_) => {
-                        if !ctx.is_ignored(
-                            &next_abs,
-                            next_canonical.as_deref(),
-                            false,
-                            chain.as_deref(),
-                        ) {
-                            ctx.push_escaping(Arc::from(next_rel.as_path()));
-                        }
-                        continue 'subtree;
-                    }
+                    continue 'subtree;
                 };
                 let is_dir = meta.is_dir();
                 if ctx.is_ignored(
@@ -672,6 +650,7 @@ pub(super) fn walk_subtrees_from(
                 if is_dir
                     && ancestors.contains(ctx.canonical_walk_root.as_deref(), &cur_rel, &target)
                 {
+                    ctx.push_escaping(Arc::from(next_rel.as_path()));
                     continue 'subtree;
                 }
                 if is_dir {
@@ -1053,41 +1032,19 @@ fn handle_symlink(
 ) {
     // Resolve the symlink target first. A broken (dangling) symlink, an
     // `ENOTDIR` through a non-directory segment, or a kernel `ELOOP` direct
-    // self-cycle is skipped without aborting the walk, matching
-    // `ignore::WalkBuilder` with `follow_links(true)`.
-    let target = match abs.canonicalize() {
-        Ok(target) => target,
-        Err(err)
-            if matches!(
-                err.kind(),
-                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
-            ) || is_eloop_io(&err) =>
-        {
-            return;
+    // self-cycle is kept out of `entries` without aborting the walk, and still
+    // recorded on `escaping_symlinks` (when not ignored) so `no_symlinks` flags it.
+    let Ok(target) = abs.canonicalize() else {
+        if !ctx.is_ignored(abs, canonical_abs, false, chain) {
+            ctx.push_escaping(Arc::from(rel));
         }
-        Err(_) => {
-            if !ctx.is_ignored(abs, canonical_abs, false, chain) {
-                ctx.push_escaping(Arc::from(rel));
-            }
-            return;
-        }
+        return;
     };
-    let meta = match std::fs::metadata(&target) {
-        Ok(meta) => meta,
-        Err(err)
-            if matches!(
-                err.kind(),
-                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
-            ) || is_eloop_io(&err) =>
-        {
-            return;
+    let Ok(meta) = std::fs::metadata(&target) else {
+        if !ctx.is_ignored(abs, canonical_abs, false, chain) {
+            ctx.push_escaping(Arc::from(rel));
         }
-        Err(_) => {
-            if !ctx.is_ignored(abs, canonical_abs, false, chain) {
-                ctx.push_escaping(Arc::from(rel));
-            }
-            return;
-        }
+        return;
     };
     let is_dir = meta.is_dir();
     if ctx.is_ignored(abs, canonical_abs, is_dir, chain) {
@@ -1103,7 +1060,8 @@ fn handle_symlink(
     }
     if is_dir && ancestors.contains(ctx.canonical_walk_root.as_deref(), rel_dir, &target) {
         // Ancestor symlink cycle (`loop -> .`, `sub/up -> ..`, mutual directory
-        // symlinks): skip cleanly without indexing or recursing.
+        // symlinks): keep out of `entries`, record for `no_symlinks`.
+        ctx.push_escaping(Arc::from(rel));
         return;
     }
     if is_dir {
@@ -1632,40 +1590,6 @@ fn read_parent_file(path: PathBuf, warnings: &mut Vec<String>) -> Option<Vec<u8>
             None
         }
     }
-}
-
-/// Whether `err` is a kernel symlink-loop error (`ELOOP` on Unix,
-/// `ERROR_CANT_RESOLVE_FILENAME` on Windows), produced by `canonicalize()` /
-/// `metadata()` on a direct symlink cycle (`ln -s loop loop`, mutual links).
-/// `ErrorKind::FilesystemLoop` is still unstable in Rust 1.88, so match the
-/// platform error code directly.
-#[cfg(unix)]
-fn is_eloop_io(err: &std::io::Error) -> bool {
-    const ELOOP: i32 = if cfg!(any(target_os = "linux", target_os = "android")) {
-        if cfg!(any(target_arch = "mips", target_arch = "mips64")) {
-            90
-        } else if cfg!(any(target_arch = "sparc", target_arch = "sparc64")) {
-            92
-        } else {
-            40
-        }
-    } else if cfg!(any(target_os = "solaris", target_os = "illumos")) {
-        90
-    } else {
-        62
-    };
-    err.raw_os_error() == Some(ELOOP)
-}
-
-#[cfg(windows)]
-fn is_eloop_io(err: &std::io::Error) -> bool {
-    const ERROR_CANT_RESOLVE_FILENAME: i32 = 1921;
-    err.raw_os_error() == Some(ERROR_CANT_RESOLVE_FILENAME)
-}
-
-#[cfg(not(any(unix, windows)))]
-fn is_eloop_io(_err: &std::io::Error) -> bool {
-    false
 }
 
 #[cfg(test)]

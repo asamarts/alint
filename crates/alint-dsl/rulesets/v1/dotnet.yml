@@ -97,9 +97,11 @@ rules:
     # `if_present`: only flags a .csproj that explicitly sets
     # Nullable to something other than `enable` (a regression);
     # a project that sets it centrally / omits it is not nagged.
+    # Recursive descent (`..Nullable`) matches both single
+    # `<PropertyGroup>` objects and multi-`<PropertyGroup>` arrays.
     kind: xml_path_equals
     paths: "**/*.csproj"
-    path: "$.Project.PropertyGroup.Nullable"
+    path: "$.Project.PropertyGroup..Nullable"
     equals: "enable"
     if_present: true
     level: info
@@ -117,7 +119,7 @@ rules:
     # come from the .csproj files.
     kind: xml_path_equals
     paths: ["Directory.Packages.props", "**/Directory.Packages.props"]
-    path: "$.Project.PropertyGroup.ManagePackageVersionsCentrally"
+    path: "$.Project.PropertyGroup..ManagePackageVersionsCentrally"
     equals: "true"
     if_present: true
     level: info

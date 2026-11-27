@@ -197,40 +197,49 @@ fn init_panic_hook() {
             .copied()
             .or_else(|| info.payload().downcast_ref::<String>().map(String::as_str))
             .unwrap_or("(non-string panic payload)");
-        let title = format!("alint panic: {payload}");
-        let body = format!(
-            "alint version: {ver}\n\
-             OS: {os}\n\
-             Panic location: {location}\n\
-             Panic message: {payload}\n\n\
-             Steps to reproduce:\n\
-             1. ...\n\
-             2. ...\n\
-             3. ...\n\n\
-             Expected behaviour:\n\n\
-             Actual behaviour:\n",
-            ver = ALINT_LONG_VERSION,
-            os = std::env::consts::OS,
-        );
-        let url = format!(
-            "https://github.com/asamarts/alint/issues/new?title={}&body={}",
-            url_encode(&title),
-            url_encode(&body),
-        );
+        let redacted_location = redact_environment_values(&location);
+        let redacted_payload = redact_environment_values(payload);
+        let url = format_panic_issue_url(&redacted_location, &redacted_payload);
         let mut err = io::stderr().lock();
-        let safe_payload = terminal_error(payload);
+        let safe_payload = term(&redacted_payload);
+        let safe_location = term(&redacted_location);
         let _ = writeln!(
             err,
             "\nalint crashed unexpectedly. This is a bug - please file a report:"
         );
         let _ = writeln!(err, "  {url}\n");
         let _ = writeln!(err, "Panic: {safe_payload}");
-        let _ = writeln!(err, "Location: {location}");
+        let _ = writeln!(err, "Location: {safe_location}");
         let _ = writeln!(
             err,
             "Re-run with `RUST_BACKTRACE=1` for the full backtrace."
         );
     }));
+}
+
+fn format_panic_issue_url(location: &str, payload: &str) -> String {
+    let redacted_location = redact_environment_values(location);
+    let redacted_payload = redact_environment_values(payload);
+    let title = format!("alint panic: {redacted_payload}");
+    let body = format!(
+        "alint version: {ver}\n\
+         OS: {os}\n\
+         Panic location: {redacted_location}\n\
+         Panic message: {redacted_payload}\n\n\
+         Steps to reproduce:\n\
+         1. ...\n\
+         2. ...\n\
+         3. ...\n\n\
+         Expected behaviour:\n\n\
+         Actual behaviour:\n",
+        ver = ALINT_LONG_VERSION,
+        os = std::env::consts::OS,
+    );
+    format!(
+        "https://github.com/asamarts/alint/issues/new?title={}&body={}",
+        url_encode(&title),
+        url_encode(&body),
+    )
 }
 
 /// Minimal RFC 3986 percent-encoder for the panic-hook URL's query
@@ -267,8 +276,67 @@ fn tracing_ansi(color: &str, no_color: bool, stderr_tty: bool) -> bool {
     }
 }
 
+struct RedactingFieldFormatter;
+
+struct RedactingFieldVisitor<'a> {
+    writer: tracing_subscriber::fmt::format::Writer<'a>,
+    is_empty: bool,
+    result: std::fmt::Result,
+}
+
+impl RedactingFieldVisitor<'_> {
+    fn write_field(&mut self, field: &tracing::field::Field, rendered: &str) {
+        if self.result.is_err() {
+            return;
+        }
+        let sep = if self.is_empty { "" } else { " " };
+        self.is_empty = false;
+        let safe = term(rendered);
+        self.result = if field.name() == "message" {
+            write!(self.writer, "{sep}{safe}")
+        } else {
+            write!(self.writer, "{sep}{}={safe}", field.name())
+        };
+    }
+}
+
+impl tracing::field::Visit for RedactingFieldVisitor<'_> {
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        // Redact raw `&str` BEFORE Debug-quoting so secrets containing `"` or
+        // `\` match the literal environment redactor instead of escaping past it.
+        let redacted = redact_environment_values(value);
+        if field.name() == "message" {
+            self.write_field(field, &redacted);
+        } else {
+            let quoted = format!("{:?}", redacted.as_ref());
+            self.write_field(field, &quoted);
+        }
+    }
+
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        let text = format!("{value:?}");
+        let redacted = redact_environment_values(&text);
+        self.write_field(field, &redacted);
+    }
+}
+
+impl<'writer> tracing_subscriber::fmt::FormatFields<'writer> for RedactingFieldFormatter {
+    fn format_fields<R: tracing_subscriber::field::RecordFields>(
+        &self,
+        writer: tracing_subscriber::fmt::format::Writer<'writer>,
+        fields: R,
+    ) -> std::fmt::Result {
+        let mut visitor = RedactingFieldVisitor {
+            writer,
+            is_empty: true,
+            result: Ok(()),
+        };
+        fields.record(&mut visitor);
+        visitor.result
+    }
+}
+
 fn init_tracing(color: &str) {
-    use tracing_subscriber::field::MakeExt as _;
     use tracing_subscriber::{EnvFilter, fmt};
     let no_color = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
     let ansi = tracing_ansi(color, no_color, io::stderr().is_terminal());
@@ -292,19 +360,7 @@ fn init_tracing(color: &str) {
         // cannot forge a record or drive the terminal, and the values the
         // environment gave the loaded config are left out
         // ([`redact_environment_values`]), as in `terminal_error`.
-        .fmt_fields(
-            fmt::format::debug_fn(|writer, field, value| {
-                let text = format!("{value:?}");
-                let text = redact_environment_values(&text);
-                let text = term(&text);
-                if field.name() == "message" {
-                    write!(writer, "{text}")
-                } else {
-                    write!(writer, "{}={text}", field.name())
-                }
-            })
-            .delimited(" "),
-        )
+        .fmt_fields(RedactingFieldFormatter)
         .with_env_filter(filter)
         .with_target(false)
         .with_ansi(ansi)
@@ -656,8 +712,10 @@ fn cmd_suggest(path: &Path, opts: &SuggestOptions, cli: &Cli) -> Result<ExitCode
             .parse()
             .map_err(|e: String| anyhow::anyhow!(e))?
     };
-    let progress = progress::Progress::new(progress_mode);
-    let (mut out, _opts) = render_env(cli)?;
+    let (mut out, human_opts) = render_env(cli)?;
+    let no_color = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
+    let progress_color = tracing_ansi(&cli.color, no_color, io::stderr().is_terminal());
+    let progress = progress::Progress::with_style(progress_mode, progress_color, human_opts.glyphs);
     suggest::run(
         path,
         &suggest::RunOptions {
@@ -667,6 +725,9 @@ fn cmd_suggest(path: &Path, opts: &SuggestOptions, cli: &Cli) -> Result<ExitCode
             explain: opts.explain,
             quiet: cli.quiet,
             width: cli.width,
+            no_gitignore: cli.no_gitignore,
+            config_path: cli.config.first().cloned(),
+            glyphs: human_opts.glyphs,
         },
         &progress,
         &mut out,
@@ -674,6 +735,7 @@ fn cmd_suggest(path: &Path, opts: &SuggestOptions, cli: &Cli) -> Result<ExitCode
 }
 
 fn cmd_init(path: &Path, monorepo: bool) -> Result<ExitCode> {
+    check::require_directory(path)?;
     // Refuse to overwrite an existing `.alint.yml` (or any of
     // the other names the loader recognises). The user-visible
     // contract is: `alint init` is a one-shot scaffold; if a

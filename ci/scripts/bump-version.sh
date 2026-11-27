@@ -56,18 +56,26 @@ fi
 
 echo "==> bump: $CUR -> $NEW"
 
+# Portable in-place sed (works identically on GNU sed and macOS BSD sed).
+sed_inplace() {
+  local file="${!#}"
+  local args=("${@:1:$#-1}")
+  local tmp="${file}.tmp.$$"
+  sed "${args[@]}" "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
 # 1. Workspace version (single line under [workspace.package]).
 #    The workspace dependencies use Cargo caret requirements. Before 1.0, a
 #    new minor is a new compatibility line (`0.18` does not accept `0.19`), and
 #    a new major is always a new compatibility line. Advance the internal-crate
 #    floors in those cases before asking Cargo to resolve the bumped workspace.
-sed -i "s|^version = \"$CUR\"$|version = \"$NEW\"|" Cargo.toml
+sed_inplace "s|^version = \"$CUR\"$|version = \"$NEW\"|" Cargo.toml
 
 IFS=. read -r CUR_MAJOR CUR_MINOR _ <<<"$CUR"
 IFS=. read -r NEW_MAJOR NEW_MINOR _ <<<"$NEW"
 if [[ "$CUR_MAJOR" != "$NEW_MAJOR" || ( "$CUR_MAJOR" == "0" && "$CUR_MINOR" != "$NEW_MINOR" ) ]]; then
   NEW_FLOOR="${NEW_MAJOR}.${NEW_MINOR}.0"
-  sed -i -E \
+  sed_inplace -E \
     "s#^(alint-[a-z-]+ = \\{ path = \"[^\"]+\", version = \")[0-9]+\\.[0-9]+\\.[0-9]+(\" \\})\$#\\1${NEW_FLOOR}\\2#" \
     Cargo.toml
 fi
@@ -177,13 +185,13 @@ PY
     if [[ "$OLD_V2_REL" != "$NEW_TAG" ]]; then
       echo "==> refreshing draft v2 schema \$id: $OLD_V2_REL -> $NEW_TAG"
       OLD_V2_ESC="${OLD_V2_REL//./\\.}"
-      sed -i -E "s|(const[[:space:]]+RELEASE:[[:space:]]*&str[[:space:]]*=[[:space:]]*)\"${OLD_V2_ESC}\";|\\1\"${NEW_TAG}\";|" xtask/src/gen_schema_v2.rs
+      sed_inplace -E "s|(const[[:space:]]+RELEASE:[[:space:]]*&str[[:space:]]*=[[:space:]]*)\"${OLD_V2_ESC}\";|\\1\"${NEW_TAG}\";|" xtask/src/gen_schema_v2.rs
       if [[ -f xtask/src/gen_schema_v2_tests.rs ]]; then
-        sed -i -E "s|(https://[^\"]+/)${OLD_V2_ESC}(/schemas/v2/config\\.json)|\\1${NEW_TAG}\\2|g" xtask/src/gen_schema_v2_tests.rs
+        sed_inplace -E "s|(https://[^\"]+/)${OLD_V2_ESC}(/schemas/v2/config\\.json)|\\1${NEW_TAG}\\2|g" xtask/src/gen_schema_v2_tests.rs
       fi
       for doc in docs/site/configuration/version-2.md docs/development/CONFIG-AUTHORING.md; do
         if [[ -f "$doc" ]]; then
-          sed -i -E "s|(https://raw\\.githubusercontent\\.com/asamarts/alint/)${OLD_V2_ESC}(/schemas/v2/config\\.json)|\\1${NEW_TAG}\\2|g" "$doc"
+          sed_inplace -E "s|(https://raw\\.githubusercontent\\.com/asamarts/alint/)${OLD_V2_ESC}(/schemas/v2/config\\.json)|\\1${NEW_TAG}\\2|g" "$doc"
         fi
       done
       cargo run -q -p xtask -- gen-schema
@@ -217,7 +225,7 @@ CUR_ESCAPED="${CUR//./\\.}"
 # pattern doesn't terminate the substitution. `|` would clash.
 for f in "${SNIPPET_FILES[@]}"; do
   if [[ -f "$f" ]]; then
-    sed -i -E "s#(v|:)${CUR_ESCAPED}([^0-9.]|\$)#\1${NEW}\2#g" "$f"
+    sed_inplace -E "s#(v|:)${CUR_ESCAPED}([^0-9.]|\$)#\1${NEW}\2#g" "$f"
   fi
 done
 
@@ -230,7 +238,7 @@ done
 CUR_MINOR="${CUR%.*}"
 NEW_MINOR="${NEW%.*}"
 if [[ -f docs/site/integrations/docker.md ]]; then
-  sed -i -E "s#:${CUR_MINOR//./\\.}([^0-9.]|\$)#:${NEW_MINOR}\1#g" docs/site/integrations/docker.md
+  sed_inplace -E "s#:${CUR_MINOR//./\\.}([^0-9.]|\$)#:${NEW_MINOR}\1#g" docs/site/integrations/docker.md
 fi
 
 # 2b. npm shim version and its exact-version platform packages
@@ -239,8 +247,8 @@ fi
 #     the committed values at HEAD match what users see post-publish, and
 #     check-version-pins.sh enforces it.
 if [[ -f npm/package.json ]]; then
-  sed -i -E "s/^([[:space:]]*\"version\":[[:space:]]+)\"${CUR_ESCAPED}\"/\1\"${NEW}\"/" npm/package.json
-  sed -i -E "s/^([[:space:]]*\"@asamarts\/alint-[a-z0-9-]+\":[[:space:]]+)\"${CUR_ESCAPED}\"/\1\"${NEW}\"/" npm/package.json
+  sed_inplace -E "s/^([[:space:]]*\"version\":[[:space:]]+)\"${CUR_ESCAPED}\"/\1\"${NEW}\"/" npm/package.json
+  sed_inplace -E "s/^([[:space:]]*\"@asamarts\/alint-[a-z0-9-]+\":[[:space:]]+)\"${CUR_ESCAPED}\"/\1\"${NEW}\"/" npm/package.json
 fi
 
 # 2c. Zed extension version. Unlike VS Code/JetBrains (which release.yml
@@ -249,20 +257,20 @@ fi
 #     at the committed version — so the committed value is what ships and
 #     must track the workspace version. check-version-pins.sh enforces it.
 for zf in editors/zed/extension.toml editors/zed/Cargo.toml; do
-  [[ -f "$zf" ]] && sed -i -E "s/^(version = )\"${CUR_ESCAPED}\"/\1\"${NEW}\"/" "$zf"
+  [[ -f "$zf" ]] && sed_inplace -E "s/^(version = )\"${CUR_ESCAPED}\"/\1\"${NEW}\"/" "$zf"
 done
 # The extension's own lockfile entry follows its Cargo.toml; the editors job
 # builds with --locked, so a stale entry fails it. Set it to NEW whatever it
 # held, since this entry lagged the manifest before the gate existed.
 if [[ -f editors/zed/Cargo.lock ]]; then
-  sed -i -E "/^name = \"alint-zed\"\$/{n;s/^version = \"[^\"]*\"\$/version = \"${NEW}\"/}" editors/zed/Cargo.lock
+  sed_inplace -E "/^name = \"alint-zed\"\$/{n;s/^version = \"[^\"]*\"\$/version = \"${NEW}\"/}" editors/zed/Cargo.lock
 fi
 
 # 2d. npm README version example (@asamarts/alint@X.Y.Z + "alint vX.Y.Z").
 #     Illustrative, and not in the SCOPE files (its @-prefixed pin wouldn't match the
 #     SCOPE regex anyway), so keep it current here or it rots (it had gone 10 minors stale).
 if [[ -f npm/README.md ]]; then
-  sed -i -E "s#(@asamarts/alint@|alint v)${CUR_ESCAPED}#\1${NEW}#g" npm/README.md
+  sed_inplace -E "s#(@asamarts/alint@|alint v)${CUR_ESCAPED}#\1${NEW}#g" npm/README.md
 fi
 
 # 3. CHANGELOG stub at top so the release date is captured.
@@ -291,7 +299,7 @@ if [[ -f CHANGELOG.md ]]; then
   #     the footer untouched (sed match misses; awk insert guards
   #     against an existing $NEW row).
   if grep -q "^\[Unreleased\]:" CHANGELOG.md; then
-    sed -i -E "s#^(\[Unreleased\]:[[:space:]]+https://github\.com/asamarts/alint/compare/v)${CUR_ESCAPED}(\.\.\.HEAD)\$#\1${NEW}\2#" CHANGELOG.md
+    sed_inplace -E "s#^(\[Unreleased\]:[[:space:]]+https://github\.com/asamarts/alint/compare/v)${CUR_ESCAPED}(\.\.\.HEAD)\$#\1${NEW}\2#" CHANGELOG.md
     if ! grep -q "^\[${NEW}\]:" CHANGELOG.md; then
       awk -v new="$NEW" -v cur="$CUR" '
         /^\[Unreleased\]:/ {

@@ -92,10 +92,6 @@ impl PerFileRule for FileEndsWithRule {
             Violation::new(msg).with_path(std::sync::Arc::<Path>::from(path)),
         ])
     }
-
-    fn max_bytes_needed(&self) -> Option<usize> {
-        Some(self.suffix.len())
-    }
 }
 
 pub static META: alint_core::KindMeta = alint_core::KindMeta {
@@ -240,5 +236,22 @@ mod tests {
         let vs = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
         let flagged: Vec<_> = vs.iter().filter_map(|v| v.path.as_deref()).collect();
         assert_eq!(flagged, [std::path::Path::new("bad.bin")], "{vs:?}");
+    }
+
+    #[test]
+    fn per_file_does_not_claim_prefix_truncation_cap() {
+        let spec = std::sync::Arc::new(spec_yaml(
+            "id: t\nkind: file_ends_with\npaths: \"**/*.txt\"\nsuffix: \"END\\n\"\nlevel: error\n",
+        ));
+        let registry = crate::builtin_registry();
+        let rule = registry.build(&spec).unwrap();
+        assert_eq!(rule.as_per_file().unwrap().max_bytes_needed(), None);
+        let (tmp, idx) = tempdir_with_files(&[("a.txt", b"much longer prefix than suffix\nEND\n")]);
+        let engine = alint_core::Engine::from_entries(
+            vec![alint_core::RuleEntry::new(rule).with_spec(spec)],
+            registry,
+        );
+        let report = engine.run(tmp.path(), &idx).unwrap();
+        assert!(report.results[0].violations.is_empty(), "{report:?}");
     }
 }

@@ -51,9 +51,10 @@ fi
 export CARGO_BUILD_JOBS
 echo "==> CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS} (bounding peak memory)"
 
-if ! command -v cargo-llvm-cov >/dev/null 2>&1; then
-  echo "==> Installing cargo-llvm-cov"
-  cargo install cargo-llvm-cov --locked
+CARGO_LLVM_COV_VERSION="0.9.2"
+if [[ "$(cargo llvm-cov --version 2>/dev/null | awk '{ print $NF }' || true)" != "${CARGO_LLVM_COV_VERSION}" ]]; then
+  echo "==> Installing cargo-llvm-cov ${CARGO_LLVM_COV_VERSION}"
+  RUSTFLAGS='' cargo install cargo-llvm-cov --locked --version "${CARGO_LLVM_COV_VERSION}"
 fi
 
 mkdir -p "$OUT_DIR"
@@ -83,8 +84,8 @@ LINE_COV=$(printf '%s\n' "$SUMMARY" | awk '
 ')
 
 if [[ -z "${LINE_COV:-}" ]]; then
-  echo "WARN: could not parse line coverage from summary; skipping floor check"
-  exit 0
+  echo "FAIL: could not parse line coverage from cargo llvm-cov summary" >&2
+  exit 1
 fi
 
 echo "==> Line coverage: ${LINE_COV}%, floor ${FLOOR}%"

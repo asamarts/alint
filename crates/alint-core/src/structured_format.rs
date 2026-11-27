@@ -394,7 +394,7 @@ impl Format {
             // error so genuinely-broken JSON reports accurately.
             Self::Json => serde_json::from_str(text)
                 .or_else(|strict_err| {
-                    let stripped = strip_jsonc(text);
+                    let stripped = strip_jsonc(text).map_err(|_| strict_err.to_string())?;
                     *held = stripped.capacity();
                     serde_json::from_str(&stripped).map_err(|_| strict_err.to_string())
                 })
@@ -543,14 +543,25 @@ impl Format {
 /// untouched. Only invoked when strict parsing already failed, so
 /// plain JSON never pays for it.
 ///
-/// One pass into one copy of the text: a comma outside a string waits
-/// while only whitespace follows it (a comment drops out as it goes, a
-/// line comment leaving its line break), and a `]` or `}` next drops it,
+/// One pass into one copy of the text: a trailing comma after a value waits
+/// while only whitespace or comments follow it, and a `]` or `}` next drops it,
 /// keeping the whitespace.
-fn strip_jsonc(src: &str) -> String {
+///
+/// Matches `jsonc-parser` on the four JSONC sharp edges:
+/// - `//` line comments end on `\r` as well as `\n` (lone CR is a line break);
+/// - `/* ... */` block comments emit a single space separator (preventing token
+///   pasting such as `1/*c*/2` -> `12` or `tr/*c*/ue` -> `true`);
+/// - unterminated `/*` block comments return `Err`;
+/// - a leading or consecutive comma (`[,]`, `{,}`, `[1,,]`) is NOT treated as a
+///   trailing comma so `serde_json` rejects it.
+fn strip_jsonc(src: &str) -> Result<String, &'static str> {
     let mut out = String::with_capacity(src.len());
-    // Where the comma waiting for a `]` or `}` sits in `out`.
+    // Where a candidate trailing comma (after a value/closing delim) sits in `out`.
     let mut comma: Option<usize> = None;
+    // Whether the last significant (non-whitespace, non-comment) token could
+    // legitimately be followed by a trailing comma (i.e. not start-of-input,
+    // `[`, `{`, `,`, or `:`).
+    let mut can_trail_comma = false;
     let mut chars = src.chars().peekable();
     let mut in_string = false;
     while let Some(c) = chars.next() {
@@ -562,14 +573,26 @@ fn strip_jsonc(src: &str) -> String {
                 }
             } else if c == '"' {
                 in_string = false;
+                can_trail_comma = true;
             }
             continue;
         }
         match c {
             '/' if chars.peek() == Some(&'/') => {
+                chars.next();
                 for n in chars.by_ref() {
                     if n == '\n' {
                         out.push('\n');
+                        break;
+                    }
+                    if n == '\r' {
+                        if chars.peek() == Some(&'\n') {
+                            chars.next();
+                            out.push('\r');
+                            out.push('\n');
+                        } else {
+                            out.push('\n');
+                        }
                         break;
                     }
                 }
@@ -578,16 +601,23 @@ fn strip_jsonc(src: &str) -> String {
             '/' if chars.peek() == Some(&'*') => {
                 chars.next();
                 let mut prev = '\0';
+                let mut closed = false;
                 for n in chars.by_ref() {
                     if prev == '*' && n == '/' {
+                        closed = true;
                         break;
                     }
                     prev = n;
                 }
+                if !closed {
+                    return Err("unterminated block comment");
+                }
+                out.push(' ');
                 continue;
             }
             ',' => {
-                comma = Some(out.len());
+                comma = can_trail_comma.then_some(out.len());
+                can_trail_comma = false;
                 out.push(c);
                 continue;
             }
@@ -595,6 +625,11 @@ fn strip_jsonc(src: &str) -> String {
                 if let Some(at) = comma.take() {
                     out.remove(at);
                 }
+                can_trail_comma = true;
+            }
+            '[' | '{' | ':' => {
+                comma = None;
+                can_trail_comma = false;
             }
             c if c.is_whitespace() => {
                 out.push(c);
@@ -603,12 +638,16 @@ fn strip_jsonc(src: &str) -> String {
             '"' => {
                 in_string = true;
                 comma = None;
+                can_trail_comma = false;
             }
-            _ => comma = None,
+            _ => {
+                comma = None;
+                can_trail_comma = true;
+            }
         }
         out.push(c);
     }
-    out
+    Ok(out)
 }
 
 /// Roughly what the TOML lexer holds while a document of `text` is parsed:

@@ -382,6 +382,7 @@ fn list_json(loaded: &LoadedConfig, objects: Option<&Plan>) -> Result<ExitCode> 
 }
 
 pub(super) fn cmd_facts(path: &Path, cli: &Cli) -> Result<ExitCode> {
+    crate::check::require_directory(path)?;
     let format = match Format::parse_for(&cli.format, &[Format::Human, Format::Json]) {
         Ok(Ok(fmt)) => fmt,
         Ok(Err(_)) => bail!(
@@ -449,9 +450,16 @@ pub(super) fn render_facts_human(
     let kind_width = facts.iter().map(|f| f.kind.name().len()).max().unwrap_or(0);
     let dim = style::DIM;
     for (spec, id) in facts.iter().zip(&ids) {
-        let value_str = values
-            .get(&spec.id)
-            .map_or_else(|| "(unresolved)".to_string(), fact_value_display);
+        let value_str = match values.get(&spec.id) {
+            // Redact raw string values BEFORE Debug-quoting so secrets with
+            // quotes/backslashes/newlines cannot evade literal matching.
+            Some(alint_core::FactValue::String(s)) => {
+                let redacted = super::redact_environment_values(s);
+                format!("{:?}", redacted.as_ref())
+            }
+            Some(v) => fact_value_display(v),
+            None => "(unresolved)".to_string(),
+        };
         // The kind column is the schema/type label (always
         // dimmed); value gets a tonal cue too — `true` reads
         // as success, `false` / `(unresolved)` as muted.
@@ -466,8 +474,7 @@ pub(super) fn render_facts_human(
             out,
             "{:<id_width$}  {dim}{kind_name}{dim:#}{kind_pad}  {value_style}{}{value_style:#}",
             term(id),
-            // A fact value can come from repo content or a `custom:` command,
-            // which can print a value its arguments read from the environment.
+            // Non-string values stay covered by the pass here too.
             term(&super::redact_environment_values(&value_str)),
         )?;
     }
@@ -663,7 +670,11 @@ fn write_analysis_time_explain(
             )?;
         }
         Some(AnalysisTimeResolution::Unavailable(error)) => {
-            writeln!(out, "{dim}analysis_time:{dim:#} unavailable ({error})")?;
+            writeln!(
+                out,
+                "{dim}analysis_time:{dim:#} unavailable ({})",
+                term(&error.to_string())
+            )?;
         }
         None => {}
     }

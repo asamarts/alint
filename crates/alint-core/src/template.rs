@@ -494,8 +494,10 @@ pub fn literal_glob_path(pattern: &str) -> Option<String> {
             '\\' if !cfg!(windows) => out.push(chars.next()?),
             '[' => {
                 // Only a single-char class `[x]` is literal (`[[]`, `[]]`, `[*]`).
+                // On Unix `globset` treats `\` as an escape inside `[...]`, so
+                // `[\]` escapes the closing bracket and is an invalid class.
                 let x = chars.next()?;
-                if matches!(x, '!' | '^') || chars.next()? != ']' {
+                if matches!(x, '!' | '^') || (!cfg!(windows) && x == '\\') || chars.next()? != ']' {
                     return None;
                 }
                 out.push(x);
@@ -2259,7 +2261,10 @@ mod tests {
                 '\\' if !cfg!(windows) => out.push(chars.next()?),
                 '[' => {
                     let x = chars.next()?;
-                    if matches!(x, '!' | '^') || chars.next()? != ']' {
+                    if matches!(x, '!' | '^')
+                        || (!cfg!(windows) && x == '\\')
+                        || chars.next()? != ']'
+                    {
                         return None;
                     }
                     out.push(x);
@@ -3170,5 +3175,10 @@ mod tests {
             literal_glob_path(&glob).as_deref(),
             Some("!important/[1].json")
         );
+        // On Unix, `[\]` escapes `]` in globset and is an invalid character class,
+        // never a literal `\`.
+        if !cfg!(windows) {
+            assert_eq!(literal_glob_path(r"a[\]b"), None);
+        }
     }
 }

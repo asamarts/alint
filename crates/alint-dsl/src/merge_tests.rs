@@ -114,11 +114,7 @@ mod reference {
         // rulesets are rejected upstream (`reject_allow_out_of_root_in`),
         // so in practice only the user's top-level config carries a
         // non-default value here.
-        let allow_out_of_root = if b.allow_out_of_root.is_confined() {
-            a.allow_out_of_root
-        } else {
-            b.allow_out_of_root
-        };
+        let allow_out_of_root = b.allow_out_of_root.or(a.allow_out_of_root);
         // `baseline:` is top-level-only (an `extends:`'d value is rejected upstream
         // by `reject_baseline_in`); the later (child) config wins when it sets one.
         let (baseline, baseline_from_environment) = if b.baseline.is_some() {
@@ -684,12 +680,13 @@ fn with_settings(settings: Settings) -> RawConfig {
         fix_size_limit,
         nested_configs,
         allow_out_of_root: match allow_out_of_root {
-            0 => AllowOutOfRoot::Confined,
-            1 => AllowOutOfRoot::All,
-            _ => AllowOutOfRoot::Selective {
+            0 => None,
+            1 => Some(AllowOutOfRoot::Confined),
+            2 => Some(AllowOutOfRoot::All),
+            _ => Some(AllowOutOfRoot::Selective {
                 kinds: ["file_exists".to_string()].into(),
                 rules: std::collections::HashSet::new(),
-            },
+            }),
         },
         baseline: baseline.map(|index| PathBuf::from(format!("b{index}.json"))),
         surface: if v2_surface {

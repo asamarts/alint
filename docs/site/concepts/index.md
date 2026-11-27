@@ -128,7 +128,9 @@ The `when:` grammar supports boolean logic (`and` / `or` / `not`), comparison (`
 
 ## Auto-fix
 
-Rules that opt in declare a `fix:` block. Twelve ops cover content edits (trim whitespace, append newline, normalize line endings, strip BOM / bidi / zero-width, collapse blank lines) and path-level changes (create / remove / rename / prepend / append).
+<!-- alint:since=0.23.0 -->
+Rules that opt in declare a `fix:` block. Twenty-six ops cover content edits (trim whitespace, append newline, normalize line endings, strip BOM / bidi / zero-width, collapse blank lines, regex `replace`, structured `set_value` / `remove_value`, `sync_from`, `sort`, `insert_line`, `insert_header`, `indent_style`, `create_and_register`) and path-level changes (create / remove / rename / relocate / chmod / git_untrack / command).
+<!-- /alint:since -->
 
 ```yaml
 - id: trim-trailing-whitespace
@@ -145,8 +147,11 @@ Preview with `alint fix --dry-run`; apply with `alint fix`. Content-editing ops 
 
 Eight formats: `human` (default; colorized; grouped by file), `json` (stable schema), `sarif` (SARIF 2.1.0 for GitHub Code Scanning), `github` (`::error::` / `::warning::` workflow commands for inline PR annotations), `markdown` (PR-comment tables), `junit` (CI test-report shape), `gitlab` (Code Quality), `agent` (LLM-shaped JSON with per-violation `agent_instruction`).
 
+<!-- alint:since=0.23.0 -->
 ```bash
-alint check --format json --compact
+alint check --compact         # one-line human output for grep / editors
+alint check --format json     # machine-readable JSON report
 ```
+<!-- /alint:since -->
 
 The `--compact` flag flips human output to one line per violation, suitable for piping to editors / grep / `wc -l`.

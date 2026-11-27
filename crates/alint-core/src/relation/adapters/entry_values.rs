@@ -531,7 +531,12 @@ impl<'d> Document<'d> {
         pending.reverse();
         while let Some(index) = pending.pop() {
             let below = self.entries.rows[index].path;
-            if !self.has_members(below) {
+            let is_object = self
+                .entries
+                .values
+                .get(index)
+                .is_none_or(|value| matches!(value, EntryValue::Object));
+            if !is_object || !self.has_members(below) {
                 found.push(index);
             } else if !std::mem::replace(&mut walked[below.index()], true) {
                 let start = pending.len();

@@ -295,6 +295,12 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
             "command rule's `command:` argv must not be empty",
         ));
     }
+    if opts.timeout == Some(0) {
+        return Err(Error::rule_config(
+            &spec.id,
+            "command rule's `timeout` must be >= 1",
+        ));
+    }
     // The only supported fix op is `command`: a user-supplied `run:` argv. It is
     // spawning, so `alint_dsl::reject_spawning_fix_ops_in` already refused it from
     // any non-top-level source before this builder runs (a ruleset the user
@@ -306,6 +312,12 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
                 return Err(Error::rule_config(
                     &spec.id,
                     "command fix's `run:` argv must not be empty",
+                ));
+            }
+            if command.timeout == Some(0) {
+                return Err(Error::rule_config(
+                    &spec.id,
+                    "command fix's `timeout` must be >= 1",
                 ));
             }
             Some(CommandFixFixer::new(
@@ -687,5 +699,17 @@ command: ["/bin/sh", "-c", "exit 1"]
         let v = r.evaluate(&ctx(tmp.path(), &index)).unwrap();
         assert_eq!(v.len(), 1, "only in-scope file should fire: {v:?}");
         assert_eq!(v[0].path.as_deref(), Some(Path::new("pkg/a.txt")));
+    }
+
+    #[test]
+    fn build_rejects_zero_timeout_on_rule_and_fix() {
+        let rule_zero = "id: t\nkind: command\nlevel: error\npaths: \"*.sh\"\ncommand: [\"true\"]\ntimeout: 0\n";
+        let spec: RuleSpec = alint_core::yaml::from_str(rule_zero).unwrap();
+        assert!(build(&spec).is_err());
+
+        let fix_zero = "id: t\nkind: command\nlevel: error\npaths: \"*.sh\"\ncommand: [\"true\"]\n\
+                        fix:\n  command:\n    run: [\"true\"]\n    timeout: 0\n";
+        let spec: RuleSpec = alint_core::yaml::from_str(fix_zero).unwrap();
+        assert!(build(&spec).is_err());
     }
 }

@@ -270,8 +270,70 @@ struct Derived {
     refusal: Option<String>,
 }
 
+fn strip_disallowed_fixes(
+    value: &mut Yaml,
+    catalog: KindCatalog<'_>,
+    parent_id: &str,
+    dropped: &mut Vec<String>,
+) {
+    match value {
+        Yaml::Mapping(map) => {
+            if map
+                .get("fix")
+                .is_some_and(|fix| fix_must_not_run(fix, catalog))
+            {
+                map.remove("fix");
+                dropped.push(format!("{parent_id} (fix)"));
+            }
+            for (k, v) in map.iter_mut() {
+                if k.as_str() != Some("fix") {
+                    strip_disallowed_fixes(v, catalog, parent_id, dropped);
+                }
+            }
+        }
+        Yaml::Sequence(items) => {
+            for item in items {
+                strip_disallowed_fixes(item, catalog, parent_id, dropped);
+            }
+        }
+        Yaml::Tagged(tagged) => {
+            strip_disallowed_fixes(&mut tagged.value, catalog, parent_id, dropped);
+        }
+        _ => {}
+    }
+}
+
+fn non_bundled_extends(doc: &Yaml) -> Vec<String> {
+    let mut bad = Vec::new();
+    let Some(extends) = doc.get("extends") else {
+        return bad;
+    };
+    let check_entry = |entry: &Yaml, bad: &mut Vec<String>| {
+        let target = entry
+            .as_str()
+            .or_else(|| entry.get("url").and_then(Yaml::as_str))
+            .or_else(|| entry.get("path").and_then(Yaml::as_str));
+        match target {
+            Some(s) if s.starts_with("alint://bundled/") => {}
+            Some(s) => bad.push(s.to_string()),
+            None => bad.push("<non-string extends entry>".to_string()),
+        }
+    };
+    match extends {
+        Yaml::Sequence(items) => {
+            for item in items {
+                check_entry(item, &mut bad);
+            }
+        }
+        Yaml::Null => {}
+        other => check_entry(other, &mut bad),
+    }
+    bad
+}
+
 fn derive_config(source: &str, catalog: KindCatalog<'_>) -> Result<Derived> {
     let mut doc: Yaml = alint_core::yaml::from_str(source).context("parse the config")?;
+    let mut refusals: Vec<String> = Vec::new();
     let custom_facts: Vec<String> = doc
         .get("facts")
         .and_then(Yaml::as_sequence)
@@ -285,13 +347,54 @@ fn derive_config(source: &str, catalog: KindCatalog<'_>) -> Result<Derived> {
                 .to_string()
         })
         .collect();
-    let refusal = (!custom_facts.is_empty()).then(|| {
-        format!(
+    if !custom_facts.is_empty() {
+        refusals.push(format!(
             "custom facts run commands, so the config is not run: {}",
             custom_facts.join(", ")
-        )
-    });
+        ));
+    }
+    if let Some(aor) = doc.get("allow_out_of_root")
+        && !matches!(aor, Yaml::Bool(false) | Yaml::Null)
+    {
+        refusals.push(
+            "allow_out_of_root is forbidden in corpus replay (would allow reads outside checkout)"
+                .to_string(),
+        );
+    }
+    if doc.get("nested_configs").and_then(Yaml::as_bool) == Some(true) {
+        refusals.push(
+            "nested_configs: true is forbidden in corpus replay (would load untrusted repo configs)"
+                .to_string(),
+        );
+    }
+    let bad_extends = non_bundled_extends(&doc);
+    if !bad_extends.is_empty() {
+        refusals.push(format!(
+            "non-bundled extends entries are forbidden in corpus replay: {}",
+            bad_extends.join(", ")
+        ));
+    }
+    let refusal = (!refusals.is_empty()).then(|| refusals.join("; "));
+
     let mut dropped = Vec::new();
+    let mut dropped_templates: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
+    if let Some(templates) = doc.get_mut("templates").and_then(Yaml::as_sequence_mut) {
+        templates.retain_mut(|tpl| {
+            let id = tpl
+                .get("id")
+                .and_then(Yaml::as_str)
+                .unwrap_or("<no id>")
+                .to_string();
+            if rule_must_not_run(tpl, catalog) {
+                dropped_templates.insert(id.clone());
+                dropped.push(format!("template:{id}"));
+                return false;
+            }
+            strip_disallowed_fixes(tpl, catalog, &format!("template:{id}"), &mut dropped);
+            true
+        });
+    }
     if let Some(rules) = doc.get_mut("rules").and_then(Yaml::as_sequence_mut) {
         rules.retain_mut(|rule| {
             let id = rule
@@ -299,18 +402,16 @@ fn derive_config(source: &str, catalog: KindCatalog<'_>) -> Result<Derived> {
                 .and_then(Yaml::as_str)
                 .unwrap_or("<no id>")
                 .to_string();
-            if rule_must_not_run(rule, catalog) {
+            let refs_dropped_template = rule
+                .get("extends_template")
+                .or_else(|| rule.get("template"))
+                .and_then(Yaml::as_str)
+                .is_some_and(|tpl| dropped_templates.contains(tpl));
+            if refs_dropped_template || rule_must_not_run(rule, catalog) {
                 dropped.push(id);
                 return false;
             }
-            if let Some(map) = rule.as_mapping_mut()
-                && map
-                    .get("fix")
-                    .is_some_and(|fix| fix_must_not_run(fix, catalog))
-            {
-                map.remove("fix");
-                dropped.push(format!("{id} (fix)"));
-            }
+            strip_disallowed_fixes(rule, catalog, &id, &mut dropped);
             true
         });
     }
@@ -1960,5 +2061,94 @@ rules:
                 "corpus-replay.yml missing {snippet:?}"
             );
         }
+    }
+
+    #[test]
+    fn derive_config_blocks_templates_nested_configs_out_of_root_extends_and_nested_fixes() {
+        let registry = alint_rules::builtin_registry();
+        let catalog = registry.catalog();
+
+        // 1. Spawning template + rule referencing it are both dropped.
+        let tpl_cfg = r#"
+version: 1
+templates:
+  - id: run-cmd
+    kind: command
+    paths: "*.rs"
+    command: ["sh", "-c", "evil"]
+    level: error
+rules:
+  - id: sneaky
+    extends_template: run-cmd
+  - id: safe
+    kind: file_exists
+    paths: README.md
+    level: error
+"#;
+        let derived = derive_config(tpl_cfg, catalog).unwrap();
+        assert!(derived.refusal.is_none());
+        assert!(derived.dropped.contains(&"template:run-cmd".to_string()));
+        assert!(derived.dropped.contains(&"sneaky".to_string()));
+        assert!(!derived.yaml.contains("run-cmd"));
+        assert!(derived.yaml.contains("safe"));
+
+        // 2. Nested `require:` spawning fix is stripped recursively.
+        let nested_fix_cfg = r#"
+version: 1
+rules:
+  - id: per-pkg
+    kind: for_each_dir
+    paths: "crates/*"
+    level: error
+    require:
+      - id: inner
+        kind: file_exists
+        paths: README.md
+        level: error
+        fix: { command: { run: ["sh", "-c", "evil"] } }
+"#;
+        let derived = derive_config(nested_fix_cfg, catalog).unwrap();
+        assert!(derived.refusal.is_none());
+        assert!(derived.dropped.contains(&"per-pkg (fix)".to_string()));
+        assert!(!derived.yaml.contains("evil"));
+
+        // 3. `allow_out_of_root`, `nested_configs: true`, and non-bundled `extends:` are refused.
+        for (label, cfg) in [
+            (
+                "allow_out_of_root true",
+                "version: 1\nallow_out_of_root: true\nrules: []\n",
+            ),
+            (
+                "allow_out_of_root map",
+                "version: 1\nallow_out_of_root: { rules: [a] }\nrules: []\n",
+            ),
+            (
+                "nested_configs",
+                "version: 1\nnested_configs: true\nrules: []\n",
+            ),
+            (
+                "remote extends",
+                "version: 1\nextends: ['https://evil.example/a.yml']\nrules: []\n",
+            ),
+            (
+                "local extends",
+                "version: 1\nextends: ['../outside.yml']\nrules: []\n",
+            ),
+        ] {
+            let derived = derive_config(cfg, catalog).unwrap();
+            assert!(
+                derived.refusal.is_some(),
+                "{label} must be refused by derive_config: {}",
+                derived.yaml
+            );
+        }
+
+        // Bundled extends remains allowed.
+        let ok = derive_config(
+            "version: 1\nextends: ['alint://bundled/rust@v1']\nrules: []\n",
+            catalog,
+        )
+        .unwrap();
+        assert!(ok.refusal.is_none(), "{:?}", ok.refusal);
     }
 }

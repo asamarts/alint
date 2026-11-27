@@ -64,20 +64,86 @@ else
   fail=1
 fi
 
-echo "==> emacs/alint.el (byte-compile)"
+echo "==> emacs/alint.el (byte-compile + eglot precedence & risky vars)"
 if command -v emacs >/dev/null 2>&1; then
   # Compile a copy in a temp dir so no .elc lands in the source tree.
   tmp="$(mktemp -d)"
   cp "$root/emacs/alint.el" "$tmp/alint.el"
-  if emacs --batch -f batch-byte-compile "$tmp/alint.el" 2>&1; then
+  if emacs --batch -f batch-byte-compile "$tmp/alint.el" 2>&1 \
+    && emacs --batch -L "$tmp" --eval '
+      (require (quote eglot))
+      (require (quote alint))
+      (unless (get (quote alint-command) (quote risky-local-variable))
+        (error "alint-command must be marked :risky t"))
+      (unless (get (quote alint-trusted) (quote risky-local-variable))
+        (error "alint-trusted must be marked :risky t"))
+      (alint-setup)
+      (alint-setup)
+      (let ((alint-entries (seq-filter (lambda (e) (and (listp (cdr e)) (equal (car (cdr e)) "alint"))) eglot-server-programs)))
+        (unless (= (length alint-entries) 1)
+          (error "alint-setup must deduplicate entries, got %d" (length alint-entries))))
+      (let ((rust-first (cl-find-if (lambda (e)
+                          (let ((modes (car e)))
+                            (or (eq modes (quote rust-mode))
+                                (and (listp modes) (memq (quote rust-mode) modes)))))
+                        eglot-server-programs)))
+        (when (and (listp (cdr rust-first)) (equal (car (cdr rust-first)) "alint"))
+          (error "alint shadowed built-in rust-mode Eglot server: %S" rust-first)))
+    ' 2>&1; then
     echo "  ok"
   else
-    echo "  FAIL: byte-compile error" >&2
+    echo "  FAIL: emacs check error" >&2
     fail=1
   fi
   rm -rf "$tmp"
 else
   echo "  SKIP (emacs not on PATH)"
+fi
+
+echo "==> emacs/README.md (lsp-mode fallback append)"
+if python3 - "$root/emacs/README.md" <<'PY'; then
+import re, sys
+text = open(sys.argv[1]).read()
+for m in re.finditer(r'\(add-to-list\s+\x27lsp-language-id-configuration[^\n]*\.\*[^\n]*\)', text):
+    if not re.search(r'\bt\s*\)\s*$', m.group(0)):
+        sys.stderr.write(f"lsp-language-id-configuration wildcard missing APPEND t: {m.group(0)}\n")
+        sys.exit(1)
+PY
+  echo "  ok"
+else
+  echo "  FAIL: emacs README lsp-mode snippet" >&2
+  fail=1
+fi
+
+echo "==> zed/extension.toml (TOML)"
+if python3 -c 'import tomllib,sys; d=tomllib.load(open(sys.argv[1],"rb")); assert "language_servers" in d and "alint" in d["language_servers"]' \
+  "$root/zed/extension.toml"; then
+  echo "  ok"
+else
+  echo "  FAIL: invalid zed/extension.toml" >&2
+  fail=1
+fi
+
+echo "==> vscode/package.json (JSON + activationEvents config parity)"
+if python3 - "$root/vscode/package.json" <<'PY'; then
+import json, sys
+pkg = json.load(open(sys.argv[1]))
+events = set(pkg.get("activationEvents", []))
+required = {
+    "workspaceContains:**/.alint.yml",
+    "workspaceContains:**/.alint.yaml",
+    "workspaceContains:**/alint.yml",
+    "workspaceContains:**/alint.yaml",
+}
+missing = sorted(required - events)
+if missing:
+    sys.stderr.write(f"missing activationEvents: {missing}\n")
+    sys.exit(1)
+PY
+  echo "  ok"
+else
+  echo "  FAIL: vscode/package.json" >&2
+  fail=1
 fi
 
 if [[ "$fail" == 0 ]]; then

@@ -295,7 +295,7 @@ The anti-drift answer here is a split, not a single tool.
 
 **Code-extracted (cannot drift, regenerated every CI run):**
 
-- `cargo-depgraph` -> the 10-crate workspace dependency graph (SVG).
+- `cargo-depgraph` -> the 11-crate workspace dependency graph (SVG).
 - `cargo-modules` -> per-crate module structure and internal dependency graphs (SVG), plus
   its `--acyclic` flag as a **CI gate** that fails on any new module cycle.
 - These are committed and guarded by the same regenerate-and-diff gate as WS1 (again via

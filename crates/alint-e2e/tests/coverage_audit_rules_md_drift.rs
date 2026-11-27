@@ -269,3 +269,209 @@ fn extracted_yaml_ids_are_stable_for_known_ruleset() {
         );
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RuleTableRow {
+    id: String,
+    kind: Option<String>,
+    level: Option<String>,
+    fix: Option<String>,
+}
+
+#[derive(Default)]
+struct TableColumns {
+    kind: Option<usize>,
+    level: Option<usize>,
+    fix: Option<usize>,
+}
+
+fn first_backticked(cell: &str) -> Option<String> {
+    let (_, rest) = cell.split_once('`')?;
+    let (tok, _) = rest.split_once('`')?;
+    let tok = tok.trim();
+    (!tok.is_empty()).then(|| tok.to_string())
+}
+
+fn parse_table_header(line: &str) -> Option<TableColumns> {
+    let trimmed = line.trim();
+    if !trimmed.starts_with("| Rule id ") && !trimmed.starts_with("| Rule id|") {
+        return None;
+    }
+    let headers: Vec<String> = trimmed
+        .trim_matches('|')
+        .split('|')
+        .map(|s| s.trim().to_ascii_lowercase())
+        .collect();
+    let mut cols = TableColumns::default();
+    for (idx, h) in headers.iter().enumerate() {
+        match h.as_str() {
+            "kind" => cols.kind = Some(idx),
+            "default level" | "level" => cols.level = Some(idx),
+            "fix" => cols.fix = Some(idx),
+            _ => {}
+        }
+    }
+    Some(cols)
+}
+
+fn parse_full_rule_table_row(line: &str, cols: &TableColumns) -> Option<RuleTableRow> {
+    let trimmed = line.trim();
+    if !trimmed.starts_with("| `") {
+        return None;
+    }
+    let cells: Vec<&str> = trimmed
+        .trim_matches('|')
+        .split('|')
+        .map(str::trim)
+        .collect();
+    let id = first_backticked(cells.first()?)?;
+    let kind = cols
+        .kind
+        .and_then(|i| cells.get(i))
+        .and_then(|c| first_backticked(c));
+    let level = cols.level.and_then(|i| cells.get(i)).map(|c| {
+        c.split_whitespace()
+            .next()
+            .unwrap_or("")
+            .trim_matches('`')
+            .to_ascii_lowercase()
+    });
+    let fix = cols
+        .fix
+        .and_then(|i| cells.get(i))
+        .and_then(|c| first_backticked(c));
+    Some(RuleTableRow {
+        id,
+        kind,
+        level,
+        fix,
+    })
+}
+
+fn collect_yaml_ruleset_rows() -> BTreeMap<String, BTreeMap<String, RuleTableRow>> {
+    let base = workspace_root().join("crates/alint-dsl/rulesets");
+    let mut out = BTreeMap::new();
+    let mut stack = vec![base.clone()];
+    while let Some(dir) = stack.pop() {
+        for entry in fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if path.extension().and_then(|e| e.to_str()) != Some("yml") {
+                continue;
+            }
+            let rel = path.strip_prefix(&base).unwrap().with_extension("");
+            let components: Vec<String> = rel
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                .collect();
+            let (rev, name) = components.split_first().unwrap();
+            let uri = format!("alint://bundled/{}@{rev}", name.join("/"));
+            let text = fs::read_to_string(&path).unwrap();
+            let doc: ayaml::Value = alint_core::yaml::from_str(&text).unwrap();
+            let mut map = BTreeMap::new();
+            if let Some(rules) = doc.get("rules").and_then(ayaml::Value::as_sequence) {
+                for rule in rules {
+                    let Some(id) = rule.get("id").and_then(ayaml::Value::as_str) else {
+                        continue;
+                    };
+                    let kind = rule
+                        .get("kind")
+                        .and_then(ayaml::Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    let level = rule
+                        .get("level")
+                        .and_then(ayaml::Value::as_str)
+                        .unwrap_or("")
+                        .to_ascii_lowercase();
+                    let fix = rule
+                        .get("fix")
+                        .and_then(ayaml::Value::as_mapping)
+                        .and_then(|m| m.keys().next())
+                        .and_then(ayaml::Value::as_str)
+                        .map(String::from);
+                    map.insert(
+                        id.to_string(),
+                        RuleTableRow {
+                            id: id.to_string(),
+                            kind: Some(kind),
+                            level: Some(level),
+                            fix,
+                        },
+                    );
+                }
+            }
+            out.insert(uri, map);
+        }
+    }
+    out
+}
+
+#[test]
+fn every_documented_ruleset_table_row_matches_yaml_kind_level_and_fix() {
+    let yaml = collect_yaml_ruleset_rows();
+    let text = fs::read_to_string(workspace_root().join("docs/rules.md")).unwrap();
+
+    let mut current_uri: Option<String> = None;
+    let mut current_cols: Option<TableColumns> = None;
+    let mut failures = Vec::new();
+    for raw in text.lines() {
+        let line = raw.trim_end();
+        if line.starts_with("### ") {
+            current_uri = parse_uri_heading(line);
+            current_cols = None;
+            continue;
+        }
+        if line.starts_with("## ") || line.starts_with("# ") {
+            current_uri = None;
+            current_cols = None;
+            continue;
+        }
+        let Some(uri) = &current_uri else {
+            continue;
+        };
+        if let Some(cols) = parse_table_header(line) {
+            current_cols = Some(cols);
+            continue;
+        }
+        let Some(cols) = &current_cols else {
+            continue;
+        };
+        let Some(doc_row) = parse_full_rule_table_row(line, cols) else {
+            continue;
+        };
+        let Some(yaml_rows) = yaml.get(uri) else {
+            continue;
+        };
+        let Some(yaml_row) = yaml_rows.get(&doc_row.id) else {
+            continue;
+        };
+        if cols.kind.is_some() && doc_row.kind != yaml_row.kind {
+            failures.push(format!(
+                "{uri} `{}`: docs kind `{:?}` != YAML kind `{:?}`",
+                doc_row.id, doc_row.kind, yaml_row.kind
+            ));
+        }
+        if cols.level.is_some() && doc_row.level != yaml_row.level {
+            failures.push(format!(
+                "{uri} `{}`: docs level `{:?}` != YAML level `{:?}`",
+                doc_row.id, doc_row.level, yaml_row.level
+            ));
+        }
+        if cols.fix.is_some() && doc_row.fix != yaml_row.fix {
+            failures.push(format!(
+                "{uri} `{}`: docs fix `{:?}` != YAML fix `{:?}`",
+                doc_row.id, doc_row.fix, yaml_row.fix
+            ));
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "docs/rules.md bundled-ruleset table cell drift:\n  - {}",
+        failures.join("\n  - "),
+    );
+}

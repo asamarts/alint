@@ -6,7 +6,8 @@
 # hygiene). Adopt with:
 #
 #     extends:
-#       - alint://bundled/monorepo@v1
+#       - url: alint://bundled/monorepo@v1
+#         except: [monorepo-packages-have-readme]
 #       - alint://bundled/rust@v1
 #       - alint://bundled/monorepo/cargo-workspace@v1
 #
@@ -54,20 +55,25 @@ facts:
     file_content_matches:
       paths: Cargo.toml
       pattern: '(?m)^\[workspace\]'
+  - id: is_cargo_root_package
+    file_content_matches:
+      paths: Cargo.toml
+      pattern: '(?m)^\[package\]'
 
 rules:
-  # The workspace root must declare its members. A `[workspace]`
-  # table without `members = [...]` is broken — Cargo rejects it.
-  # Catching this here keeps the failure local to alint output.
+  # Virtual workspaces (`[workspace]` without `[package]`) must
+  # declare `members = [...]` — Cargo rejects an empty virtual
+  # manifest. Non-virtual workspaces (root `[package]` + `[workspace]`)
+  # validly omit `members` and are not flagged.
   - id: cargo-workspace-members-declared
-    when: facts.is_cargo_workspace
+    when: facts.is_cargo_workspace and not facts.is_cargo_root_package
     kind: toml_path_matches
     paths: Cargo.toml
     path: "$.workspace.members[*]"
     matches: ".+"
     level: error
     message: >-
-      Cargo workspace must declare `members = [...]` under
+      Virtual Cargo workspace must declare `members = [...]` under
       `[workspace]`. Without it, `cargo build` fails to resolve
       the package graph.
     policy_url: "https://doc.rust-lang.org/cargo/reference/workspaces.html"

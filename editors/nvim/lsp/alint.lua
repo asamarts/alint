@@ -37,8 +37,14 @@ return {
 
   -- Prefer the Git root first so a vendored `.alint.yml` in a subdirectory
   -- does not become its own workspace root; fall back to a config file outside
-  -- a Git repository.
-  root_markers = { { ".git" }, { ".alint.yml", ".alint.yaml", "alint.yml", "alint.yaml" } },
+  -- a Git repository. Using a `root_dir` callback works across all Neovim
+  -- 0.11.x releases (nested `root_markers` tables crashed in 0.11.0-0.11.2).
+  root_dir = function(bufnr, on_dir)
+    on_dir(
+      vim.fs.root(bufnr, ".git")
+        or vim.fs.root(bufnr, { ".alint.yml", ".alint.yaml", "alint.yml", "alint.yaml" })
+    )
+  end,
 
   -- Until it is told the workspace is trusted, the server runs nothing the
   -- repository's config could start (command rules, rules that run Git,

@@ -192,19 +192,20 @@ pub fn load(path: &Path) -> Result<Config> {
 /// config carries them so an embedder can scrub a later error the same way.
 pub fn load_with(path: &Path, opts: &LoadOptions<'_>) -> Result<Config> {
     let raw = load_top_level_raw(path, opts)?;
-    let mut environment_values = raw.environment_values.clone();
-    load_resolved(path, opts, raw, &mut environment_values)
+    let environment_values = raw.environment_values.clone();
+    load_resolved(path, opts, raw, &environment_values)
         .map_err(|error| alint_core::redact_environment_values_in_error(error, &environment_values))
 }
 
 /// Discover the nested configs of the resolved top-level `raw`, then finalise
-/// and validate the whole. The nested configs' environment values are added to
-/// `environment_values` too, so a later error is scrubbed of them.
+/// and validate the whole. Nested configs may not interpolate host environment
+/// values; `environment_values` carries the root config's values so nested
+/// errors are still scrubbed of any echoed root values.
 fn load_resolved(
     path: &Path,
     opts: &LoadOptions<'_>,
     mut raw: RawConfig,
-    environment_values: &mut Vec<String>,
+    environment_values: &[String],
 ) -> Result<Config> {
     // Nested `.alint.yml` discovery (opt-in via `nested_configs:
     // true` on the root config). Walks from the root config's
@@ -227,7 +228,7 @@ fn load_resolved(
                     source,
                 })?;
         let mut field_source_names = std::mem::take(&mut raw.field_source_names);
-        let (discovered_rules, discovered_compatibility, discovered_environment_values) =
+        let (discovered_rules, discovered_compatibility, discovered_when_var_reads) =
             nested::discover_nested(
                 &root_dir,
                 &canonical_root_cfg,
@@ -235,12 +236,14 @@ fn load_resolved(
                 opts,
                 RunningVersion::current(),
                 &mut field_source_names,
+                environment_values,
             )?;
         raw.field_source_names = field_source_names;
         raw.rules.extend(discovered_rules);
+        raw.untrusted_when_var_reads
+            .extend(discovered_when_var_reads);
         merge::extend_compatibility(&mut raw.compatibility, discovered_compatibility);
-        loader::add_environment_values(environment_values, &discovered_environment_values);
-        loader::add_environment_values(&mut raw.environment_values, &discovered_environment_values);
+        merge::check_raw_size(&raw)?;
     }
 
     let surface = raw.surface;
@@ -285,22 +288,23 @@ pub fn nested_configs_enabled_with(path: &Path, opts: &LoadOptions<'_>) -> Resul
 fn nested_configs_key(path: &Path, source: &dyn ConfigSourceProvider) -> Result<Option<bool>> {
     #[derive(Deserialize)]
     struct NestedConfigsKey {
-        #[serde(default)]
+        #[serde(default, deserialize_with = "deserialize_explicit")]
         nested_configs: Option<bool>,
     }
     let contents = source.read_to_string(path).map_err(|source| Error::Io {
         path: path.to_path_buf(),
         source,
     })?;
-    let guards = alint_core::yaml_depth::scan_guards(&contents);
-    if !guards.flow_within_limit() || !guards.expansion_within_limit(&contents) {
+    let shown = path.display().to_string();
+    let text = config_text(&contents, &shown)?;
+    let guards = alint_core::yaml_depth::scan_guards(text);
+    if !guards.flow_within_limit() || !guards.expansion_within_limit(text) {
         return Err(Error::Other(format!(
-            "{}: YAML nesting or alias expansion exceeds the supported limits",
-            path.display()
+            "{shown}: YAML nesting or alias expansion exceeds the supported limits"
         )));
     }
-    let key: NestedConfigsKey = loader::decode_text(&contents)
-        .map_err(|error| Error::Other(format!("{}: YAML parse error: {error}", path.display())))?;
+    let key: NestedConfigsKey = loader::decode_text(text)
+        .map_err(|error| Error::Other(format!("{shown}: YAML parse error: {error}")))?;
     Ok(key.nested_configs)
 }
 
@@ -477,12 +481,13 @@ pub(crate) struct RawConfig {
     #[serde(default, deserialize_with = "deserialize_explicit_limits")]
     limits: alint_core::ConfigLimits,
     /// `allow_out_of_root:` — the top-level escape hatch for path
-    /// confinement. Parsed here (the YAML-facing form); the loader
-    /// rejects a non-default value from any `extends:`'d ruleset, and
-    /// `finalize()` carries the surviving (top-level) value onto
-    /// `Config`. See `docs/design/v0.12/allow_out_of_root.md`.
-    #[serde(default)]
-    allow_out_of_root: alint_core::AllowOutOfRoot,
+    /// confinement. Parsed here as `Option` so a `.alint.d/` drop-in declaring
+    /// `allow_out_of_root: false` overrides a root `allow_out_of_root: true`;
+    /// the loader rejects a non-default value from any `extends:`'d ruleset,
+    /// and `finalize()` carries the surviving (top-level) value onto `Config`.
+    /// See `docs/design/v0.12/allow_out_of_root.md`.
+    #[serde(default, deserialize_with = "deserialize_explicit")]
+    allow_out_of_root: Option<alint_core::AllowOutOfRoot>,
     /// `baseline:` — path to a committed baseline file `check` suppresses
     /// against (the YAML-facing form). Top-level-only: the loader rejects a
     /// value from any `extends:`'d/nested config, and `finalize()` carries the
@@ -610,6 +615,7 @@ impl RawConfig {
         // `version:` describes the extended file itself, not the consumer.
         self.version = None;
         self.requires = None;
+        self.allow_out_of_root = None;
         [
             ("respect_gitignore", self.respect_gitignore.take().is_some()),
             ("fix_size_limit", self.fix_size_limit.take().is_some()),
@@ -841,7 +847,7 @@ impl RawConfig {
             .with_fix_size_limit(self.fix_size_limit.unwrap_or(DEFAULT_FIX_SIZE_LIMIT))
             .with_nested_configs(self.nested_configs.unwrap_or(false))
             .with_limits(self.limits)
-            .with_allow_out_of_root(self.allow_out_of_root)
+            .with_allow_out_of_root(self.allow_out_of_root.unwrap_or_default())
             .with_baseline(self.baseline)
             .with_baseline_from_environment(self.baseline_from_environment)
             .with_compatibility(self.compatibility)

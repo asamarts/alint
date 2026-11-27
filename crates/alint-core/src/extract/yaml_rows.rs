@@ -161,7 +161,9 @@ struct YamlNode {
     /// Where the node's event starts: a key's location when it has no span
     /// (a block scalar, or an empty key).
     start: Option<usize>,
-    style: Option<ScalarStyle>,
+    /// Whether this scalar node is a YAML 1.1 merge key (`<<` plain without
+    /// non-merge tag, or explicitly tagged `!!merge`, matching `duplicate_keys.rs`).
+    is_merge: bool,
     /// What the node holds, when the walk records values.
     value: Option<EntryValue>,
 }
@@ -221,11 +223,15 @@ impl YamlWalk<'_, '_> {
                 value, style, tag, ..
             } => {
                 *index += 1;
+                let is_merge = match tag.as_ref() {
+                    Some(tag) => tag.is_core() && tag.suffix() == "merge" && value == "<<",
+                    None => *style == ScalarStyle::Plain && value == "<<",
+                };
                 Ok(YamlNode {
                     scalar: Some(value.to_string()),
                     span: yaml_scalar_span(event_span, *style, offset),
                     start: event_start,
-                    style: Some(*style),
+                    is_merge,
                     value: self
                         .values
                         .then(|| scalar_value(value, *style, tag.as_ref())),
@@ -242,7 +248,7 @@ impl YamlWalk<'_, '_> {
                     scalar: None,
                     span: yaml_token_span(event_span, offset),
                     start: event_start,
-                    style: None,
+                    is_merge: false,
                     value: Some(EntryValue::Unreadable),
                 })
             }
@@ -265,7 +271,7 @@ impl YamlWalk<'_, '_> {
                         .then(|| yaml_flow_container_span(start, end, offset, text, b'[', b']'))
                         .flatten(),
                     start: event_start,
-                    style: None,
+                    is_merge: false,
                     value: Some(EntryValue::Array),
                 })
             }
@@ -276,10 +282,7 @@ impl YamlWalk<'_, '_> {
                 while !matches!(events.get(*index), Some(Event::MappingEnd { .. })) {
                     let key = self.node(index, false)?;
                     if let Some(key_text) = key.scalar {
-                        if reject_yaml_features
-                            && key_text == "<<"
-                            && key.style == Some(ScalarStyle::Plain)
-                        {
+                        if reject_yaml_features && key.is_merge {
                             return Err(EntryRowsError::Parse(
                                 "YAML merge keys are not supported for key extraction".to_string(),
                             ));
@@ -342,7 +345,7 @@ impl YamlWalk<'_, '_> {
                         .then(|| yaml_flow_container_span(start, end, offset, text, b'{', b'}'))
                         .flatten(),
                     start: event_start,
-                    style: None,
+                    is_merge: false,
                     value: Some(EntryValue::Object),
                 })
             }

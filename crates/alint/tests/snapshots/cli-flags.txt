@@ -259,3 +259,97 @@
   -h, --help
   -q, --quiet
 
+=== baseline ===
+  --accept-new
+  --as-of <YYYY-MM-DD>
+  --ascii
+  --baseline <FILE>
+  --color <WHEN>
+  --compact
+  --fail-on-warning
+  --include-fixes
+  --no-docs
+  --no-gitignore
+  --no-spawn
+  --only <RULE_ID>
+  --output <FILE>
+  --progress <WHEN>
+  --show-baselined
+  --show-notes
+  --strict-baseline
+  --untrusted
+  --width <COLS>
+  -c, --config <CONFIG>
+  -f, --format <FORMAT>
+  -h, --help
+  -q, --quiet
+
+=== validate-config ===
+  --as-of <YYYY-MM-DD>
+  --ascii
+  --baseline <FILE>
+  --color <WHEN>
+  --compact
+  --fail-on-warning
+  --include-fixes
+  --no-docs
+  --no-gitignore
+  --no-spawn
+  --only <RULE_ID>
+  --progress <WHEN>
+  --show-baselined
+  --show-notes
+  --strict-baseline
+  --untrusted
+  --width <COLS>
+  -c, --config <CONFIG>
+  -f, --format <FORMAT>
+  -h, --help
+  -q, --quiet
+
+=== lsp ===
+  --as-of <YYYY-MM-DD>
+  --ascii
+  --baseline <FILE>
+  --color <WHEN>
+  --compact
+  --fail-on-warning
+  --include-fixes
+  --no-docs
+  --no-gitignore
+  --no-spawn
+  --only <RULE_ID>
+  --progress <WHEN>
+  --show-baselined
+  --show-notes
+  --strict-baseline
+  --untrusted
+  --width <COLS>
+  -c, --config <CONFIG>
+  -f, --format <FORMAT>
+  -h, --help
+  -q, --quiet
+
+=== rules ===
+  --as-of <YYYY-MM-DD>
+  --ascii
+  --baseline <FILE>
+  --color <WHEN>
+  --compact
+  --fail-on-warning
+  --include-fixes
+  --no-docs
+  --no-gitignore
+  --no-spawn
+  --only <RULE_ID>
+  --progress <WHEN>
+  --show-baselined
+  --show-notes
+  --strict-baseline
+  --untrusted
+  --width <COLS>
+  -c, --config <CONFIG>
+  -f, --format <FORMAT>
+  -h, --help
+  -q, --quiet
+

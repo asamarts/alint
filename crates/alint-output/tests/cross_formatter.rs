@@ -926,3 +926,65 @@ fn report_with_a_proposed_edit() -> Report {
     }];
     report
 }
+
+#[test]
+fn agent_md_example_validates_against_schema_and_uses_no_em_dash() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    let schema: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(root.join("schemas/v1/agent-report.json")).unwrap(),
+    )
+    .unwrap();
+    let validator = jsonschema::validator_for(&schema).expect("agent schema compiles");
+
+    for rel in [
+        "docs/site/reference/output-formats/agent.md",
+        "docs/site/concepts/agents/the-agent-surface.md",
+    ] {
+        let md = std::fs::read_to_string(root.join(rel)).unwrap();
+        let mut in_json = false;
+        let mut buf = String::new();
+        let mut checked = 0usize;
+        for line in md.lines() {
+            let t = line.trim();
+            if t == "```json" {
+                in_json = true;
+                buf.clear();
+                continue;
+            }
+            if in_json && t == "```" {
+                in_json = false;
+                let doc: serde_json::Value = serde_json::from_str(&buf)
+                    .unwrap_or_else(|e| panic!("{rel}: invalid JSON example: {e}\n{buf}"));
+                let errors: Vec<String> = validator
+                    .iter_errors(&doc)
+                    .map(|e| format!("{e} at {}", e.instance_path()))
+                    .collect();
+                assert!(
+                    errors.is_empty(),
+                    "{rel}: agent JSON example violates schemas/v1/agent-report.json:\n{errors:#?}"
+                );
+                for v in doc["violations"].as_array().unwrap() {
+                    let instr = v["agent_instruction"].as_str().unwrap();
+                    assert!(
+                        !instr.contains('\u{2014}'),
+                        "{rel}: agent_instruction must not contain an em-dash: {instr:?}"
+                    );
+                }
+                checked += 1;
+                continue;
+            }
+            if in_json {
+                buf.push_str(line);
+                buf.push('\n');
+            }
+        }
+        assert!(
+            checked > 0,
+            "{rel}: expected at least one JSON example block"
+        );
+    }
+}

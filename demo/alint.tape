@@ -1,7 +1,7 @@
 Output demo/alint.gif
 # alint README demo, as code.
 #
-# Regenerate:  vhs demo/alint.tape          (writes demo/alint.gif)
+# Regenerate:  demo/render.sh              (writes and re-times demo/alint.gif)
 # Requires:    https://github.com/charmbracelet/vhs
 #
 # WHY a tape and not a hand-recorded GIF: alint is a drift-prevention tool, and a
@@ -39,7 +39,7 @@ Set Shell bash
 # THE CATCH: VHS screenshots a headless browser in real time and cannot keep up
 # with this canvas, so it silently DROPS frames while still tagging the GIF
 # 25fps. The raw output plays 2.4x too fast with no warning. demo/render.sh
-# re-times it back to the true 33.32s. Render with that script, never bare vhs.
+# re-times it to its target duration (TRUE_DURATION=29.16s). Render with that script, never bare vhs.
 Set FontSize 30
 Set Width 1760
 Set Height 1520

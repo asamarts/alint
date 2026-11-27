@@ -13,6 +13,43 @@ use alint_core::{Engine, Level, RuleResult, Violation};
 use crate::render::{kind_description, rule_docs_url};
 use crate::{Finding, FindingsByPath};
 
+/// Normalize a filesystem path for use as a `HashMap`/`HashSet` key so
+/// Windows drive-letter casing differences (`c:\repo` vs `C:\repo`, such as
+/// VS Code's `file:///c%3A/...` vs `Url::from_file_path`'s `file:///C:/...`)
+/// map to the same entry. Identity on non-Windows platforms.
+#[cfg(windows)]
+pub(crate) fn normalize_path_key(path: &Path) -> PathBuf {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+
+    let mut units: Vec<u16> = path.as_os_str().encode_wide().collect();
+    if units.len() >= 2
+        && units[1] == u16::from(b':')
+        && (u16::from(b'a')..=u16::from(b'z')).contains(&units[0])
+    {
+        units[0] -= 32;
+        return PathBuf::from(OsString::from_wide(&units));
+    }
+    if units.len() >= 6
+        && units[0] == u16::from(b'\\')
+        && units[1] == u16::from(b'\\')
+        && units[2] == u16::from(b'?')
+        && units[3] == u16::from(b'\\')
+        && units[5] == u16::from(b':')
+        && (u16::from(b'a')..=u16::from(b'z')).contains(&units[4])
+    {
+        units[4] -= 32;
+        return PathBuf::from(OsString::from_wide(&units));
+    }
+    path.to_path_buf()
+}
+
+/// Normalize a filesystem path for use as a `HashMap`/`HashSet` key.
+#[cfg(not(windows))]
+pub(crate) fn normalize_path_key(path: &Path) -> PathBuf {
+    path.to_path_buf()
+}
+
 /// Logical document text for UTF-16 column conversion: the editor's buffer for
 /// open documents (what was linted), else the BOM-decoded file on disk (cached).
 #[derive(Debug, Default)]
@@ -23,6 +60,10 @@ pub(crate) struct TextSource {
 
 impl TextSource {
     pub(crate) fn with_overlays(overlays: HashMap<PathBuf, String>) -> Self {
+        let overlays = overlays
+            .into_iter()
+            .map(|(path, text)| (normalize_path_key(&path), text))
+            .collect();
         Self {
             overlays,
             disk: HashMap::new(),
@@ -30,14 +71,18 @@ impl TextSource {
     }
 
     fn get(&mut self, abs: &Path) -> Option<&str> {
-        if let Some(text) = self.overlays.get(abs) {
+        let key = normalize_path_key(abs);
+        if let Some(text) = self.overlays.get(&key) {
             return Some(without_utf8_bom(text));
         }
         self.disk
-            .entry(abs.to_path_buf())
+            .entry(key)
             .or_insert_with(|| {
-                let size = std::fs::metadata(abs).ok()?.len();
-                let bytes = alint_core::read_capped_or_skip(abs, size)?;
+                let bytes = alint_core::bounded_file::read_regular_capped(
+                    abs,
+                    alint_core::MAX_ANALYZE_BYTES,
+                )
+                .ok()?;
                 Some(decode_disk_text(&bytes))
             })
             .as_deref()
@@ -48,7 +93,7 @@ fn without_utf8_bom(text: &str) -> &str {
     text.strip_prefix('\u{feff}').unwrap_or(text)
 }
 
-fn decode_disk_text(bytes: &[u8]) -> String {
+pub(crate) fn decode_disk_text(bytes: &[u8]) -> String {
     if let Some(text) = bytes.strip_prefix(b"\xef\xbb\xbf") {
         return String::from_utf8_lossy(text).into_owned();
     }
@@ -112,14 +157,14 @@ pub(crate) fn group_findings(
                 // Findings whose selector path came from protected configuration
                 // are anchored to the config; exposing a URI would reveal it.
                 let path_sensitive = violation.path_is_sensitive();
-                let abs = if path_sensitive {
+                let abs = normalize_path_key(&if path_sensitive {
                     ctx.config_path.to_path_buf()
                 } else {
                     violation
                         .path
                         .as_deref()
                         .map_or_else(|| ctx.config_path.to_path_buf(), |rel| ctx.root.join(rel))
-                };
+                });
                 let text = if !path_sensitive
                     && violation.path.is_some()
                     && (violation.column.is_some() || violation.range.is_some())
@@ -142,9 +187,11 @@ pub(crate) fn group_findings(
                     message: violation.message.to_string(),
                     line: (!path_sensitive).then_some(violation.line).flatten(),
                     column: (!path_sensitive).then_some(violation.column).flatten(),
+                    has_path: !path_sensitive && violation.path.is_some(),
+                    baseline_key: violation.baseline_key.as_deref().map(str::to_string),
                     policy_url: policy_url.clone(),
                     fixable: result.is_fixable,
-                    sensitive: violation.is_sensitive(),
+                    sensitive: violation.is_sensitive() || path_sensitive,
                     per_file,
                     is_pattern_hint: false,
                     description,
@@ -155,14 +202,14 @@ pub(crate) fn group_findings(
         }
         for failure in &result.analysis_failures {
             let path_sensitive = failure.path_is_sensitive();
-            let abs = if path_sensitive {
+            let abs = normalize_path_key(&if path_sensitive {
                 ctx.config_path.to_path_buf()
             } else {
                 failure
                     .path
                     .as_deref()
                     .map_or_else(|| ctx.config_path.to_path_buf(), |rel| ctx.root.join(rel))
-            };
+            });
             let text = if !path_sensitive && failure.path.is_some() && failure.column.is_some() {
                 texts.get(&abs)
             } else {
@@ -183,6 +230,8 @@ pub(crate) fn group_findings(
                 ),
                 line: (!path_sensitive).then_some(failure.line).flatten(),
                 column: (!path_sensitive).then_some(failure.column).flatten(),
+                has_path: !path_sensitive && failure.path.is_some(),
+                baseline_key: None,
                 policy_url: None,
                 fixable: false,
                 sensitive: false,
@@ -219,6 +268,8 @@ pub(crate) fn hint_findings(
                 message: hint.to_string(),
                 line,
                 column: None,
+                has_path: false,
+                baseline_key: None,
                 policy_url: None,
                 fixable: false,
                 sensitive: false,
@@ -412,25 +463,31 @@ pub(crate) fn finding_to_diagnostic(
     }
 }
 
-/// True when `pos` falls within the half-open `range`. Empty ranges contain
-/// no positions.
+/// True when `pos` falls within the half-open `range`. Zero-width ranges
+/// (such as EOF missing-newline or BOM markers emitted by `editorconfig_conforms`
+/// and `constraint` rules) match when `pos` is exactly at the marker position.
 pub(crate) fn range_contains(range: Range, pos: Position) -> bool {
     let start = (range.start.line, range.start.character);
     let end = (range.end.line, range.end.character);
     let pos = (pos.line, pos.character);
-    start <= pos && pos < end
+    if start == end {
+        pos == start
+    } else {
+        start <= pos && pos < end
+    }
 }
 
-/// True when two half-open ranges intersect. A zero-width selection represents
-/// an editor cursor and overlaps a non-empty range only when the cursor is
-/// inside it; the exclusive end does not match. Two empty ranges never overlap.
+/// True when two half-open ranges intersect. A zero-width range represents an
+/// editor cursor or a zero-width diagnostic marker (BOM, missing final newline)
+/// and overlaps a non-empty range when inside it, or another zero-width range
+/// at the exact same position.
 pub(crate) fn ranges_overlap(a: Range, b: Range) -> bool {
     let a_start = (a.start.line, a.start.character);
     let a_end = (a.end.line, a.end.character);
     let b_start = (b.start.line, b.start.character);
     let b_end = (b.end.line, b.end.character);
     match (a_start == a_end, b_start == b_end) {
-        (true, true) => false,
+        (true, true) => a_start == b_start,
         (true, false) => b_start <= a_start && a_start < b_end,
         (false, true) => a_start <= b_start && b_start < a_end,
         (false, false) => a_start < b_end && b_start < a_end,
@@ -446,7 +503,9 @@ pub(crate) fn whole_document() -> Range {
 
 /// Convert a byte offset into `text` (valid UTF-8) to an LSP [`Position`]:
 /// 0-indexed line, and a character column counted in UTF-16 code units (the LSP
-/// default position encoding). A non-BMP scalar (e.g. an emoji) is two UTF-16
+/// default position encoding). A leading UTF-8 BOM (`\u{feff}` at byte 0) is
+/// zero-width, matching [`alint_core::SourceRange::from_byte_range`] and
+/// [`TextSource`]. A non-BMP scalar (e.g. an emoji) is two UTF-16
 /// units, so a byte or `char` count would misplace the edit. LF, CRLF, and lone
 /// CR end physical lines; an offset between the two bytes of CRLF maps to the
 /// following line's start, matching [`alint_core::SourceRange`]. A range that
@@ -472,7 +531,10 @@ pub(crate) fn byte_offset_to_position(text: &str, byte_offset: usize) -> Positio
                 character = 0;
             }
             _ => {
-                character = character.saturating_add(u32::try_from(ch.len_utf16()).unwrap_or(0));
+                if idx != 0 || ch != '\u{feff}' {
+                    character =
+                        character.saturating_add(u32::try_from(ch.len_utf16()).unwrap_or(0));
+                }
                 previous_was_cr = false;
             }
         }
@@ -490,5 +552,38 @@ mod tests {
         assert_eq!(declaring_line(yaml, "flow_rule"), Some(3));
         assert_eq!(declaring_line(yaml, "inline_comment"), Some(4));
         assert_eq!(declaring_line(yaml, "missing"), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn text_source_refuses_fifo_and_dev_zero_without_blocking() {
+        use std::os::unix::fs::symlink;
+        use std::time::Duration;
+
+        let dir = tempfile::tempdir().unwrap();
+        let fifo = dir.path().join("hang.fifo");
+        let status = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .expect("mkfifo runs");
+        assert!(status.success(), "mkfifo failed: {status}");
+
+        let dev_zero_link = dir.path().join("zero.txt");
+        symlink("/dev/zero", &dev_zero_link).unwrap();
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let fifo_clone = fifo.clone();
+        let zero_clone = dev_zero_link.clone();
+        std::thread::spawn(move || {
+            let mut texts = TextSource::default();
+            let a = texts.get(&fifo_clone).is_none();
+            let b = texts.get(&zero_clone).is_none();
+            let _ = tx.send((a, b));
+        });
+        let (fifo_none, zero_none) = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("TextSource::get must reject FIFO without hanging");
+        assert!(fifo_none, "FIFO must be rejected");
+        assert!(zero_none, "/dev/zero symlink must be rejected");
     }
 }

@@ -285,7 +285,7 @@
     "scenario": "check/content/markdown_images_have_alt_fail.yml",
     "rule_id": "image-alt",
     "path": "README.md",
-    "fingerprint": "3db84413db0268cdd86d9a67804ed94abe3a20e863e9bd8f5df41833123c8977"
+    "fingerprint": "ab38ec13f96705166233730884846fd2c1fb8ffdc79cf75894aa7eee511326b3"
   },
   {
     "scenario": "check/content/markdown_no_duplicate_headings_fail.yml",
@@ -1338,6 +1338,18 @@
     "fingerprint": "6639699c21d8769cf9f3539035e4d8ad9cd0cadb1da63049c7f368b8ebfc85dd"
   },
   {
+    "scenario": "check/interactions/legacy_rule_aliases_compat.yml",
+    "rule_id": "alias-content-forbidden",
+    "path": "bad.sh",
+    "fingerprint": "cb35f080e42b06dbc8f5699a7bc634b3c4725891b2e5681f8dc13aae214a2a00"
+  },
+  {
+    "scenario": "check/interactions/legacy_rule_aliases_compat.yml",
+    "rule_id": "alias-max-lines",
+    "path": "bad.sh",
+    "fingerprint": "986eb5df9ed216fd736e9d3f3a32636124e6a9445ee224b2a4cada4c7b4d8c13"
+  },
+  {
     "scenario": "check/interactions/multiple_rules_some_fail.yml",
     "rule_id": "no-target",
     "path": "target",
@@ -1524,6 +1536,12 @@
     "fingerprint": "bd63599d46d4a0b5abce41fa9e87b2a3d54ef8ec8e22bbf33b21745fe4f8f97c"
   },
   {
+    "scenario": "check/scope_filter/include_manifest_paths_xml_csproj.yml",
+    "rule_id": "cs-nws",
+    "path": "src/Included.cs",
+    "fingerprint": "6a303f97688f024547cca7261fe99b682429c60a23f4b4f883f3c70b841ecd4f"
+  },
+  {
     "scenario": "check/scope_filter/nested_manifest_dot_entry_does_not_scope_subtree.yml",
     "rule_id": "forbid",
     "path": "pkg/src/app.ts",
@@ -1534,12 +1552,6 @@
     "rule_id": "rust-cargo-lock-exists",
     "path": null,
     "fingerprint": "4d0b407bd9305073370a98281a21ed98f7d41cfab1761662b87dd619ddfd16e8"
-  },
-  {
-    "scenario": "check/scope_filter/scope_filter_dogfood_rust_v1.yml",
-    "rule_id": "rust-cargo-toml-exists",
-    "path": null,
-    "fingerprint": "d22305cbabb6785e2bcf572541ea28aed4d61d8d1aa21832042adfc43f89b2da"
   },
   {
     "scenario": "check/scope_filter/scope_filter_dogfood_rust_v1.yml",
@@ -1725,7 +1737,7 @@
     "scenario": "check/structured/json_schema_passes_dotenv_missing_key_fail.yml",
     "rule_id": "env-has-db-url",
     "path": ".env",
-    "fingerprint": "d46395ac3f9148c4dcfa43e41fa4281af9964d1f6969e5fbead7b49d29444b82"
+    "fingerprint": "df749a87bf700e4c31006047319dc77f52f5a25c6cbbf0c7eac4c9f1abf0e86e"
   },
   {
     "scenario": "check/structured/json_schema_passes_fail.yml",
@@ -1749,13 +1761,25 @@
     "scenario": "check/structured/json_schema_passes_properties_missing_key_fail.yml",
     "rule_id": "app-has-port",
     "path": "application.properties",
-    "fingerprint": "28fbef0feb053cf252f4315726cfeb08045ba9a187c23c2542be14f64eabccfc"
+    "fingerprint": "e1ed5d26dbe6b4885f989c5f8e5293f63517a864ff08cfb208e9da386f65e278"
+  },
+  {
+    "scenario": "check/structured/json_schema_passes_toml_fail.yml",
+    "rule_id": "pyproject-toml-schema",
+    "path": "pyproject.toml",
+    "fingerprint": "5606a53b70ec1acedd727be1484920398b8ed9e9bf8823feb73dc3d28df040ac"
   },
   {
     "scenario": "check/structured/json_schema_passes_xml_autodetect_fail.yml",
     "rule_id": "csproj-conforms",
     "path": "App.csproj",
     "fingerprint": "dae978921cdca413bd0665b1207139db47fa7c16fa7cf015b4133a91f3f60d4b"
+  },
+  {
+    "scenario": "check/structured/json_schema_passes_yaml_fail.yml",
+    "rule_id": "deploy-yaml-schema",
+    "path": "deploy.yml",
+    "fingerprint": "3f7e7a6f81f86c1c5a1bc222aaca94229f7622c06552fe59c0f49cbfe6d6ca0c"
   },
   {
     "scenario": "check/structured/no_duplicate_keys_all_formats_fail.yml",
@@ -2277,7 +2301,7 @@
     "scenario": "dotnet/dotnet_flags_misconfigured_project.yml",
     "rule_id": "dotnet-csproj-nullable-enabled",
     "path": "src/App.csproj",
-    "fingerprint": "f2b0baf754d04079306ef6dbe695d8b6134cffb95118c01114df0c81273a69f9"
+    "fingerprint": "7cec074aefa1fba778e7c38400028f6b81d84b3d96f933629a6c2fe6edc1466d"
   },
   {
     "scenario": "dotnet/dotnet_flags_misconfigured_project.yml",
@@ -2307,7 +2331,7 @@
     "scenario": "dotnet/dotnet_global_json_and_cpm_misconfigured_fire.yml",
     "rule_id": "dotnet-central-package-management",
     "path": "Directory.Packages.props",
-    "fingerprint": "65fe7551da05a31fc35b7dd7119c62d76449bdae8424d2d0a322c4a28e912094"
+    "fingerprint": "c5b0f4b4eff0178da469e70dba02c794049893443804664136a8a47f9a326d2b"
   },
   {
     "scenario": "dotnet/dotnet_global_json_and_cpm_misconfigured_fire.yml",
@@ -2316,10 +2340,22 @@
     "fingerprint": "e4c47eab54f7d33c5316710dfa9aeee9fdb4252787782f4b6b3263e013dcb66c"
   },
   {
+    "scenario": "dotnet/dotnet_multi_propertygroup_flagged.yml",
+    "rule_id": "dotnet-csproj-nullable-enabled",
+    "path": "src/App.csproj",
+    "fingerprint": "7cec074aefa1fba778e7c38400028f6b81d84b3d96f933629a6c2fe6edc1466d"
+  },
+  {
     "scenario": "fix/chmod_executable_bit_clear.yml",
     "rule_id": "docs-not-exec",
     "path": "docs/generate.sh",
     "fingerprint": "9f3ab785e7e409358fc6f750cf1e6d8be045e5d0d987170a321bd1b891a0d12b"
+  },
+  {
+    "scenario": "fix/chmod_executable_bit_set.yml",
+    "rule_id": "scripts-must-be-exec",
+    "path": "scripts/run.sh",
+    "fingerprint": "6328e7a22d2516bdd45dd3d28642750503ab8617e35d6284c63fb1558ecff41d"
   },
   {
     "scenario": "fix/chmod_shebang_has_executable.yml",
@@ -2964,6 +3000,12 @@
     "fingerprint": "e1ebc1eb36b686c123877ff55c7d293e1776b7da5b8239d1a86fd92d4b4c3b8c"
   },
   {
+    "scenario": "fix/replace_toml_path_matches.yml",
+    "rule_id": "v-prefix-toml",
+    "path": "Cargo.toml",
+    "fingerprint": "d5a31bd86774f946f51b9a2110d50df068c965b71c63c8440a45da3e3a3bff66"
+  },
+  {
     "scenario": "fix/replace_unsafe_by_default.yml",
     "rule_id": "no-console",
     "path": "app.js",
@@ -3549,7 +3591,7 @@
     "scenario": "python/python_flags_missing_manifest.yml",
     "rule_id": "python-manifest-exists",
     "path": null,
-    "fingerprint": "a647f38cc22dd0a45202855b8cc5b6da094fe1a82aceb7d562f4b5767aff5637"
+    "fingerprint": "95b5ebe06b798d36e66f129991948dd0a017aecb6e93af3983ea6ff5dc60862a"
   },
   {
     "scenario": "rust/rust_gaps_flagged.yml",

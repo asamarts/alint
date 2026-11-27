@@ -337,7 +337,14 @@ fn toml_code_lines(text: &str) -> Vec<usize> {
     lines
 }
 
+fn strip_toml_key<'a>(s: &'a str, key: &str) -> Option<&'a str> {
+    s.strip_prefix(key)
+        .or_else(|| s.strip_prefix(&format!("\"{key}\"")))
+        .or_else(|| s.strip_prefix(&format!("'{key}'")))
+}
+
 fn rust_toolchain_channel_lines(text: &str, code_lines: &[usize]) -> Vec<usize> {
+    let mut in_root = true;
     let mut in_toolchain = false;
     let mut channel_lines = Vec::new();
     for (index, line) in text.lines().enumerate() {
@@ -351,12 +358,20 @@ fn rust_toolchain_channel_lines(text: &str, code_lines: &[usize]) -> Vec<usize> 
                 .split_once('#')
                 .map_or(trimmed, |(header, _)| header)
                 .trim();
-            in_toolchain = header == "[toolchain]";
+            in_root = false;
+            in_toolchain =
+                header == "[toolchain]" || header == "[\"toolchain\"]" || header == "['toolchain']";
             continue;
         }
         if in_toolchain
-            && trimmed
-                .strip_prefix("channel")
+            && strip_toml_key(trimmed, "channel")
+                .is_some_and(|rest| rest.trim_start().starts_with('='))
+        {
+            channel_lines.push(line_number);
+        } else if in_root
+            && let Some(after_tc) = strip_toml_key(trimmed, "toolchain")
+            && let Some(after_dot) = after_tc.trim_start().strip_prefix('.')
+            && strip_toml_key(after_dot.trim_start(), "channel")
                 .is_some_and(|rest| rest.trim_start().starts_with('='))
         {
             channel_lines.push(line_number);
@@ -534,7 +549,17 @@ fn ruby_code_lines(text: &str) -> std::result::Result<Vec<usize>, String> {
                             continue;
                         }
                     }
-                    if bytes.get(offset..offset + 2) == Some(b"<<".as_slice()) {
+                    if bytes[offset] == b'/' && ruby_regex_can_start(bytes, offset) {
+                        quote = Some(RubyQuote::Simple {
+                            delimiter: b'/',
+                            escaped: false,
+                        });
+                        offset += 1;
+                        continue;
+                    }
+                    if bytes.get(offset..offset + 2) == Some(b"<<".as_slice())
+                        && ruby_heredoc_can_start(bytes, offset)
+                    {
                         let mut at = offset + 2;
                         let allow_indent = matches!(bytes.get(at), Some(b'-' | b'~'));
                         if allow_indent {
@@ -574,6 +599,67 @@ fn ruby_code_lines(text: &str) -> std::result::Result<Vec<usize>, String> {
         return Err("unterminated Ruby string, heredoc, or block comment in Gemfile".to_string());
     }
     Ok(lines)
+}
+
+/// Whether `<<` at `offset` in a Ruby line can open a heredoc rather than
+/// being an append/shift operator (`arr<<item`, `1<<3`) or singleton class
+/// (`class <<self`).
+fn ruby_heredoc_can_start(bytes: &[u8], offset: usize) -> bool {
+    // Reject `<<=` and `<<<`.
+    if matches!(bytes.get(offset + 2), Some(b'=' | b'<')) {
+        return false;
+    }
+    // `arr<<item` or `1<<3` (no whitespace before `<<` after an operand).
+    if offset > 0 {
+        let prev = bytes[offset - 1];
+        if prev.is_ascii_alphanumeric() || matches!(prev, b'_' | b')' | b']' | b'}') {
+            return false;
+        }
+    }
+    // `class << self` / `class <<self`: singleton class header, never a heredoc.
+    let before = std::str::from_utf8(&bytes[..offset])
+        .unwrap_or("")
+        .trim_end();
+    before
+        .rsplit(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .next()
+        != Some("class")
+}
+
+/// Whether `/` at `offset` in a Ruby line starts a regex literal rather than
+/// division (e.g. `match /don't/`, `x =~ /a'b/`).
+fn ruby_regex_can_start(bytes: &[u8], offset: usize) -> bool {
+    let before = std::str::from_utf8(&bytes[..offset])
+        .unwrap_or("")
+        .trim_end();
+    if before.is_empty() {
+        return true;
+    }
+    let last = before.as_bytes()[before.len() - 1];
+    if matches!(
+        last,
+        b'=' | b'(' | b'[' | b'{' | b',' | b';' | b'~' | b'!' | b'?' | b':' | b'&' | b'|'
+    ) {
+        return true;
+    }
+    let word = before
+        .rsplit(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .next()
+        .unwrap_or("");
+    matches!(
+        word,
+        "if" | "unless"
+            | "when"
+            | "while"
+            | "until"
+            | "and"
+            | "or"
+            | "not"
+            | "return"
+            | "match"
+            | "sub"
+            | "gsub"
+    )
 }
 
 #[derive(Debug)]
@@ -1812,5 +1898,31 @@ mod tests {
         let error = target_regex_capture_ranges(Path::new("pins.txt"), &text, r"(?m)^v=([a-z])$")
             .unwrap_err();
         assert!(error.contains("value safety limit"), "{error}");
+    }
+
+    #[test]
+    fn rust_toolchain_supports_dotted_keys_and_ruby_ignores_heredoc_and_regex_slashes() {
+        let toml = "toolchain.channel = \"1.88.0\"\n";
+        let captures = target_regex_capture_ranges(
+            Path::new("rust-toolchain.toml"),
+            toml,
+            r#"(?m)channel = "([^"]+)""#,
+        )
+        .unwrap();
+        let values: Vec<&str> = captures.ranges.iter().map(|r| &toml[r.clone()]).collect();
+        assert_eq!(values, ["1.88.0"]);
+
+        // Ruby: `=begin` inside `/regex/` must NOT open a block comment, and
+        // `<<` shift operator / `a / b` division must not swallow `ruby "3.3.0"`.
+        let gemfile = "pattern = /=begin/\nx = 1 << 2\nruby \"3.3.0\"\n";
+        let captures =
+            target_regex_capture_ranges(Path::new("Gemfile"), gemfile, r#"(?m)^ruby "([^"]+)"$"#)
+                .unwrap();
+        let values: Vec<&str> = captures
+            .ranges
+            .iter()
+            .map(|r| &gemfile[r.clone()])
+            .collect();
+        assert_eq!(values, ["3.3.0"]);
     }
 }

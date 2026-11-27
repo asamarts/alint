@@ -210,9 +210,10 @@ fn markdown_target(ctx: &Context<'_>, source: &Path, candidate: &Path) -> Option
     if ctx.index.contains_file(candidate) && has_markdown_extension(candidate) {
         return Some(candidate.to_path_buf());
     }
-    if candidate.extension().is_none() {
-        let mut with_md = candidate.to_path_buf();
-        with_md.set_extension("md");
+    if !has_markdown_extension(candidate) {
+        let mut os = candidate.as_os_str().to_os_string();
+        os.push(".md");
+        let with_md = PathBuf::from(os);
         if ctx.index.contains_file(&with_md) {
             return Some(with_md);
         }
@@ -382,5 +383,18 @@ mod tests {
             violations[0].analysis_failure_kind(),
             Some(alint_core::AnalysisFailureKind::ResourceParse)
         );
+    }
+
+    #[test]
+    fn dotted_extensionless_doc_fragment_resolves_to_md() {
+        let rule = super::build(&spec_yaml(
+            "id: fragments\nkind: markdown_fragments_resolve\npaths: README.md\nlevel: error\n",
+        ))
+        .unwrap();
+        let (tmp, index) = tempdir_with_files(&[
+            ("README.md", b"[notes](v1.2#highlights)\n"),
+            ("v1.2.md", b"# Highlights\n"),
+        ]);
+        assert!(rule.evaluate(&ctx(tmp.path(), &index)).unwrap().is_empty());
     }
 }

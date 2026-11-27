@@ -30,8 +30,11 @@ fn git_available() -> bool {
 
 fn run_git(root: &Path, args: &[&str]) {
     let out = Command::new("git")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .arg("-C")
         .arg(root)
+        .args(["-c", "commit.gpgsign=false"])
         .args(args)
         .output()
         .expect("git invocation");

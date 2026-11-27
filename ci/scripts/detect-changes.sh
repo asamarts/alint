@@ -29,12 +29,16 @@ fi
 
 echo "==> Detecting changes (base: ${BASE})"
 
+DIFF_FAILED=false
 if ! CHANGED=$(git diff --name-only "$BASE" HEAD 2>/dev/null); then
   echo "==> Could not determine diff — running all pipelines"
-  CHANGED="crates/ xtask/ Cargo.toml"
+  DIFF_FAILED=true
+  CHANGED=""
 fi
 
-if [[ -n "$CHANGED" ]]; then
+if [[ "$DIFF_FAILED" == true ]]; then
+  echo "  (diff unavailable; enabling every pipeline)"
+elif [[ -n "$CHANGED" ]]; then
   echo "$CHANGED"
 else
   echo "  (no files changed)"
@@ -51,6 +55,18 @@ SUPPLY_CHAIN=false
 PACKAGING=false
 SHELL_TESTS=false
 RELATION=false
+
+if [[ "$DIFF_FAILED" == true ]]; then
+  RUST=true
+  DOCS=true
+  BENCH=true
+  EXAMPLES=true
+  EDITORS=true
+  SUPPLY_CHAIN=true
+  PACKAGING=true
+  SHELL_TESTS=true
+  RELATION=true
+fi
 
 # CI infrastructure or workspace manifest changes trigger all pipelines.
 if echo "$CHANGED" | grep -qE '^(\.github/workflows/|ci/|Cargo\.toml$|Cargo\.lock$|rust-toolchain\.toml$)'; then

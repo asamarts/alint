@@ -111,4 +111,18 @@ expect_rejection \
   $'          curl https://api.github.com/repos/o/r/issues -d title=audit-fixture\n          LATEST_TAG="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"' \
   'raw GitHub API mutation requires an explicit policy mapping'
 
+expect_rejection \
+  pip-install-in-oidc-job \
+  .github/workflows/release.yml \
+  '      - name: publish to PyPI (Trusted Publishing + PEP 740 attestations)' \
+  $'      - run: python3 -m pip install twine==6.1.0\n      - name: publish to PyPI (Trusted Publishing + PEP 740 attestations)' \
+  'pip install is prohibited in a job with id-token: write'
+
+expect_rejection \
+  sbom-attest-without-write \
+  .github/workflows/ci.yml \
+  '      - run: bash ci/scripts/check-secrets-inventory.sh' \
+  $'      - run: bash ci/scripts/check-secrets-inventory.sh\n      - uses: actions/attest@0123456789abcdef0123456789abcdef01234567' \
+  "'GitHub SBOM attestation' requires attestations: write"
+
 printf '[workflow-permissions-mutations] OK — %d real-file regressions rejected\n' "$passed"

@@ -7,19 +7,23 @@
 //! `file_trim_trailing_whitespace` (read-modify-write).
 
 use std::io::Write;
+use std::sync::Arc;
 
-use alint_core::{Engine, Rule, WalkOptions, walk};
-use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use alint_core::{Engine, RuleEntry, WalkOptions, walk};
+use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
 fn build_engine(yaml: &str) -> Engine {
     let config = alint_dsl::parse(yaml).expect("bench config parses");
     let registry = alint_rules::builtin_registry();
-    let rules: Vec<Box<dyn Rule>> = config
+    let entries: Vec<RuleEntry> = config
         .rules
-        .iter()
-        .map(|spec| registry.build(spec).expect("bench rule builds"))
+        .into_iter()
+        .map(|spec| {
+            let rule = registry.build(&spec).expect("bench rule builds");
+            RuleEntry::new(rule).with_spec(Arc::new(spec))
+        })
         .collect();
-    Engine::new(rules, alint_rules::builtin_registry())
+    Engine::from_entries(entries, registry)
 }
 
 fn make_tree(n: usize, content: &[u8]) -> tempfile::TempDir {
@@ -52,31 +56,32 @@ rules:
     let content = b"fn one() {} \nfn two() {}  \nfn three() {}\t\n";
     let mut group = c.benchmark_group("fix_throughput/trim_trailing_whitespace");
     for &n in &[100usize, 1_000] {
-        let tmp = make_tree(n, content);
-        let walk_opts = WalkOptions::default();
-        let index = walk(tmp.path(), &walk_opts).expect("walk");
         let engine = build_engine(yaml);
         group.throughput(Throughput::Elements(n as u64));
-        group.bench_with_input(BenchmarkId::from_parameter(n), &index, |b, idx| {
-            // Re-materialise the tree per iteration so each
-            // benched fix() call has work to do (otherwise the
-            // first run cleans them and subsequent runs are
-            // no-ops).
-            b.iter_with_setup(
-                || make_tree(n, content),
-                |fresh| {
-                    let fresh_idx = walk(fresh.path(), &WalkOptions::default()).unwrap();
-                    let _ = fresh_idx;
-                    engine
+        group.bench_with_input(BenchmarkId::from_parameter(n), &n, |b, &n| {
+            // Re-materialise and walk the tree in setup, time only real
+            // read-modify-write fixing (`dry_run = false`), and return `fresh`
+            // so `TempDir` teardown runs outside the timed routine.
+            b.iter_batched(
+                || {
+                    let fresh = make_tree(n, content);
+                    let fresh_idx = walk(fresh.path(), &WalkOptions::default()).expect("walk");
+                    (fresh, fresh_idx)
+                },
+                |(fresh, fresh_idx)| {
+                    let report = engine
                         .fix(
-                            tmp.path(),
-                            idx,
+                            fresh.path(),
+                            &fresh_idx,
                             &WalkOptions::default(),
-                            /* dry_run */ true,
+                            /* dry_run */ false,
                             alint_core::Applicability::Safe,
                         )
                         .expect("fix");
+                    assert_eq!(report.applied(), n);
+                    (fresh, report)
                 },
+                BatchSize::PerIteration,
             );
         });
     }

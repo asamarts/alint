@@ -82,30 +82,7 @@ impl<'de> serde::de::Visitor<'de> for YamlKey<'_> {
     /// quote is the plain merge key; anything else (quoted, escaped, block
     /// scalar -- the owned-string paths below) is an ordinary `"<<"` key.
     fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Key, E> {
-        let merge = v == "<<" && {
-            let src = self.src.as_bytes();
-            (v.as_ptr() as usize)
-                .checked_sub(src.as_ptr() as usize)
-                .filter(|&off| off + v.len() <= src.len())
-                .is_some_and(|off| {
-                    if off > 0 && matches!(src[off - 1], b'"' | b'\'') {
-                        return false;
-                    }
-                    // An explicit tag like `!!str <<` or `! <<` keeps `<<`
-                    // as a literal string key rather than a YAML 1.1 merge key.
-                    let before = &src[..off];
-                    let line_start = before
-                        .iter()
-                        .rposition(|&b| b == b'\n' || b == b'\r')
-                        .map_or(0, |i| i + 1);
-                    let prefix = before[line_start..].trim_ascii();
-                    let has_tag = prefix
-                        .rsplit(|b| matches!(b, b' ' | b'\t' | b'{' | b','))
-                        .next()
-                        .is_some_and(|tok| tok.starts_with(b"!"));
-                    !has_tag
-                })
-        };
+        let merge = v == "<<" && is_yaml_merge_key(self.src.as_bytes(), v);
         Ok(Key {
             text: v.to_owned(),
             merge,
@@ -175,10 +152,12 @@ impl<'de> serde::de::Visitor<'de> for YamlJson<'_> {
     }
     fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Value, A::Error> {
         let mut out = serde_json::Map::new();
-        // The value of a PLAIN `<<` key whose value is a mapping (or a sequence
-        // of them), applied after the explicit keys. A quoted `"<<"` key, or a
-        // `<<` whose value is anything else, stays an ordinary key.
-        let mut merge = None;
+        // Values of PLAIN (or explicit `!!merge`) `<<` keys whose values are
+        // mappings (or sequences of them), applied after explicit keys. Collect
+        // every merge key rather than letting a later `<<:` overwrite earlier
+        // ones; a quoted `"<<"` key without `!!merge`, or a `<<` whose value is
+        // not mergeable, stays an ordinary key.
+        let mut merges: Vec<Value> = Vec::new();
         while let Some(key) = map.next_key_seed(YamlKey { src: self.src })? {
             let value = map.next_value_seed(self)?;
             let mergeable = match &value {
@@ -187,14 +166,16 @@ impl<'de> serde::de::Visitor<'de> for YamlJson<'_> {
                 _ => false,
             };
             if key.merge && mergeable {
-                merge = Some(value);
+                merges.push(value);
             } else {
                 out.insert(key.text, value);
             }
         }
-        // Apply the merge key. The merged values were built by this same visitor,
-        // so their own merges are already resolved (nested merges compose).
-        if let Some(merge) = merge {
+        // Apply merge keys after explicit keys. When multiple `<<:` keys appear
+        // in one mapping, later merge keys win over earlier ones (matching YAML
+        // duplicate-key precedence) while retaining keys from every source;
+        // within a single sequence `<<: [*a, *b]`, earlier items win over later.
+        for merge in merges.into_iter().rev() {
             let sources = match merge {
                 Value::Array(items) => items,
                 single => vec![single],
@@ -214,6 +195,81 @@ impl<'de> serde::de::Visitor<'de> for YamlJson<'_> {
         // A custom tag: drop it (the variant name) and keep the tagged node.
         let (_tag, variant) = data.variant::<serde::de::IgnoredAny>()?;
         variant.newtype_variant_seed(self)
+    }
+}
+
+/// Inspect the YAML node properties (tags `!..` and anchors `&..`, possibly
+/// spanning preceding property-only lines) right before a borrowed `<<` key:
+/// - Explicit `!!merge` / `!<tag:yaml.org,2002:merge>` -> merge key (even when
+///   quoted, e.g. `!!merge "<<"`, matching `duplicate_keys.rs`).
+/// - Any other explicit tag (`!!str`, `!`, `!custom`, including `!!str &k <<`
+///   and multiline `!!str\n  <<`) -> literal string key, NOT a merge.
+/// - No explicit tag -> merge key iff unquoted (plain scalar).
+fn is_yaml_merge_key(src: &[u8], borrowed: &str) -> bool {
+    let Some(off) = (borrowed.as_ptr() as usize)
+        .checked_sub(src.as_ptr() as usize)
+        .filter(|&off| off + borrowed.len() <= src.len())
+    else {
+        return false;
+    };
+    let quoted = off > 0 && matches!(src[off - 1], b'"' | b'\'');
+    let prop_end = if quoted { off - 1 } else { off };
+    let mut cursor = prop_end;
+    let mut explicit_tag: Option<&[u8]> = None;
+    loop {
+        // Skip whitespace and YAML `# ...` comments on preceding lines.
+        let skipped = skip_yaml_ws_and_comments_backwards(src, cursor);
+        if skipped == 0 {
+            break;
+        }
+        // Scan backwards across the preceding non-whitespace/non-flow token.
+        let tok_end = skipped;
+        let mut tok_start = tok_end;
+        while tok_start > 0
+            && !matches!(
+                src[tok_start - 1],
+                b' ' | b'\t' | b'\n' | b'\r' | b'{' | b',' | b'['
+            )
+        {
+            tok_start -= 1;
+        }
+        let tok = &src[tok_start..tok_end];
+        if tok.starts_with(b"!") {
+            explicit_tag = Some(tok);
+            cursor = tok_start;
+        } else if tok.starts_with(b"&") {
+            // Anchor property (`&k`): keep scanning left for a preceding tag.
+            cursor = tok_start;
+        } else {
+            break;
+        }
+    }
+    match explicit_tag {
+        Some(tag) => tag == b"!!merge" || tag == b"!<tag:yaml.org,2002:merge>",
+        None => !quoted,
+    }
+}
+
+fn skip_yaml_ws_and_comments_backwards(src: &[u8], mut pos: usize) -> usize {
+    loop {
+        while pos > 0 && matches!(src[pos - 1], b' ' | b'\t' | b'\n' | b'\r') {
+            pos -= 1;
+        }
+        // Check if `pos` sits at the end of a `# ...` comment on its line.
+        let line_start = src[..pos]
+            .iter()
+            .rposition(|&b| b == b'\n' || b == b'\r')
+            .map_or(0, |i| i + 1);
+        let line = &src[line_start..pos];
+        if let Some(hash) = line
+            .iter()
+            .position(|&b| b == b'#')
+            .filter(|&i| i == 0 || matches!(line[i - 1], b' ' | b'\t'))
+        {
+            pos = line_start + hash;
+            continue;
+        }
+        return pos;
     }
 }
 
@@ -336,5 +392,28 @@ mod tests {
             let plain = crate::yaml::from_str::<serde_json::Value>(doc).map_err(|e| e.to_string());
             assert_eq!(Format::Yaml.parse(doc), plain, "diverged on {doc:?}");
         }
+    }
+
+    #[test]
+    fn yaml_merge_key_respects_tags_anchors_multiline_and_multiple_merges() {
+        // Explicit `!!str` (with anchor or across lines) disables merge semantics.
+        for doc in [
+            "base: &b {x: 1}\nd:\n  !!str &k <<: *b\n",
+            "base: &b {x: 1}\nd:\n  !!str\n  <<: *b\n",
+            "base: &b {x: 1}\nd:\n  !!str # comment\n  <<: *b\n",
+        ] {
+            let v = Format::Yaml.parse(doc).unwrap();
+            assert_eq!(v["d"], json!({"<<": {"x": 1}}), "{doc:?}");
+        }
+        // Explicit `!!merge` enables merge even on quoted `"<<"`.
+        let v = Format::Yaml
+            .parse("base: &b {x: 1}\nd:\n  !!merge \"<<\": *b\n  y: 2\n")
+            .unwrap();
+        assert_eq!(v["d"], json!({"x": 1, "y": 2}));
+        // Multiple `<<:` keys in one mapping merge ALL sources rather than dropping earlier ones.
+        let v = Format::Yaml
+            .parse("a: &a {x: 1, shared: from_a}\nb: &b {y: 2, shared: from_b}\nc:\n  <<: *a\n  <<: *b\n")
+            .unwrap();
+        assert_eq!(v["c"], json!({"x": 1, "y": 2, "shared": "from_b"}));
     }
 }

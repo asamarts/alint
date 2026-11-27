@@ -12,6 +12,7 @@ use unicode_general_category::{GeneralCategory, get_general_category};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MarkdownImage {
+    pub(crate) dest: String,
     pub(crate) alt: String,
     pub(crate) span: Range<usize>,
 }
@@ -53,6 +54,7 @@ const ALL: Projection = Projection {
 
 #[derive(Debug)]
 struct OpenImage {
+    dest: String,
     alt: String,
     span: Range<usize>,
 }
@@ -122,8 +124,9 @@ fn project(text: &str, projection: Projection) -> MarkdownDocument {
     for (event, span) in Parser::new_ext(markdown, options).into_offset_iter() {
         let span = span.start + source_offset..span.end + source_offset;
         match event {
-            Event::Start(Tag::Image { .. }) if projection.images => {
+            Event::Start(Tag::Image { dest_url, .. }) if projection.images => {
                 image_stack.push(OpenImage {
+                    dest: dest_url.into_string(),
                     alt: String::new(),
                     span,
                 });
@@ -131,6 +134,7 @@ fn project(text: &str, projection: Projection) -> MarkdownDocument {
             Event::End(TagEnd::Image) if projection.images => {
                 if let Some(image) = image_stack.pop() {
                     document.images.push(MarkdownImage {
+                        dest: image.dest,
                         alt: image.alt,
                         span: image.span,
                     });

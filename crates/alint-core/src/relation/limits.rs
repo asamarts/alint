@@ -324,10 +324,17 @@ impl RunBudget {
     /// Take `amount` from the budget, or fail once the run's total would
     /// exceed it. A failed take still counts, so every later take fails too.
     pub fn take(&self, amount: usize) -> Result<(), LimitExceeded> {
-        let total = self
-            .used
-            .fetch_add(amount, Ordering::Relaxed)
-            .saturating_add(amount);
+        let mut cur = self.used.load(Ordering::Relaxed);
+        let total = loop {
+            let next = cur.saturating_add(amount);
+            match self
+                .used
+                .compare_exchange_weak(cur, next, Ordering::Relaxed, Ordering::Relaxed)
+            {
+                Ok(_) => break next,
+                Err(actual) => cur = actual,
+            }
+        };
         if total > self.limit {
             return Err(LimitExceeded {
                 kind: self.kind,
@@ -533,6 +540,12 @@ mod tests {
             "an exhausted budget stays exhausted"
         );
         assert!(budget.take(usize::MAX).is_err());
+        assert!(
+            budget.spent().is_err(),
+            "saturating add must never wrap back under the limit"
+        );
+        assert!(budget.take(0).is_err());
+        assert_eq!(budget.used(), usize::MAX);
     }
 
     #[test]

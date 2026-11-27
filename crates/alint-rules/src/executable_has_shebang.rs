@@ -48,8 +48,12 @@ impl Rule for ExecutableHasShebangRule {
                 continue;
             }
             let full = ctx.root.join(&entry.path);
-            let Ok(meta) = std::fs::metadata(&full) else {
-                continue;
+            let meta = match std::fs::metadata(&full) {
+                Ok(m) => m,
+                Err(e) => {
+                    violations.push(crate::io::io_error_violation(&entry.path, &e));
+                    continue;
+                }
             };
             if meta.permissions().mode() & 0o111 == 0 {
                 continue;
@@ -58,8 +62,12 @@ impl Rule for ExecutableHasShebangRule {
             // read instead of the whole file. Non-`+x` files
             // already short-circuited above; this read only
             // happens on actual executables.
-            let Ok(bytes) = read_prefix_n(&full, 2) else {
-                continue;
+            let bytes = match read_prefix_n(&full, 2) {
+                Ok(b) => b,
+                Err(e) => {
+                    violations.push(crate::io::io_error_violation(&entry.path, &e));
+                    continue;
+                }
             };
             if !bytes.starts_with(b"#!") {
                 let msg = self
@@ -245,5 +253,25 @@ mod tests {
         let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
         assert_eq!(v.len(), 1, "only in-scope file should fire: {v:?}");
         assert_eq!(v[0].path.as_deref(), Some(std::path::Path::new("pkg/a.sh")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_executable_emits_resource_read_analysis_failure() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: executable_has_shebang\n\
+             paths: \"scripts/**\"\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("scripts/vanished.sh", b"echo hi\n")]);
+        std::fs::remove_file(tmp.path().join("scripts/vanished.sh")).unwrap();
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert_eq!(
+            v[0].analysis_failure_kind(),
+            Some(alint_core::AnalysisFailureKind::ResourceRead)
+        );
     }
 }

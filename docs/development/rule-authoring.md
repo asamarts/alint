@@ -14,12 +14,10 @@ Two independent layers keep the rule surface honest, and both run in CI.
 
 | Layer | Tool | Catches |
 |---|---|---|
-| 1. File presence | `alint check .` (the root `.alint.yml`, run by the `action-selftest.yml` workflow on every push) | Missing source files, missing scenario YAMLs, missing bundled-ruleset coverage. Fast feedback while you develop locally. |
-| 2. Semantic | `cargo test -p alint-e2e` (the `coverage_audit_*.rs` integration tests) | Pass/fail symmetry, alias-aware kind coverage, bundled-ruleset symmetry, git-mode symmetry, and registry-to-schema-to-docs consistency. |
+| 1. Dogfood lint | `alint check .` (the root `.alint.yml`, run by `ci.yml`'s `dogfood` job and `ci/scripts/preflight.sh`) | Bundled-ruleset header shape, ADR numbering/MADR compliance, repo hygiene, and version-pin drift. Fast feedback while you develop locally. |
+| 2. Semantic & coverage audits | `cargo test -p alint-e2e` (the `coverage_audit_*.rs` integration tests) + `xtask gen-* --check` | Missing rule source files, missing E2E pass/fail scenarios, bundled-ruleset parity, git-mode symmetry, and registry-to-schema-to-docs consistency. |
 
-A PR that adds a rule kind with no e2e scenario fails layer 1 at lint time. A PR
-that adds only a passing scenario, with no firing counterpart, fails layer 2 at
-test time.
+A PR that adds a rule kind with no e2e scenario, or only a passing scenario with no firing counterpart, fails layer 2 at test time.
 
 ## Adding a new rule kind
 
@@ -33,9 +31,10 @@ test time.
    guard in `crates/alint-dsl/tests/schema.rs` fails and prints the missing kind
    name until the entry exists.
 4. Document the kind in `docs/rules.md`, under its family (an `##` heading) as an
-   `###` section that contains at least one fenced ` ```yaml ` usage example.
-   The reference page at `alint.org/docs/rules/<family>/<kind>/` is sliced from
-   this section, and the docs build fails if the example is missing. Directly
+   `###` section. The reference page at `alint.org/docs/rules/<family>/<kind>/`
+   is sliced from this section, while its runnable usage examples are rendered
+   automatically from policy-test scenarios tagged with `docs:` (ADR-0014) — do
+   not duplicate hand-written YAML blocks inside the `###` section. Directly
    under the `###` heading add a `**Categories:**` line listing the kind's
    categories, PRIMARY FIRST — the primary is the family it sits under. Most kinds
    are single-category (just the family); give a cross-cutting kind its
@@ -184,8 +183,8 @@ expect:
 
 Each `when` entry has one `expect` entry. Present channels are exact; omitted channels are
 unasserted. A firing check normally uses `exit: policy_failure` and a non-empty `violations`
-list. See the [policy-test contract](../design/v0.20/policy-tests.md) and generated
-[`schemas/v1/policy-test.json`](../../schemas/v1/policy-test.json) for fixtures, capabilities,
+list. See the [policy-test contract](https://github.com/asamarts/alint/blob/main/docs/design/v0.20/policy-tests.md) and generated
+[`schemas/v1/policy-test.json`](https://github.com/asamarts/alint/blob/main/schemas/v1/policy-test.json) for fixtures, capabilities,
 matchers, fixes, final-tree assertions, and snapshots.
 
 For git-aware rules, add `given.git: { init: true, add: [<paths>], commit: true }`.
@@ -282,17 +281,11 @@ orphaned test directories, and documents extending a bundle other than their own
 ## Adding a rule-kind alias
 
 An alias registers the same builder under a second name (for example, `max_size`
-for `file_max_size`). Aliases need no new scenarios. Add the pair to every alias
-table in the coverage audits, so each audit treats both spellings as one
-canonical kind:
-
-- the inline `aliased` table in `coverage_audit.rs`
-- `ALIASES` in `coverage_audit_pass_fail.rs`
-- `ALIASES` in `coverage_audit_bench_listing.rs`
-- `ALIASES` in `coverage_audit_baseline_safety.rs`
-
-These tables are kept identical. A missing entry in any one of them fails that
-audit.
+for `file_max_size`). Declare the alias in `RuleRegistry` / `crates/alint-rules/src/lib.rs`,
+add it to the parent kind's `###` heading in `docs/rules.md`, and regenerate
+`facts.json` via `cargo run -p xtask -- gen-facts`. All coverage audits derive
+the alias map automatically from the live registry and `facts.json` — there are
+no hand-coded alias tables left in `coverage_audit_*.rs`.
 
 ## Bench-scale coverage (soft)
 
@@ -302,9 +295,11 @@ test always passes and only prints a summary of the rule kinds absent from every
 to see the listing.
 
 If your rule's dispatch shape is genuinely new (for example, a cross-file
-aggregation that the existing S6, S7, and S8 scenarios do not exercise), consider
-extending one of those scenarios so `xtask bench-compare` gates regressions of
-its performance shape. This is opt-in; most rule additions do not need it.
+aggregation that the existing `s1_layout`, `s2_content`, `s3_relational`,
+`s4_workspace`, `sfix_all`, `syaml_mid`, and `relation_coalescing` scenarios do
+not exercise), consider extending one of those scenarios so `xtask bench-compare`
+gates regressions of its performance shape. This is opt-in; most rule additions
+do not need it.
 
 ## Common failures
 

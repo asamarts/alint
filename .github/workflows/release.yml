@@ -821,20 +821,13 @@ jobs:
           publish npm-dist/alint/
           wait_served @asamarts/alint
 
-  publish-pypi:
-    name: publish alint to PyPI
-    # `needs: release` so the wheels repackage the exact tarballs that are live on
-    # the GitHub Release -- Path B: byte-identical, attested bytes, so the release's
-    # own build-provenance transitively covers the wheel payload (ADR-0015 /
-    # docs/design/distribution-pypi.md, section 7). Tokenless via PyPI Trusted
-    # Publishing (OIDC), mirroring publish-crates / publish-npm; no PYPI_API_TOKEN,
-    # so nothing here can expire mid-release. A missing Trusted Publisher fails THIS
-    # job on the next release (register it on PyPI, then `gh run rerun --failed`);
-    # like npm/crates, it must never be fixed by re-tagging.
+  build-wheels:
+    name: build PyPI wheels (Path B)
+    # Assemble and check wheels in an unprivileged job (contents: read only) so
+    # third-party tooling (`twine`) never executes inside the OIDC publishing job.
     needs: release
     runs-on: ubuntu-latest
     permissions:
-      id-token: write   # OIDC for PyPI Trusted Publishing + PEP 740 attestation signing
       contents: read    # `gh release download` only; no writes
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -869,8 +862,30 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m pip install --quiet --disable-pip-version-check twine
+          python3 -m pip install --quiet --disable-pip-version-check twine==6.1.0
           python3 -m twine check dist/*
+      - name: upload checked wheels
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: pypi-wheels
+          path: dist/*.whl
+          retention-days: 1
+
+  publish-pypi:
+    name: publish alint to PyPI
+    # Minimal OIDC publishing job: receives the checked wheels artifact from
+    # `build-wheels` and invokes only `pypa/gh-action-pypi-publish`. No third-party
+    # package installation runs with `id-token: write`.
+    needs: build-wheels
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # OIDC for PyPI Trusted Publishing + PEP 740 attestation signing
+    steps:
+      - name: download checked wheels
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: pypi-wheels
+          path: dist
       - name: publish to PyPI (Trusted Publishing + PEP 740 attestations)
         # id-token: write above covers BOTH the OIDC publish exchange and the PEP 740
         # attestation signing (Sigstore, PyPI OIDC identity); this action does NOT
@@ -1001,12 +1016,12 @@ jobs:
           # stay at any past version (so local `vsce package` during
           # development works); CI rewrites to the release tag here.
           ver="${TAG#v}"
-          node -e "
-            const fs = require('fs');
-            const pkg = require('./package.json');
-            pkg.version = '$ver';
-            fs.writeFileSync('./package.json', JSON.stringify(pkg, null, 2) + '\n');
-          "
+          VER="$ver" node -e '
+            const fs = require("fs");
+            const pkg = require("./package.json");
+            pkg.version = process.env.VER;
+            fs.writeFileSync("./package.json", JSON.stringify(pkg, null, 2) + "\n");
+          '
           echo "==> extension version set to $ver"
           npm ci
           npm run audit

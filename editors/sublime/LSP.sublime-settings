@@ -11,7 +11,7 @@
       // alint is repo-structural (it lints every file), but Sublime LSP
       // attaches by scope selector — there is no "all files" wildcard.
       // This is a broad common-language selector; extend it as needed.
-      "selector": "source.c | source.c++ | source.go | source.js | source.json | source.python | source.rust | source.ts | source.tsx | source.yaml | source.toml | text.html.markdown",
+      "selector": "source.c | source.c++ | source.go | source.js | source.js.jsx | source.json | source.python | source.ruby | source.rust | source.ts | source.tsx | source.yaml | source.toml | text.html.markdown",
       "schemes": ["file"],
       // Until it is told the workspace is trusted, the server runs nothing
       // the repository's config could start (command rules, rules that run

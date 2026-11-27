@@ -122,34 +122,38 @@ fn build_sarif(
             short_description: SarifText {
                 text: format!("alint rule `{}`", rr.rule_id),
             },
-            help_uri: rr.policy_url.as_deref().map(str::to_string),
+            help_uri: rr.policy_url.as_deref().and_then(valid_sarif_help_uri),
         });
 
         let marks: Option<&ResultMarks> = baseline.and_then(|b| b.per_result.get(idx));
 
         // Live (new) findings — drive the exit code; tagged `new` under a baseline.
-        for (vi, v) in rr.violations.iter().enumerate() {
-            let mut res = base_result(rr.rule_id.as_ref(), rr.level, v, config_uri);
-            // `partialFingerprints` carries the canonical `violation_fingerprint`
-            // so GitHub Code Scanning correlates alerts across runs. The value is
-            // the baseline marks' fingerprint when a baseline is in effect, else
-            // the pre-computed source the CLI supplies for the no-baseline path;
-            // both are the same canonical identity. `baselineState: new` is
-            // baseline-specific, so it stays gated on an active baseline while the
-            // fingerprint is emitted either way.
-            let fp = marks.and_then(|m| m.live_fingerprints.get(vi)).or_else(|| {
-                fingerprints
-                    .and_then(|f| f.get(idx))
-                    .and_then(|r| r.get(vi))
-            });
-            if let Some(fp) = fp {
-                if baseline.is_some() {
-                    res.baseline_state = Some("new");
+        // Skip `Level::Off` rules: SARIF 2.1.0 §3.27.10 forbids `level: "none"`
+        // on failure results (`kind: "fail"` / omitted default).
+        if rr.level != Level::Off {
+            for (vi, v) in rr.violations.iter().enumerate() {
+                let mut res = base_result(rr.rule_id.as_ref(), rr.level, v, config_uri);
+                // `partialFingerprints` carries the canonical `violation_fingerprint`
+                // so GitHub Code Scanning correlates alerts across runs. The value is
+                // the baseline marks' fingerprint when a baseline is in effect, else
+                // the pre-computed source the CLI supplies for the no-baseline path;
+                // both are the same canonical identity. `baselineState: new` is
+                // baseline-specific, so it stays gated on an active baseline while the
+                // fingerprint is emitted either way.
+                let fp = marks.and_then(|m| m.live_fingerprints.get(vi)).or_else(|| {
+                    fingerprints
+                        .and_then(|f| f.get(idx))
+                        .and_then(|r| r.get(vi))
+                });
+                if let Some(fp) = fp {
+                    if baseline.is_some() {
+                        res.baseline_state = Some("new");
+                    }
+                    res.partial_fingerprints = Some(fingerprint_map(fp));
+                    numbered.push((results.len(), fp, (true, OccurrenceKey::of(&rr.rule_id, v))));
                 }
-                res.partial_fingerprints = Some(fingerprint_map(fp));
-                numbered.push((results.len(), fp, (true, OccurrenceKey::of(&rr.rule_id, v))));
+                results.push(res);
             }
-            results.push(res);
         }
 
         for note in &rr.notes {
@@ -198,7 +202,9 @@ fn build_sarif(
 
         // Baselined findings — marked, not removed, so Code Scanning dismisses
         // (rather than closes-then-reopens) the alert.
-        if let Some(m) = marks {
+        if rr.level != Level::Off
+            && let Some(m) = marks
+        {
             for sf in &m.suppressed {
                 let mut res = base_result(rr.rule_id.as_ref(), rr.level, &sf.violation, config_uri);
                 res.suppressions = vec![SarifSuppression { kind: "external" }];
@@ -357,12 +363,47 @@ fn base_result(rule_id: &str, level: Level, v: &Violation, config_uri: &str) -> 
     }
 }
 
+/// Accept only `http://` or `https://` URLs with a non-empty authority as
+/// SARIF `helpUri`, percent-encoding characters disallowed in RFC 3986 URIs.
+/// Redacted placeholders (`"<redacted>"`) and non-HTTP schemes (`javascript:`)
+/// are omitted so `helpUri` always satisfies SARIF 2.1.0's `"format": "uri"`.
+fn valid_sarif_help_uri(raw: &str) -> Option<String> {
+    let rest = raw
+        .get(..8)
+        .filter(|p| p.eq_ignore_ascii_case("https://"))
+        .map(|_| &raw[8..])
+        .or_else(|| {
+            raw.get(..7)
+                .filter(|p| p.eq_ignore_ascii_case("http://"))
+                .map(|_| &raw[7..])
+        })?;
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if authority.is_empty() {
+        return None;
+    }
+    let mut out = String::with_capacity(raw.len());
+    for byte in raw.bytes() {
+        if byte.is_ascii_graphic()
+            && !matches!(
+                byte,
+                b'<' | b'>' | b'"' | b'\\' | b'^' | b'`' | b'{' | b'|' | b'}'
+            )
+        {
+            out.push(char::from(byte));
+        } else {
+            push_percent_encoded_byte(&mut out, byte);
+        }
+    }
+    Some(out)
+}
+
 fn finding_locations(v: &Violation, config_uri: &str) -> Vec<SarifLocation> {
+    let line = v.report_line().filter(|&n| n > 0);
+    let column = v.report_column().filter(|&n| n > 0);
     let region = v.report_range().map(source_range_to_sarif).or_else(|| {
-        let line = v.report_line();
-        let column = v.report_column();
         (line.is_some() || column.is_some()).then_some(SarifRegion {
-            start_line: line,
+            // SARIF 2.1.0 §3.30.6: if `startColumn` is present, `startLine` SHALL be present.
+            start_line: line.or(column.is_some().then_some(1)),
             start_column: column,
             end_line: None,
             end_column: None,
@@ -376,8 +417,8 @@ fn finding_locations(v: &Violation, config_uri: &str) -> Vec<SarifLocation> {
             config_uri.to_string(),
             region.or_else(|| {
                 Some(SarifRegion {
-                    start_line: Some(v.report_line().unwrap_or(1)),
-                    start_column: v.report_column(),
+                    start_line: Some(line.unwrap_or(1)),
+                    start_column: column,
                     end_line: None,
                     end_column: None,
                 })
@@ -402,7 +443,9 @@ fn finding_related_locations(v: &Violation, config_uri: &str) -> Vec<SarifRelate
     locations.extend(
         v.related_locations
             .iter()
-            .map(|related| SarifRelatedLocation {
+            .enumerate()
+            .map(|(index, related)| SarifRelatedLocation {
+                id: index + 1,
                 physical_location: SarifPhysicalLocation {
                     artifact_location: SarifArtifactLocation {
                         uri: path_to_uri(&related.path),
@@ -415,7 +458,9 @@ fn finding_related_locations(v: &Violation, config_uri: &str) -> Vec<SarifRelate
             }),
     );
     if v.related_locations_omitted > 0 {
+        let next_id = locations.len() + 1;
         locations.push(SarifRelatedLocation {
+            id: next_id,
             physical_location: SarifPhysicalLocation {
                 artifact_location: SarifArtifactLocation {
                     uri: config_uri.to_string(),
@@ -432,10 +477,10 @@ fn finding_related_locations(v: &Violation, config_uri: &str) -> Vec<SarifRelate
 
 fn source_range_to_sarif(range: &alint_core::SourceRange) -> SarifRegion {
     SarifRegion {
-        start_line: Some(range.start_line()),
-        start_column: Some(range.start_column()),
-        end_line: Some(range.end_line()),
-        end_column: Some(range.end_column()),
+        start_line: Some(range.start_line().max(1)),
+        start_column: Some(range.start_column().max(1)),
+        end_line: Some(range.end_line().max(1)),
+        end_column: Some(range.end_column().max(1)),
     }
 }
 fn analysis_failure_locations(
@@ -445,18 +490,16 @@ fn analysis_failure_locations(
     let path = failure.report_path();
     let pathless = path.is_none();
     let uri = path.map_or_else(|| config_uri.to_string(), path_to_uri);
+    let line = failure.line.filter(|&n| n > 0);
+    let column = failure.column.filter(|&n| n > 0);
     let region = (!failure.path_is_sensitive())
         .then(|| {
-            (pathless || failure.line.is_some() || failure.column.is_some()).then_some(
-                SarifRegion {
-                    start_line: failure
-                        .line
-                        .or((pathless || failure.column.is_some()).then_some(1)),
-                    start_column: failure.column,
-                    end_line: None,
-                    end_column: None,
-                },
-            )
+            (pathless || line.is_some() || column.is_some()).then_some(SarifRegion {
+                start_line: line.or((pathless || column.is_some()).then_some(1)),
+                start_column: column,
+                end_line: None,
+                end_column: None,
+            })
         })
         .flatten();
     vec![SarifLocation {
@@ -490,10 +533,10 @@ fn build_fixes(rule_id: &str, v: &Violation) -> Vec<SarifFix> {
     for pe in &v.proposed_edits {
         let r = &pe.region;
         let deleted_region = SarifRegion {
-            start_line: Some(r.start_line),
-            start_column: Some(r.start_column),
-            end_line: Some(r.end_line),
-            end_column: Some(r.end_column),
+            start_line: Some(r.start_line.max(1)),
+            start_column: Some(r.start_column.max(1)),
+            end_line: Some(r.end_line.max(1)),
+            end_column: Some(r.end_column.max(1)),
         };
         let inserted_content = (!pe.inserted.is_empty()).then(|| SarifText {
             text: pe.inserted.clone(),
@@ -705,6 +748,7 @@ struct SarifLocation {
 
 #[derive(Serialize)]
 struct SarifRelatedLocation {
+    id: usize,
     #[serde(rename = "physicalLocation")]
     physical_location: SarifPhysicalLocation,
     message: SarifText,
@@ -1012,8 +1056,9 @@ mod tests {
         };
         let v = render(&report);
         let results = v["runs"][0]["results"].as_array().unwrap();
-        assert_eq!(results[0]["level"], "none");
-        assert_eq!(results[1]["level"], "note");
+        assert_eq!(results.len(), 1, "Level::Off violation must be skipped");
+        assert_eq!(results[0]["ruleId"], "info");
+        assert_eq!(results[0]["level"], "note");
     }
 
     #[test]
@@ -1859,5 +1904,100 @@ mod tests {
                 "{extra} must be live: {with_extra:?}"
             );
         }
+    }
+
+    #[test]
+    fn related_locations_carry_sequential_ids_and_omitted_summary_id() {
+        let mut v = Violation::new("duplicate key")
+            .with_path(Path::new("a.yml"))
+            .with_location(2, 3)
+            .with_related_locations([
+                RelatedLocation::new("b.yml", "other")
+                    .with_range(SourceRange::new(4, 1, 4, 5).unwrap()),
+                RelatedLocation::new("c.yml", "third"),
+            ]);
+        v.related_locations_omitted = 2;
+        let report = Report {
+            results: vec![RuleResult {
+                rule_id: "uniq".into(),
+                level: Level::Error,
+                policy_url: None,
+                violations: vec![v],
+                notes: Vec::new(),
+                is_fixable: false,
+                analysis_failures: Vec::new(),
+            }],
+        };
+        let out = render(&report);
+        let rels = out["runs"][0]["results"][0]["relatedLocations"]
+            .as_array()
+            .unwrap();
+        assert_eq!(rels.len(), 3);
+        assert_eq!(rels[0]["id"], 1);
+        assert_eq!(rels[1]["id"], 2);
+        assert_eq!(rels[2]["id"], 3);
+    }
+
+    #[test]
+    fn sarif_omits_non_http_help_uri_clamps_regions_and_skips_level_off() {
+        let mut col_only = Violation::new("col only").with_path(Path::new("src/a.rs"));
+        col_only.column = Some(3);
+        let mut zero_coords = Violation::new("zero").with_path(Path::new("src/b.rs"));
+        zero_coords.line = Some(0);
+        zero_coords.column = Some(0);
+        let report = Report {
+            results: vec![
+                RuleResult {
+                    rule_id: "redacted-url".into(),
+                    level: Level::Warning,
+                    policy_url: Some("<redacted>".into()),
+                    violations: vec![col_only, zero_coords],
+                    notes: Vec::new(),
+                    is_fixable: false,
+                    analysis_failures: Vec::new(),
+                },
+                RuleResult {
+                    rule_id: "js-url".into(),
+                    level: Level::Warning,
+                    policy_url: Some("javascript:alert(1)".into()),
+                    violations: vec![Violation::new("x").with_path(Path::new("src/c.rs"))],
+                    notes: Vec::new(),
+                    is_fixable: false,
+                    analysis_failures: Vec::new(),
+                },
+                RuleResult {
+                    rule_id: "off-rule".into(),
+                    level: Level::Off,
+                    policy_url: None,
+                    violations: vec![Violation::new("hidden").with_path(Path::new("src/d.rs"))],
+                    notes: Vec::new(),
+                    is_fixable: false,
+                    analysis_failures: Vec::new(),
+                },
+            ],
+        };
+        let out = render(&report);
+        let rules = out["runs"][0]["tool"]["driver"]["rules"]
+            .as_array()
+            .unwrap();
+        for rule in rules {
+            assert!(
+                rule.get("helpUri").is_none(),
+                "invalid policy_url must not emit helpUri: {rule}"
+            );
+        }
+        let results = out["runs"][0]["results"].as_array().unwrap();
+        assert_eq!(results.len(), 3, "Level::Off violation must be omitted");
+        assert!(results.iter().all(|r| r["ruleId"] != "off-rule"));
+        let col_region = &results[0]["locations"][0]["physicalLocation"]["region"];
+        assert_eq!(col_region["startLine"], 1);
+        assert_eq!(col_region["startColumn"], 3);
+        assert!(
+            results[1]["locations"][0]["physicalLocation"]
+                .get("region")
+                .is_none(),
+            "zero line/column must not emit 0-valued SARIF region: {}",
+            results[1]
+        );
     }
 }

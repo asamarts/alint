@@ -48,6 +48,16 @@ impl<'t> JsonSyntax<'t> {
         let stripped = if strict {
             text
         } else {
+            if text
+                .trim_matches(|c: char| c == '\u{feff}' || c.is_whitespace())
+                .is_empty()
+            {
+                return Ok(Self {
+                    root: None,
+                    offset: text.len(),
+                    held: guarded.unwrap_or(0),
+                });
+            }
             text.trim_start_matches('\u{feff}')
         };
         let offset = text.len() - stripped.len();
@@ -115,33 +125,104 @@ impl<'t> JsonSyntax<'t> {
     /// paths ending in a key), as the document's entries place it: none for
     /// no path, and when no member or several (a repeated key, here or
     /// above it) are at the path.
+    ///
+    /// Built as a prefix trie over `paths` and resolved in a single traversal
+    /// of `self.root` (`O(N + M * avg_depth)` instead of `O(M * N)`).
     pub(crate) fn member_spans(&self, paths: &[Option<Vec<Segment>>]) -> Vec<Option<ByteSpan>> {
-        paths
-            .iter()
-            .map(|path| {
-                let (Segment::Key(key), above) = path.as_ref()?.split_last()? else {
-                    return None;
+        use std::collections::HashMap;
+
+        #[derive(Default)]
+        struct TrieNode<'a> {
+            keys: HashMap<&'a str, usize>,
+            indices: HashMap<usize, usize>,
+            queries: Vec<usize>,
+        }
+
+        #[derive(Clone, Copy)]
+        enum Hit {
+            None,
+            One(ByteSpan),
+            Many,
+        }
+
+        let Some(root) = self.root.as_ref() else {
+            return vec![None; paths.len()];
+        };
+        let mut nodes: Vec<TrieNode<'_>> = vec![TrieNode::default()];
+        for (qi, path) in paths.iter().enumerate() {
+            let Some(segments) = path.as_deref() else {
+                continue;
+            };
+            if !matches!(segments.last(), Some(Segment::Key(_))) {
+                continue;
+            }
+            let mut cur = 0usize;
+            for seg in segments {
+                cur = match seg {
+                    Segment::Key(key) => {
+                        if let Some(&next) = nodes[cur].keys.get(&**key) {
+                            next
+                        } else {
+                            let next = nodes.len();
+                            nodes.push(TrieNode::default());
+                            nodes[cur].keys.insert(key, next);
+                            next
+                        }
+                    }
+                    Segment::Index(idx) => {
+                        if let Some(&next) = nodes[cur].indices.get(idx) {
+                            next
+                        } else {
+                            let next = nodes.len();
+                            nodes.push(TrieNode::default());
+                            nodes[cur].indices.insert(*idx, next);
+                            next
+                        }
+                    }
                 };
-                let mut holders: Vec<&Value<'_>> = self.root.iter().collect();
-                for segment in above {
-                    holders = holders
-                        .into_iter()
-                        .flat_map(|holder| below(holder, segment))
-                        .collect();
+            }
+            nodes[cur].queries.push(qi);
+        }
+        if nodes[0].keys.is_empty() && nodes[0].indices.is_empty() {
+            return vec![None; paths.len()];
+        }
+
+        let mut hits = vec![Hit::None; paths.len()];
+        let mut stack: Vec<(usize, &Value<'_>)> = vec![(0, root)];
+        while let Some((node_idx, value)) = stack.pop() {
+            match value {
+                Value::Object(object) if !nodes[node_idx].keys.is_empty() => {
+                    for property in &object.properties {
+                        if let Some(&child) = nodes[node_idx].keys.get(name(property)) {
+                            if !nodes[child].queries.is_empty() {
+                                let span = self.span(property_value_range(property));
+                                for &qi in &nodes[child].queries {
+                                    hits[qi] = match hits[qi] {
+                                        Hit::None => Hit::One(span),
+                                        Hit::One(_) | Hit::Many => Hit::Many,
+                                    };
+                                }
+                            }
+                            if !nodes[child].keys.is_empty() || !nodes[child].indices.is_empty() {
+                                stack.push((child, &property.value));
+                            }
+                        }
+                    }
                 }
-                let mut members = holders.into_iter().flat_map(|holder| match holder {
-                    Value::Object(object) => object
-                        .properties
-                        .iter()
-                        .filter(|property| name(property) == &**key)
-                        .collect(),
-                    _ => Vec::new(),
-                });
-                let member = members.next()?;
-                members
-                    .next()
-                    .is_none()
-                    .then(|| self.span(property_value_range(member)))
+                Value::Array(array) if !nodes[node_idx].indices.is_empty() => {
+                    for (&idx, &child) in &nodes[node_idx].indices {
+                        if let Some(elem) = array.elements.get(idx) {
+                            stack.push((child, elem));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        hits.into_iter()
+            .map(|hit| match hit {
+                Hit::One(span) => Some(span),
+                Hit::None | Hit::Many => None,
             })
             .collect()
     }
@@ -222,19 +303,42 @@ fn property_value_range(property: &ObjectProp<'_>) -> jsonc_parser::common::Rang
     property.value.range()
 }
 
-/// The values at `segment` below `holder`: an object's members of that key,
-/// or an array's element at that index.
-fn below<'v, 't>(holder: &'v Value<'t>, segment: &Segment) -> Vec<&'v Value<'t>> {
-    match (holder, segment) {
-        (Value::Object(object), Segment::Key(key)) => object
-            .properties
-            .iter()
-            .filter(|property| name(property) == &**key)
-            .map(|property| &property.value)
-            .collect(),
-        (Value::Array(array), Segment::Index(index)) => {
-            array.elements.get(*index).into_iter().collect()
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::relation::Segment;
+
+    #[test]
+    fn member_spans_handles_wide_objects_duplicates_and_interleaved_bom_whitespace() {
+        use std::fmt::Write as _;
+        let mut text = String::from("{");
+        let mut paths: Vec<Option<Vec<Segment>>> = Vec::new();
+        for i in 0..20_000 {
+            if i > 0 {
+                text.push(',');
+            }
+            let _ = write!(text, "\"k{i}\":{i}");
+            if i % 20 == 0 {
+                paths.push(Some(vec![Segment::Key(format!("k{i}").into())]));
+            }
         }
-        _ => Vec::new(),
+        text.push('}');
+        let syntax = JsonSyntax::read(&text, None, false).unwrap();
+        let spans = syntax.member_spans(&paths);
+        assert_eq!(spans.len(), paths.len());
+        assert_eq!(&text[spans[0].unwrap().as_range()], "0");
+        assert_eq!(&text[spans[1].unwrap().as_range()], "20");
+
+        // Duplicate key yields None (ambiguous span).
+        let dup_syntax = JsonSyntax::read(r#"{"a": 1, "a": 2}"#, None, false).unwrap();
+        let dup_ptr = [Some(vec![Segment::Key("a".into())])];
+        let dup_spans = dup_syntax.member_spans(&dup_ptr);
+        assert_eq!(dup_spans, [None]);
+
+        // Interleaved BOM + whitespace parses as empty document cleanly.
+        let empty = JsonSyntax::read(" \u{feff} \t ", None, false).unwrap();
+        let mut count = 0;
+        empty.members(&mut |_| count += 1);
+        assert_eq!(count, 0);
     }
 }

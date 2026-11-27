@@ -42,13 +42,17 @@ alint treats a coding agent as a first-class consumer. Your one rule set drives 
 
 ## The `agent` output format
 
-`alint check --format agent` emits one JSON envelope. It is a check-only format: `alint fix` accepts only `human`, `json`, or `markdown`, and rejects `--format agent`. The envelope has four top-level fields, stable behind `schema_version`:
+<!-- alint:since=0.23.0 -->
+`alint check --format agent` emits one JSON envelope. It is a check-only format: `alint fix` accepts only `human`, `json`, or `markdown`, and rejects `--format agent`. The envelope carries five always-present top-level fields (plus optional `notes`), stable behind `schema_version`:
 
 - **`schema_version`** and a literal **`format: "agent"`**.
-- **`summary`**: `total_violations`, `by_severity` (`error` / `warning` / `info`), `fixable_violations`, `passing_rules`, `failing_rules`.
+- **`summary`**: `total_violations`, `by_severity` (`error` / `warning` / `info`), `fixable_violations`, `passing_rules`, `failing_rules`, `total_analysis_failures`.
 - **`violations`**: a single flat array (unlike `--format json`, which nests by rule).
+- **`analysis_failures`**: incomplete-analysis records flattened across all rules (always present; empty when analysis completed cleanly).
+- **`notes`** *(optional)*: non-violation note count (`count`, `details_format: "json"`), omitted when zero.
 
-Each violation object carries `rule_id`, `severity`, the location (`file`, `line`, `column`, present only when the finding has one), `human_message` (the rule's message verbatim), an `agent_instruction`, `fix_available`, a **`fix_command`** when the finding is fixable, and a `policy_url` when the rule declares one. The `agent_instruction` starts from a templated remediation sentence, `"<severity>: <message>. To resolve: edit <path>:<line>:<col>"` (or a repository-level phrasing for a path-less finding); a fix hint is appended when the finding is fixable and a policy hint when a `policy_url` is set, and the whole always closes with a period. The `fix_command` is the argv **after** the `alint` program name, `["fix", "--only", "<rule-id>"]`, so an agent runs the fix without parsing English, and a CLI-parse test guarantees it only ever names flags the binary accepts.
+Each violation object carries `rule_id`, `severity`, the location (`file`, `line`, `column`, present only when the finding has one), `human_message` (sanitized for terminal/bidi safety in v0.24+; see below), an `agent_instruction`, `fix_available` (computed per violation for Safe auto-fixes), a **`fix_command`** when the finding is fixable, an optional **`proposed_edit`** array of exact Safe edit payloads when representable, and a `policy_url` when the rule declares one. The `agent_instruction` starts from a templated remediation sentence, `"<severity>: <message>. To resolve: edit <path>:<line>:<col>"` (or a repository-level phrasing for a path-less finding); a parenthetical fix hint `(or run \`alint fix --only <rule-id>\` to apply the auto-fix)` is appended when the finding is fixable and a policy hint when a `policy_url` is set, and the whole always closes with a period. The `fix_command` is the argv **after** the `alint` program name, `["fix", "--only", "<rule-id>"]`, so an agent runs the fix without parsing English, and a CLI-parse test guarantees it only ever names flags the binary accepts.
+<!-- /alint:since -->
 
 <!-- alint:since=0.24 -->
 From v0.24, `human_message`, `agent_instruction`, `policy_url`, and `analysis_failures[].human_message` are sanitized of terminal controls, bidi overrides/isolates, zero-width characters, and astral tag characters, while raw machine paths stay intact in `file`.
@@ -82,6 +86,7 @@ alint check --format agent
 
 One fixable finding comes back as a flat object with a ready-to-run `fix_command`:
 
+<!-- alint:since=0.23.0 -->
 ```json
 {
   "schema_version": 1,
@@ -91,7 +96,8 @@ One fixable finding comes back as a flat object with a ready-to-run `fix_command
     "by_severity": { "error": 0, "warning": 1, "info": 0 },
     "fixable_violations": 1,
     "passing_rules": 12,
-    "failing_rules": 1
+    "failing_rules": 1,
+    "total_analysis_failures": 0
   },
   "violations": [
     {
@@ -105,9 +111,11 @@ One fixable finding comes back as a flat object with a ready-to-run `fix_command
       "fix_available": true,
       "fix_command": ["fix", "--only", "no-trailing-whitespace"]
     }
-  ]
+  ],
+  "analysis_failures": []
 }
 ```
+<!-- /alint:since -->
 
 The agent runs `fix_command` and the loop closes without it ever reading human output. To keep the standing instructions current, splice them on every rules change:
 

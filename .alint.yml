@@ -32,7 +32,7 @@ ignore:
   # The README demo fixture (demo/fixture/**) is the repo that the VHS
   # tape records `alint check` / `alint fix` against, so it ships
   # deliberate drift: a scratch PLAN.md at root, trailing whitespace, a
-  # missing final newline, a BOM, an unpinned action. Dogfooding alint
+  # missing final newline, and an unpinned action. Dogfooding alint
   # over it would re-fire exactly the rules the demo exists to show.
   # (The grossest bits, a tracked `target/` and a `.DS_Store`, are NOT
   # committed; the tape synthesizes them into a scratch copy at record

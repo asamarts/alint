@@ -285,9 +285,10 @@ impl Merger {
         merged.limits.merge_from(limits);
         // `allow_out_of_root` and `baseline` are top-level-only (an
         // `extends:`'d value is refused upstream); the later config wins when
-        // it sets one.
-        if !allow_out_of_root.is_confined() {
-            merged.allow_out_of_root = allow_out_of_root.clone();
+        // it explicitly sets one (including `allow_out_of_root: false` in a
+        // `.alint.d/` drop-in overriding a root `allow_out_of_root: true`).
+        if allow_out_of_root.is_some() {
+            merged.allow_out_of_root.clone_from(allow_out_of_root);
         }
         if baseline.is_some() {
             merged.baseline.clone_from(baseline);
@@ -422,6 +423,24 @@ impl Merger {
              {MAX_MERGED_ENTRIES} supported; flatten the `extends:` chain or split the ruleset"
         )))
     }
+}
+
+/// Refuse a [`RawConfig`] whose total entry count exceeds [`MAX_MERGED_ENTRIES`]
+/// (used after nested configs append their rules post-merge).
+pub(crate) fn check_raw_size(raw: &RawConfig) -> Result<()> {
+    let entries = raw.entry_count();
+    if entries <= MAX_MERGED_ENTRIES {
+        return Ok(());
+    }
+    let held = if raw.v2.object_count() == 0 {
+        "rules, templates, facts, vars and `ignore:` patterns"
+    } else {
+        "rules, templates, facts, vars, `ignore:` patterns, selectors and relations"
+    };
+    Err(Error::Other(format!(
+        "the merged config holds {entries} entries ({held}), more than the \
+         {MAX_MERGED_ENTRIES} supported; flatten the `extends:` chain or split the ruleset"
+    )))
 }
 
 /// The entries of one list of a config pushed onto a [`Merger`]: moved out of

@@ -49,17 +49,21 @@ impl PerFileRule for MarkdownImagesHaveAltRule {
             ]);
         };
         let mut violations = Vec::new();
+        let mut seen_dests: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
         for image in crate::markdown::images(text) {
             if !image.alt.trim().is_empty() {
                 continue;
             }
+            let occ = seen_dests.entry(image.dest.clone()).or_insert(0);
+            *occ += 1;
             let message = self
                 .message
                 .clone()
                 .unwrap_or_else(|| "Markdown image has no alt text".to_string());
             let mut violation = Violation::new(message)
                 .with_path(Arc::<Path>::from(path))
-                .with_baseline_key(format!("image\0{}", image.span.start));
+                .with_baseline_key(format!("image\0{}\0{}", image.dest, *occ));
             if let Some(range) = SourceRange::from_byte_range(text, image.span) {
                 violation = violation.with_range(range);
             }
@@ -142,5 +146,24 @@ mod tests {
             violations[0].analysis_failure_kind(),
             Some(alint_core::AnalysisFailureKind::ResourceParse)
         );
+    }
+
+    #[test]
+    fn baseline_key_survives_edits_above_image() {
+        let rule = super::build(&spec_yaml(
+            "id: alt\nkind: markdown_images_have_alt\npaths: '*.md'\nlevel: warning\n",
+        ))
+        .unwrap();
+        let before = "![](hero.png)\n![](hero.png)\n";
+        let after = "# Added heading\n\nExtra prose above.\n\n![](hero.png)\n![](hero.png)\n";
+        let (tmp1, idx1) = tempdir_with_files(&[("a.md", before.as_bytes())]);
+        let (tmp2, idx2) = tempdir_with_files(&[("a.md", after.as_bytes())]);
+        let v1 = rule.evaluate(&ctx(tmp1.path(), &idx1)).unwrap();
+        let v2 = rule.evaluate(&ctx(tmp2.path(), &idx2)).unwrap();
+        assert_eq!(v1.len(), 2);
+        assert_eq!(v2.len(), 2);
+        assert_eq!(v1[0].baseline_key, v2[0].baseline_key);
+        assert_eq!(v1[1].baseline_key, v2[1].baseline_key);
+        assert_ne!(v1[0].baseline_key, v1[1].baseline_key);
     }
 }

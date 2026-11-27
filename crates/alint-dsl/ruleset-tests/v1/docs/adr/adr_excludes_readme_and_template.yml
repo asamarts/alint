@@ -1,0 +1,35 @@
+test_version: 1
+name: docs/adr excludes standard MADR README, index, and template files
+tags: [check, extends, bundled, adr]
+
+given:
+  tree:
+    docs:
+      adr:
+        README.md: "# Architecture Decision Records\n"
+        index.md: "# ADR Index\n"
+        adr-template.md: "# Template\n"
+        0001-use-alint.md: |
+          # Use alint
+
+          ## Status
+
+          Accepted
+
+          ## Context
+
+          We need policy checks.
+
+          ## Decision
+
+          Adopt alint.
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/docs/adr@v1
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

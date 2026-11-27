@@ -105,7 +105,7 @@ pub use extract::{
     extract_entry_rows_strict_yaml_bounded, extract_values, extract_values_bounded,
     extract_values_with_context, is_non_literal,
 };
-pub use facts::{FactKind, FactSpec, FactValue, FactValues, evaluate_facts};
+pub use facts::{FactKind, FactSpec, FactValue, FactValues, evaluate_facts, validate_facts};
 pub use kind_meta::{
     Capability, CapabilityCondition, CapabilityMeta, ContentAccess, DependencyMeta, DispatchClass,
     FixOpMeta, FixTrustClass, GitOperation, GitTrackedSupport, KindMeta, OptionPredicate,
@@ -153,7 +153,7 @@ pub use trace::{
 };
 pub use walker::{
     AnalysisRead, FileEntry, FileIndex, MAX_ANALYZE_BYTES, WalkOptions, index_scan_count,
-    read_capped_or_skip, read_for_analysis, walk, walk_subtrees,
+    read_capped_or_skip, read_for_analysis, validate_ignore_patterns, walk, walk_subtrees,
 };
 pub use when::{WhenEnv, WhenError, WhenExpr};
 

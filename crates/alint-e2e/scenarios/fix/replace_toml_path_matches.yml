@@ -1,0 +1,43 @@
+test_version: 1
+name: replace on toml_path_matches rewrites the string value while preserving TOML comments and siblings
+tags: [fix, toml_path_matches, replace, toml]
+
+given:
+  tree:
+    Cargo.toml: |
+      # Workspace package manifest
+      [package]
+      name = "demo"
+      version = "1.2.3" # pinned
+  config: |
+    version: 1
+    rules:
+      - id: v-prefix-toml
+        kind: toml_path_matches
+        paths: "Cargo.toml"
+        path: "$.package.version"
+        matches: "^v"
+        level: error
+        fix:
+          replace:
+            pattern: "^"
+            replacement: "v"
+            applicability: safe
+
+when: [check, fix, check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: v-prefix-toml, level: error, path: Cargo.toml}
+  - exit: success
+    applied: [v-prefix-toml]
+  - exit: success
+    violations: []
+
+expect_tree:
+  Cargo.toml: |
+    # Workspace package manifest
+    [package]
+    name = "demo"
+    version = "v1.2.3" # pinned

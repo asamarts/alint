@@ -258,10 +258,32 @@ fn read_checked_for_fix(
     if let Some(outcome) = check_fix_size(abs, display_path, ctx)? {
         return Ok(ReadForFix::Skipped(outcome));
     }
-    let bytes = std::fs::read(abs).map_err(|source| crate::error::Error::Io {
-        path: abs.to_path_buf(),
-        source,
-    })?;
+    let cap = ctx.fix_size_limit.unwrap_or(u64::MAX);
+    let bytes = match crate::bounded_file::read_regular_capped(abs, cap) {
+        Ok(bytes) => bytes,
+        Err(err) if err.kind() == std::io::ErrorKind::InvalidInput => {
+            return Ok(ReadForFix::Skipped(FixOutcome::Skipped(format!(
+                "{} is not a regular file",
+                ctx.shown_path(display_path)
+            ))));
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::FileTooLarge => {
+            let reason = format!(
+                "{} exceeds fix_size_limit. Raise \
+                 `fix_size_limit` in .alint.yml (or set it to `null` to disable) \
+                 to fix files this large.",
+                ctx.shown_path(display_path),
+            );
+            eprintln!("alint: warning: {reason}");
+            return Ok(ReadForFix::Skipped(FixOutcome::Skipped(reason)));
+        }
+        Err(source) => {
+            return Err(crate::error::Error::Io {
+                path: abs.to_path_buf(),
+                source,
+            });
+        }
+    };
     Ok(ReadForFix::Bytes(bytes))
 }
 
@@ -300,7 +322,7 @@ pub(crate) fn resolve_write_target(path: &Path) -> PathBuf {
 /// Propagates any I/O error from creating, writing, syncing, or renaming.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write as _;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::AtomicU64;
     // Unique sibling name: the pid distinguishes concurrent processes, the
     // atomic counter distinguishes concurrent threads in this process.
     static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -326,14 +348,13 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     if let Ok(meta) = std::fs::metadata(path) {
         refuse_unwritable(path, &meta)?;
     }
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    // A short, fixed-shape name: the target's own name is NOT embedded, so a
-    // long basename (> ~230 bytes) cannot push the temp past NAME_MAX (255 on
-    // most filesystems; the old `.{name}.alint-fix.{pid}.{n}` failed with
-    // ENAMETOOLONG / os error 36). pid + counter keep it unique.
-    let tmp = dir.join(format!(".alint-fix.{}.{n}.tmp", std::process::id()));
-    let write = || -> std::io::Result<()> {
-        let mut f = std::fs::File::create(&tmp)?;
+    // A short, fixed-shape, unpredictable sibling name created with `O_EXCL`
+    // (`create_new(true)`) and `0o600` on Unix so a pre-existing symlink cannot
+    // be followed and secret files (e.g. `0o600` `.env`) are never exposed
+    // world-readable during write before `set_permissions` restores the target
+    // mode. Retries on `AlreadyExists`.
+    let (tmp, mut f) = create_unique_temp(&dir, &COUNTER)?;
+    let mut write = || -> std::io::Result<()> {
         f.write_all(bytes)?;
         // Preserve the original file's mode when it exists (a rewrite) -- AFTER
         // the write, not before. A `write()` clears the setuid/setgid bits (the
@@ -352,6 +373,55 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         return Err(e);
     }
     Ok(())
+}
+
+/// Create a fresh sibling temp file in `dir` using `create_new(true)` (`O_EXCL`)
+/// and restricted `0o600` mode on Unix so pre-existing symlinks are never
+/// followed and written contents are never world-readable before `set_permissions`.
+fn create_unique_temp(
+    dir: &Path,
+    counter: &std::sync::atomic::AtomicU64,
+) -> std::io::Result<(PathBuf, std::fs::File)> {
+    use std::collections::hash_map::RandomState;
+    use std::hash::{BuildHasher as _, Hasher as _};
+    use std::sync::atomic::Ordering;
+
+    const MAX_ATTEMPTS: usize = 64;
+    let pid = std::process::id();
+    for _ in 0..MAX_ATTEMPTS {
+        let n = counter.fetch_add(1, Ordering::Relaxed);
+        let mut hasher = RandomState::new().build_hasher();
+        hasher.write_u64(n);
+        let nonce = hasher.finish();
+        let tmp = dir.join(format!(".alint-fix.{pid}.{n}.{nonce:016x}.tmp"));
+        match open_temp_exclusive(&tmp) {
+            Ok(file) => return Ok((tmp, file)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "could not allocate unique temporary file for atomic write",
+    ))
+}
+
+#[cfg(unix)]
+fn open_temp_exclusive(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+}
+
+#[cfg(not(unix))]
+fn open_temp_exclusive(path: &Path) -> std::io::Result<std::fs::File> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
 }
 
 /// The directory `write_atomic` writes its temporary file in: the target's

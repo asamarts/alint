@@ -51,6 +51,7 @@ impl Adapter for TomlRowsAdapter {
             .map_err(|_| AdapterError::Parse("the TOML document is not valid UTF-8".to_string()))?;
         let mut walk = Walk {
             text,
+            offset: 0,
             limits,
             values: false,
             descend_arrays: false,
@@ -76,6 +77,7 @@ impl TomlRowsAdapter {
     pub(crate) fn values(text: &str, limits: &Limits) -> Result<EntryTable, AdapterError> {
         let mut walk = Walk {
             text,
+            offset: 0,
             limits,
             values: true,
             descend_arrays: false,
@@ -95,6 +97,7 @@ impl TomlRowsAdapter {
     ) -> Result<EntryTable, AdapterError> {
         let mut walk = Walk {
             text,
+            offset: 0,
             limits,
             values: true,
             descend_arrays: true,
@@ -118,6 +121,7 @@ struct TomlValue {
 /// arrays inside `[[...]]` / `[...]` allocate zero `KeyPaths` nodes.
 struct Walk<'w> {
     text: &'w str,
+    offset: usize,
     limits: &'w Limits,
     values: bool,
     descend_arrays: bool,
@@ -134,18 +138,27 @@ enum WalkStep<'t> {
 
 impl Walk<'_> {
     fn document(&mut self) -> Result<(), AdapterError> {
+        if self
+            .text
+            .trim_matches(|c: char| c == '\u{feff}' || c.is_whitespace())
+            .is_empty()
+        {
+            return Ok(());
+        }
         let stripped = self.text.trim_start_matches('\u{feff}');
+        self.offset = self.text.len() - stripped.len();
+        self.text = stripped;
         if stripped.len() > crate::structured_format::MAX_STRUCTURED_BYTES {
             return Err(AdapterError::Parse(format!(
                 "TOML input exceeds the maximum supported size ({} bytes)",
                 crate::structured_format::MAX_STRUCTURED_BYTES
             )));
         }
-        let document = Document::parse(self.text).map_err(|error: toml_edit::TomlError| {
-            AdapterError::Parse(parse_error(self.text, &error))
+        let document = Document::parse(stripped).map_err(|error: toml_edit::TomlError| {
+            AdapterError::Parse(parse_error(stripped, &error))
         })?;
         // The lexer's tokens, held while the document was built.
-        self.entries.parsed += crate::structured_format::toml_tokens(self.text);
+        self.entries.parsed += crate::structured_format::toml_tokens(stripped);
         self.table(document.as_table())
     }
 
@@ -300,16 +313,18 @@ impl Walk<'_> {
         check_row_count(self.limits, self.entries.rows.len() + 1)?;
         // What the document holds for the member.
         self.entries.parsed += MEMBER + owned;
+        let offset = self.offset;
         let value_span = if self.values {
             let held = value();
             self.entries.values.push(held.value);
             held.span
+                .map(|s| ByteSpan::new(s.start + offset, s.end + offset))
         } else {
             None
         };
         self.entries.rows.push(EntryAt {
             path,
-            key_span: ByteSpan::new(span.start, span.end),
+            key_span: ByteSpan::new(span.start + offset, span.end + offset),
             value_span,
         });
         Ok(())
@@ -764,5 +779,15 @@ mod tests {
             2,
             "lazy PathStack must allocate only ROOT + `a`, not 1,000 empty inline tables"
         );
+    }
+
+    #[test]
+    fn multi_bom_and_whitespace_only_toml_keep_accurate_spans() {
+        let text = "\u{feff}\u{feff}k = \"v\"\n";
+        let out = output(text);
+        assert_eq!(located(text, &out.rows), ["k @ \"k\""]);
+        let vals = TomlRowsAdapter::values(text, &Limits::default()).unwrap();
+        assert_eq!(&text[vals.rows[0].value_span.unwrap().as_range()], "\"v\"");
+        assert_eq!(output(" \u{feff} \t\n").rows, []);
     }
 }

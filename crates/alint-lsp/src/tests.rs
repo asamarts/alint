@@ -43,6 +43,8 @@ fn finding(policy_url: Option<&str>) -> Finding {
         // 1-indexed location matching the 0-indexed range above.
         line: Some(4),
         column: Some(7),
+        has_path: true,
+        baseline_key: None,
         policy_url: policy_url.map(ToString::to_string),
         fixable: false,
         sensitive: false,
@@ -101,14 +103,20 @@ fn finding_to_diagnostic_omits_code_description_for_non_url_policy() {
 }
 
 #[test]
-fn range_contains_uses_half_open_end_and_empty_ranges_match_nothing() {
+fn range_contains_uses_half_open_end_and_matches_zero_width_at_marker() {
     let r = Range::new(Position::new(3, 6), Position::new(3, 7));
     assert!(range_contains(r, Position::new(3, 6)));
     assert!(!range_contains(r, Position::new(3, 7)));
     assert!(!range_contains(r, Position::new(3, 8)));
     assert!(!range_contains(r, Position::new(2, 6)));
     let empty = Range::new(Position::new(3, 6), Position::new(3, 6));
-    assert!(!range_contains(empty, Position::new(3, 6)));
+    assert!(range_contains(empty, Position::new(3, 6)));
+    assert!(!range_contains(empty, Position::new(3, 7)));
+    assert!(ranges_overlap(empty, empty));
+    assert!(!ranges_overlap(
+        empty,
+        Range::new(Position::new(3, 7), Position::new(3, 7))
+    ));
 }
 #[test]
 fn ranged_locations_use_utf16_and_related_information_respects_capability() {
@@ -822,7 +830,7 @@ fn set_content_maps_to_full_document_text_edit() {
         path: PathBuf::from("a.txt"),
         content: b"fixed\n".to_vec(),
     };
-    let ws = fix_edit_to_workspace_edit(&edit, &root).unwrap();
+    let ws = fix_edit_to_workspace_edit(&edit, &root, None, ResourceOpSupport::default()).unwrap();
     let changes = ws.changes.expect("content edit uses the changes map");
     let uri = Url::from_file_path(root.join("a.txt")).unwrap();
     let edits = &changes[&uri];
@@ -837,7 +845,13 @@ fn delete_maps_to_a_resource_operation() {
     let edit = FixEdit::DeleteFile {
         path: PathBuf::from("debug.log"),
     };
-    let ws = fix_edit_to_workspace_edit(&edit, &repo_root()).unwrap();
+    assert!(
+        fix_edit_to_workspace_edit(&edit, &repo_root(), None, ResourceOpSupport::default())
+            .is_none(),
+        "delete requires client resourceOperations support"
+    );
+    let ws =
+        fix_edit_to_workspace_edit(&edit, &repo_root(), None, ResourceOpSupport::all()).unwrap();
     assert!(ws.changes.is_none());
     let Some(DocumentChanges::Operations(ops)) = ws.document_changes else {
         panic!("delete must use resource operations");
@@ -855,7 +869,13 @@ fn create_maps_to_create_op_plus_insert_edit() {
         path: PathBuf::from("LICENSE"),
         content: b"Apache-2.0\n".to_vec(),
     };
-    let ws = fix_edit_to_workspace_edit(&edit, &repo_root()).unwrap();
+    assert!(
+        fix_edit_to_workspace_edit(&edit, &repo_root(), None, ResourceOpSupport::default())
+            .is_none(),
+        "create requires client resourceOperations support"
+    );
+    let ws =
+        fix_edit_to_workspace_edit(&edit, &repo_root(), None, ResourceOpSupport::all()).unwrap();
     let Some(DocumentChanges::Operations(ops)) = ws.document_changes else {
         panic!("create must use resource operations");
     };
@@ -873,7 +893,13 @@ fn rename_maps_to_rename_op() {
         from: PathBuf::from("FooBar.rs"),
         to: PathBuf::from("foo_bar.rs"),
     };
-    let ws = fix_edit_to_workspace_edit(&edit, &repo_root()).unwrap();
+    assert!(
+        fix_edit_to_workspace_edit(&edit, &repo_root(), None, ResourceOpSupport::default())
+            .is_none(),
+        "rename requires client resourceOperations support"
+    );
+    let ws =
+        fix_edit_to_workspace_edit(&edit, &repo_root(), None, ResourceOpSupport::all()).unwrap();
     let Some(DocumentChanges::Operations(ops)) = ws.document_changes else {
         panic!("rename must use resource operations");
     };
@@ -889,7 +915,9 @@ fn set_content_with_non_utf8_yields_no_edit() {
         path: PathBuf::from("a.bin"),
         content: vec![0xff, 0xfe],
     };
-    assert!(fix_edit_to_workspace_edit(&edit, &repo_root()).is_none());
+    assert!(
+        fix_edit_to_workspace_edit(&edit, &repo_root(), None, ResourceOpSupport::all()).is_none()
+    );
 }
 
 #[test]
@@ -942,9 +970,9 @@ fn located_edits_map_to_utf16_text_edits() {
         verify: alint_core::EditVerifier::None,
         isolation_group: None,
     };
-    let ws = located_edits_to_workspace_edit(&[edit], text, Path::new("a.txt"), &root).unwrap();
-    let changes = ws.changes.expect("a located edit uses the changes map");
     let uri = Url::from_file_path(root.join("a.txt")).unwrap();
+    let ws = located_edits_to_workspace_edit(&[edit], text, &uri).unwrap();
+    let changes = ws.changes.expect("a located edit uses the changes map");
     let edits = &changes[&uri];
     assert_eq!(edits.len(), 1);
     assert_eq!(edits[0].new_text, "DONE");
@@ -974,8 +1002,8 @@ fn located_edit_spanning_a_newline_maps_to_a_multi_line_range() {
         verify: alint_core::EditVerifier::None,
         isolation_group: None,
     };
-    let ws = located_edits_to_workspace_edit(&[edit], text, Path::new("a.txt"), &root).unwrap();
     let uri = Url::from_file_path(root.join("a.txt")).unwrap();
+    let ws = located_edits_to_workspace_edit(&[edit], text, &uri).unwrap();
     let te = &ws.changes.unwrap()[&uri][0];
     assert_eq!(te.range.start, Position::new(0, 0));
     assert_eq!(
@@ -989,9 +1017,8 @@ fn located_edit_spanning_a_newline_maps_to_a_multi_line_range() {
 #[test]
 fn located_edits_with_no_range_edits_yield_none() {
     // A located fixer that collected nothing offers NO action (not an empty one).
-    assert!(
-        located_edits_to_workspace_edit(&[], "abc", Path::new("a.txt"), &repo_root()).is_none()
-    );
+    let uri = Url::from_file_path(repo_root().join("a.txt")).unwrap();
+    assert!(located_edits_to_workspace_edit(&[], "abc", &uri).is_none());
 }
 
 #[test]
@@ -1029,6 +1056,8 @@ fn code_action_offers_the_located_replace_fix_end_to_end() {
         message: "forbidden".to_string(),
         line: Some(1),
         column: Some(3),
+        has_path: true,
+        baseline_key: None,
         policy_url: None,
         fixable: true,
         sensitive: false,
@@ -1109,6 +1138,8 @@ fn code_action_omits_sensitive_replacement_bytes() {
         message: "sensitive evidence <redacted:000000000000>".to_string(),
         line: Some(1),
         column: Some(7),
+        has_path: true,
+        baseline_key: None,
         policy_url: None,
         fixable: true,
         sensitive: true,
@@ -1188,6 +1219,8 @@ rules:
         message: "required pattern is missing".to_string(),
         line: Some(1),
         column: Some(1),
+        has_path: true,
+        baseline_key: None,
         policy_url: None,
         fixable: true,
         sensitive: false,
@@ -1253,6 +1286,8 @@ fn code_action_offers_a_structured_set_value_fix() {
         message: "value at path does not equal expected".to_string(),
         line: Some(1),
         column: Some(10),
+        has_path: true,
+        baseline_key: None,
         policy_url: None,
         fixable: true,
         sensitive: false,
@@ -1330,6 +1365,8 @@ fn code_action_withholds_a_fix_the_pipeline_would_demote() {
         message: "secret present".to_string(),
         line: Some(1),
         column: Some(1),
+        has_path: true,
+        baseline_key: None,
         policy_url: None,
         fixable: true,
         sensitive: false,
@@ -1394,6 +1431,8 @@ fn code_action_labels_an_unsafe_fix_and_does_not_prefer_it() {
         message: "forbidden".to_string(),
         line: Some(1),
         column: Some(3),
+        has_path: true,
+        baseline_key: None,
         policy_url: None,
         fixable: true,
         sensitive: false,
@@ -1462,6 +1501,7 @@ fn offered_fix_actions(root: &Path, files: &[&str]) -> Vec<String> {
         });
         {
             let mut st = backend.state.lock();
+            st.resource_ops = ResourceOpSupport::all();
             if let Some(session) = session.take() {
                 install_session(&mut st, root, &uri, session);
             } else {
@@ -1589,10 +1629,10 @@ fn located_lsp_path_maps_a_real_replace_fixer_to_utf16_text_edits() {
         text.as_bytes(),
         root,
     );
-    let ws = located_edits_to_workspace_edit(&edits, text, Path::new("a.txt"), root)
+    let uri = Url::from_file_path(root.join("a.txt")).unwrap();
+    let ws = located_edits_to_workspace_edit(&edits, text, &uri)
         .expect("the located edits map to a workspace edit");
     let changes = ws.changes.expect("located edits use the changes map");
-    let uri = Url::from_file_path(root.join("a.txt")).unwrap();
     let tes = &changes[&uri];
     assert_eq!(tes.len(), 2, "both TODO occurrences become TextEdits");
     assert!(tes.iter().all(|te| te.new_text == "DONE"));
@@ -1633,10 +1673,10 @@ fn code_action_offers_every_match_for_a_path_matches_replace() {
         text.as_bytes(),
         root,
     );
-    let ws = located_edits_to_workspace_edit(&edits, text, Path::new("app.json"), root)
+    let uri = Url::from_file_path(root.join("app.json")).unwrap();
+    let ws = located_edits_to_workspace_edit(&edits, text, &uri)
         .expect("the located edits map to a workspace edit");
     let changes = ws.changes.expect("located edits use the changes map");
-    let uri = Url::from_file_path(root.join("app.json")).unwrap();
     assert_eq!(
         changes[&uri].len(),
         2,
@@ -1858,5 +1898,530 @@ fn no_duplicate_keys_runs_on_per_file_did_change_hot_path_with_related_location(
             findings.is_empty(),
             "expected clean diagnostics: {findings:#?}"
         );
+    }
+}
+
+#[test]
+fn code_action_never_deletes_or_edits_config_for_path_sensitive_finding() {
+    use lsp_types::{
+        CodeActionContext, PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams,
+    };
+
+    // CARGO_PKG_NAME is always set by Cargo during `cargo test`.
+    let pkg = std::env::var("CARGO_PKG_NAME").expect("CARGO_PKG_NAME set by cargo test");
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().to_path_buf();
+    let cfg_text = "version: 1\nrules:\n  - id: forbid-secret-file\n    kind: file_absent\n    \
+         paths: \"{{env.CARGO_PKG_NAME}}\"\n    level: error\n    fix: { file_remove: {} }\n  \
+         - id: forbid-secret-word\n    kind: file_content_forbidden\n    \
+         paths: \"{{env.CARGO_PKG_NAME}}\"\n    pattern: \"version\"\n    level: error\n    \
+         fix: { replace: { replacement: \"CORRUPTED\" } }\n";
+    std::fs::write(root.join(".alint.yml"), cfg_text).unwrap();
+    std::fs::write(root.join(&pkg), "version: 1\n").unwrap();
+
+    let cfg_uri = Url::from_file_path(root.join(".alint.yml")).unwrap();
+    let check = check_workspace(
+        std::slice::from_ref(&root),
+        &[(cfg_uri.clone(), Some(cfg_text.to_string()))],
+        &Settings {
+            trusted: true,
+            ..Settings::default()
+        },
+        &alint_rules::builtin_registry(),
+    );
+    let (backend, _rx) = test_server();
+    {
+        let mut st = backend.state.lock();
+        st.folders = vec![root.clone()];
+        st.resource_ops = ResourceOpSupport::all();
+        st.open.insert(cfg_uri.clone());
+        st.documents.insert(cfg_uri.clone(), cfg_text.to_string());
+        st.versions.insert(cfg_uri.clone(), 1);
+        let docs = vec![(cfg_uri.clone(), Some(cfg_text.to_string()), Some(1), None)];
+        let _ = apply_check(&mut st, &docs, check, &LspOptions::default());
+        let findings = st
+            .diagnostics
+            .get(&cfg_uri)
+            .expect("path-sensitive findings anchored on .alint.yml");
+        assert_eq!(findings.len(), 2, "{findings:#?}");
+        assert!(findings.iter().all(|f| f.sensitive && !f.has_path));
+        for f in findings {
+            let md = render_finding(f);
+            assert!(
+                md.contains("withheld from LSP for sensitive findings"),
+                "hover must note withheld fix: {md}"
+            );
+        }
+    }
+    let resp = backend.code_action(CodeActionParams {
+        text_document: TextDocumentIdentifier { uri: cfg_uri },
+        range: Range::new(Position::new(0, 0), Position::new(0, 1)),
+        context: CodeActionContext::default(),
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    });
+    assert!(
+        resp.is_none(),
+        "path_sensitive findings must never offer codeAction on .alint.yml: {resp:?}"
+    );
+}
+
+#[test]
+fn code_action_never_leaks_secret_path_via_create_file() {
+    use lsp_types::{
+        CodeActionContext, PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams,
+    };
+
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().to_path_buf();
+    let cfg_text = "version: 1\nrules:\n  - id: require-secret-file\n    kind: file_exists\n    \
+         paths: \"{{env.CARGO_PKG_NAME}}\"\n    level: error\n    \
+         fix: { file_create: { content: \"x\\n\" } }\n";
+    std::fs::write(root.join(".alint.yml"), cfg_text).unwrap();
+
+    let cfg_uri = Url::from_file_path(root.join(".alint.yml")).unwrap();
+    let check = check_workspace(
+        std::slice::from_ref(&root),
+        &[(cfg_uri.clone(), Some(cfg_text.to_string()))],
+        &Settings {
+            trusted: true,
+            ..Settings::default()
+        },
+        &alint_rules::builtin_registry(),
+    );
+    let (backend, _rx) = test_server();
+    {
+        let mut st = backend.state.lock();
+        st.folders = vec![root.clone()];
+        st.resource_ops = ResourceOpSupport::all();
+        st.open.insert(cfg_uri.clone());
+        st.documents.insert(cfg_uri.clone(), cfg_text.to_string());
+        st.versions.insert(cfg_uri.clone(), 1);
+        let docs = vec![(cfg_uri.clone(), Some(cfg_text.to_string()), Some(1), None)];
+        let _ = apply_check(&mut st, &docs, check, &LspOptions::default());
+        assert!(
+            st.diagnostics
+                .get(&cfg_uri)
+                .is_some_and(|fs| fs.len() == 1 && fs[0].sensitive)
+        );
+    }
+    let resp = backend.code_action(CodeActionParams {
+        text_document: TextDocumentIdentifier { uri: cfg_uri },
+        range: Range::new(Position::new(0, 0), Position::new(0, 1)),
+        context: CodeActionContext::default(),
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    });
+    assert!(
+        resp.is_none(),
+        "path_sensitive create_file must never leak env path via LSP: {resp:?}"
+    );
+}
+
+#[test]
+fn byte_offset_to_position_and_located_edits_handle_leading_bom_and_reject_mid_scalar() {
+    let text = "\u{feff}a\u{1F600}TODO\n";
+    // Leading UTF-8 BOM (bytes 0..3) is zero-width, matching SourceRange.
+    assert_eq!(byte_offset_to_position(text, 0), Position::new(0, 0));
+    assert_eq!(byte_offset_to_position(text, 3), Position::new(0, 0));
+    let todo = text.find("TODO").unwrap();
+    assert_eq!(
+        byte_offset_to_position(text, todo),
+        Position::new(0, 3),
+        "'a'=1 unit + emoji=2 units => TODO starts at col 3, not 4"
+    );
+
+    let uri = Url::from_file_path(repo_root().join("a.txt")).unwrap();
+    let valid_edit = CollectedEdit {
+        edit: FixEdit::ReplaceRange {
+            path: PathBuf::from("a.txt"),
+            range: todo..todo + 4,
+            content: b"DONE".to_vec(),
+        },
+        applicability: Applicability::Safe,
+        verify: alint_core::EditVerifier::None,
+        isolation_group: None,
+    };
+    let ws = located_edits_to_workspace_edit(&[valid_edit], text, &uri).unwrap();
+    let te = &ws.changes.unwrap()[&uri][0];
+    assert_eq!(
+        te.range,
+        Range::new(Position::new(0, 3), Position::new(0, 7))
+    );
+
+    // Mid-UTF-8-scalar range (inside the 4-byte emoji) must be rejected cleanly.
+    let emoji_start = text.find('\u{1F600}').unwrap();
+    let mid_scalar = CollectedEdit {
+        edit: FixEdit::ReplaceRange {
+            path: PathBuf::from("a.txt"),
+            range: emoji_start + 1..emoji_start + 2,
+            content: b"x".to_vec(),
+        },
+        applicability: Applicability::Safe,
+        verify: alint_core::EditVerifier::None,
+        isolation_group: None,
+    };
+    assert!(
+        located_edits_to_workspace_edit(&[mid_scalar], text, &uri).is_none(),
+        "mid-scalar ReplaceRange must return None rather than corrupting UTF-8"
+    );
+}
+
+#[test]
+fn check_workspace_preserves_no_bom_when_editor_strips_bom() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().to_path_buf();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nrules:\n  - id: bom\n    kind: no_bom\n    paths: '*.txt'\n    level: error\n",
+    )
+    .unwrap();
+    let file = root.join("bom.txt");
+    std::fs::write(&file, b"\xef\xbb\xbfhello\n").unwrap();
+    let uri = Url::from_file_path(&file).unwrap();
+
+    // Editor opens the file and strips the BOM from the LSP buffer text.
+    let check = check_workspace(
+        std::slice::from_ref(&root),
+        &[(uri, Some("hello\n".to_string()))],
+        &Settings {
+            trusted: true,
+            ..Settings::default()
+        },
+        &alint_rules::builtin_registry(),
+    );
+    let (_, run) = check.runs.into_iter().next().expect("one config run");
+    let run = run.expect("config run succeeds");
+    let findings = run.by_path.get(&file).expect("no_bom finding preserved");
+    assert_eq!(findings.len(), 1, "{findings:#?}");
+    assert_eq!(findings[0].rule_id, "bom");
+}
+
+#[test]
+fn hover_and_code_action_match_zero_width_source_ranges() {
+    use lsp_types::{
+        CodeActionContext, PartialResultParams, TextDocumentIdentifier, TextDocumentPositionParams,
+        WorkDoneProgressParams,
+    };
+
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().to_path_buf();
+    std::fs::write(
+        root.join(".editorconfig"),
+        "root = true\n[*]\ninsert_final_newline = true\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nrules:\n  - id: ec\n    kind: editorconfig_conforms\n    \
+         paths: '*.txt'\n    level: error\n  - id: eol\n    kind: final_newline\n    \
+         paths: '*.txt'\n    level: error\n    fix: { file_append_final_newline: {} }\n",
+    )
+    .unwrap();
+    let file = root.join("a.txt");
+    std::fs::write(&file, "hello").unwrap();
+    let uri = Url::from_file_path(&file).unwrap();
+
+    let check = check_workspace(
+        std::slice::from_ref(&root),
+        &[(uri.clone(), Some("hello".to_string()))],
+        &Settings {
+            trusted: true,
+            ..Settings::default()
+        },
+        &alint_rules::builtin_registry(),
+    );
+    let (backend, _rx) = test_server();
+    let eof_pos = {
+        let mut st = backend.state.lock();
+        st.folders = vec![root.clone()];
+        st.open.insert(uri.clone());
+        st.documents.insert(uri.clone(), "hello".to_string());
+        st.versions.insert(uri.clone(), 1);
+        let docs = vec![(uri.clone(), Some("hello".to_string()), Some(1), None)];
+        let _ = apply_check(&mut st, &docs, check, &LspOptions::default());
+        let findings = st.diagnostics.get_mut(&uri).expect("editorconfig finding");
+        let ec = findings
+            .iter()
+            .find(|f| f.rule_id == "ec")
+            .expect("editorconfig_conforms finding");
+        assert_eq!(
+            ec.range.start, ec.range.end,
+            "missing final newline emits a zero-width SourceRange"
+        );
+        let eof = ec.range.start;
+        // Also collapse the fixable `eol` finding to the same zero-width EOF range
+        // to verify cursor-positioned `code_action` overlaps zero-width markers.
+        let eol = findings
+            .iter_mut()
+            .find(|f| f.rule_id == "eol")
+            .expect("file_ends_with_newline finding");
+        eol.range = Range::new(eof, eof);
+        eof
+    };
+
+    let hover = backend
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: eof_pos,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .expect("hover matches zero-width range");
+    let HoverContents::Markup(markup) = hover.contents else {
+        panic!("expected markdown hover");
+    };
+    assert!(markup.value.contains("`ec`"), "{markup:?}");
+
+    let actions = backend
+        .code_action(CodeActionParams {
+            text_document: TextDocumentIdentifier { uri },
+            range: Range::new(eof_pos, eof_pos),
+            context: CodeActionContext::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .expect("cursor-positioned code_action matches zero-width range");
+    assert_eq!(actions.len(), 1);
+}
+
+#[test]
+fn code_action_deduplicates_overlapping_findings_and_preserves_is_preferred() {
+    use lsp_types::{
+        CodeActionContext, PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams,
+    };
+
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().to_path_buf();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nrules:\n  - id: v-pins\n    kind: json_path_matches\n    \
+         paths: '*.json'\n    path: '$.deps.*'\n    matches: '^v'\n    level: error\n    \
+         fix: { replace: { pattern: '^', replacement: 'v', applicability: safe } }\n",
+    )
+    .unwrap();
+    let file = root.join("app.json");
+    let text = "{\n  \"deps\": {\n    \"a\": \"1.0\",\n    \"b\": \"2.0\"\n  }\n}\n";
+    std::fs::write(&file, text).unwrap();
+    let uri = Url::from_file_path(&file).unwrap();
+
+    let check = check_workspace(
+        std::slice::from_ref(&root),
+        &[(uri.clone(), Some(text.to_string()))],
+        &Settings {
+            trusted: true,
+            ..Settings::default()
+        },
+        &alint_rules::builtin_registry(),
+    );
+    let (backend, _rx) = test_server();
+    {
+        let mut st = backend.state.lock();
+        st.folders = vec![root.clone()];
+        st.open.insert(uri.clone());
+        st.documents.insert(uri.clone(), text.to_string());
+        st.versions.insert(uri.clone(), 1);
+        let docs = vec![(uri.clone(), Some(text.to_string()), Some(1), None)];
+        let _ = apply_check(&mut st, &docs, check, &LspOptions::default());
+        assert_eq!(
+            st.diagnostics.get(&uri).map(Vec::len),
+            Some(2),
+            "expected two json_path_matches findings"
+        );
+    }
+
+    let actions = backend
+        .code_action(CodeActionParams {
+            text_document: TextDocumentIdentifier { uri },
+            range: Range::new(Position::new(0, 0), Position::new(6, 0)),
+            context: CodeActionContext::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .expect("single deduplicated quick-fix");
+    assert_eq!(actions.len(), 1, "must not duplicate actions per finding");
+    let CodeActionOrCommand::CodeAction(action) = &actions[0] else {
+        panic!("expected CodeAction");
+    };
+    assert_eq!(action.is_preferred, Some(true));
+    assert_eq!(
+        action.diagnostics.as_ref().map(Vec::len),
+        Some(2),
+        "single action must attach both overlapping diagnostics"
+    );
+}
+
+#[test]
+fn code_action_honors_baseline_for_located_structured_fixer() {
+    use lsp_types::{
+        CodeActionContext, PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams,
+    };
+
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().to_path_buf();
+    let rule = "rules:\n  - id: v-pins\n    kind: json_path_matches\n    \
+                paths: '*.json'\n    path: '$.deps.*'\n    matches: '^v'\n    level: error\n    \
+                fix: { replace: { pattern: '^', replacement: 'v', applicability: safe } }\n";
+    std::fs::write(root.join(".alint.yml"), format!("version: 1\n{rule}")).unwrap();
+    let file = root.join("app.json");
+    // Grandfather `a: "1.0"` into the baseline.
+    std::fs::write(&file, "{\"deps\": {\"a\": \"1.0\"}}").unwrap();
+    let session = build_session(&root).unwrap().unwrap();
+    let initial_report = session.engine.run(&session.root, &session.index).unwrap();
+    let baseline = Baseline::from_fingerprints(
+        None,
+        initial_report.results.iter().flat_map(|r| {
+            r.violations.iter().map(|v| {
+                let bytes = std::fs::read(root.join(v.path.as_deref().unwrap())).unwrap();
+                alint_core::baseline::FingerprintedViolation {
+                    rule_id: r.rule_id.to_string(),
+                    path: v.path.as_deref().map(|p| p.display().to_string()),
+                    fingerprint: alint_core::baseline::fingerprint(&r.rule_id, v, Some(&bytes)),
+                    message: None,
+                    path_free_identity: false,
+                }
+            })
+        }),
+    );
+    std::fs::write(root.join(".alint-baseline.json"), baseline.to_jsonl()).unwrap();
+
+    // Now add baseline to config and add a second LIVE violation `b: "2.0"`.
+    std::fs::write(
+        root.join(".alint.yml"),
+        format!("version: 1\nbaseline: .alint-baseline.json\n{rule}"),
+    )
+    .unwrap();
+    let text = "{\"deps\": {\"a\": \"1.0\", \"b\": \"2.0\"}}";
+    std::fs::write(&file, text).unwrap();
+    let uri = Url::from_file_path(&file).unwrap();
+
+    let check = check_workspace(
+        std::slice::from_ref(&root),
+        &[(uri.clone(), Some(text.to_string()))],
+        &Settings {
+            trusted: true,
+            ..Settings::default()
+        },
+        &alint_rules::builtin_registry(),
+    );
+    let (backend, _rx) = test_server();
+    let live_range = {
+        let mut st = backend.state.lock();
+        st.folders = vec![root.clone()];
+        st.open.insert(uri.clone());
+        st.documents.insert(uri.clone(), text.to_string());
+        st.versions.insert(uri.clone(), 1);
+        let docs = vec![(uri.clone(), Some(text.to_string()), Some(1), None)];
+        let _ = apply_check(&mut st, &docs, check, &LspOptions::default());
+        let findings = st.diagnostics.get(&uri).expect("only live finding present");
+        assert_eq!(findings.len(), 1, "grandfathered finding must be filtered");
+        assert!(findings[0].baseline_key.is_some());
+        findings[0].range
+    };
+
+    let actions = backend
+        .code_action(CodeActionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            range: live_range,
+            context: CodeActionContext::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .expect("live finding offers a quick-fix");
+    assert_eq!(actions.len(), 1);
+    let CodeActionOrCommand::CodeAction(action) = &actions[0] else {
+        panic!("expected CodeAction");
+    };
+    let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&uri];
+    assert_eq!(
+        edits.len(),
+        1,
+        "must edit ONLY the live node, not the baselined one: {edits:#?}"
+    );
+    assert!(
+        edits[0].new_text.contains("v2.0"),
+        "expected edit for live node 2.0, got: {edits:#?}"
+    );
+}
+
+#[test]
+fn code_action_respects_client_resource_operations_capability() {
+    use lsp_types::{
+        ClientCapabilities, CodeActionContext, PartialResultParams, ResourceOperationKind,
+        TextDocumentIdentifier, WorkDoneProgressParams, WorkspaceClientCapabilities,
+        WorkspaceEditClientCapabilities, WorkspaceFolder,
+    };
+
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().to_path_buf();
+    let cfg_text = "version: 1\nrules:\n  - id: need-readme\n    kind: file_exists\n    \
+         paths: README.md\n    level: error\n    fix: { file_create: { content: \"# Hi\\n\" } }\n";
+    std::fs::write(root.join(".alint.yml"), cfg_text).unwrap();
+    let cfg_uri = Url::from_file_path(root.join(".alint.yml")).unwrap();
+
+    for advertised in [false, true] {
+        let (backend, _rx) = test_server();
+        let capabilities = if advertised {
+            ClientCapabilities {
+                workspace: Some(WorkspaceClientCapabilities {
+                    workspace_edit: Some(WorkspaceEditClientCapabilities {
+                        document_changes: Some(true),
+                        resource_operations: Some(vec![ResourceOperationKind::Create]),
+                        ..WorkspaceEditClientCapabilities::default()
+                    }),
+                    ..WorkspaceClientCapabilities::default()
+                }),
+                ..ClientCapabilities::default()
+            }
+        } else {
+            ClientCapabilities::default()
+        };
+        backend.initialize(&InitializeParams {
+            workspace_folders: Some(vec![WorkspaceFolder {
+                uri: Url::from_file_path(&root).unwrap(),
+                name: "repo".to_string(),
+            }]),
+            capabilities,
+            initialization_options: Some(serde_json::json!({ "trusted": true })),
+            ..InitializeParams::default()
+        });
+        let check = check_workspace(
+            std::slice::from_ref(&root),
+            &[(cfg_uri.clone(), Some(cfg_text.to_string()))],
+            &Settings {
+                trusted: true,
+                ..Settings::default()
+            },
+            &alint_rules::builtin_registry(),
+        );
+        {
+            let mut st = backend.state.lock();
+            st.open.insert(cfg_uri.clone());
+            st.documents.insert(cfg_uri.clone(), cfg_text.to_string());
+            st.versions.insert(cfg_uri.clone(), 1);
+            let docs = vec![(cfg_uri.clone(), Some(cfg_text.to_string()), Some(1), None)];
+            let _ = apply_check(&mut st, &docs, check, &LspOptions::default());
+        }
+        let resp = backend.code_action(CodeActionParams {
+            text_document: TextDocumentIdentifier {
+                uri: cfg_uri.clone(),
+            },
+            range: Range::new(Position::new(0, 0), Position::new(0, 1)),
+            context: CodeActionContext::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        });
+        if advertised {
+            assert!(
+                resp.is_some(),
+                "expected create_file action when advertised"
+            );
+        } else {
+            assert!(
+                resp.is_none(),
+                "create_file action must be omitted without resourceOperations: {resp:?}"
+            );
+        }
     }
 }

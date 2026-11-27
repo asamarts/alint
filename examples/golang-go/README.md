@@ -263,7 +263,7 @@ Each surface from §1 tagged with one of:
 
 | Absence | Coverage | Rule |
 |---|---|---|
-| Repo doesn't have `AUTHORS` or `CONTRIBUTORS` | ✅ alint-today | `go-no-AUTHORS-file` (`file_absent`) |
+| Repo doesn't have `AUTHORS` or `CONTRIBUTORS` | ✅ alint-today | `go-no-authors-file` (`file_absent`) |
 | Repo doesn't have `/bin/` or `/pkg/` (build outputs) | ✅ alint-today | `go-no-toplevel-bin` + `go-no-toplevel-pkg` |
 | Bundled hygiene (no `.DS_Store`, no `node_modules`, etc.) | ✅ alint-today | 11 rules from `hygiene/no-tracked-artifacts@v1` |
 
@@ -390,7 +390,7 @@ rules:
   - id: go-gitattributes-no-text-normalization  # file_content_matches for ^\* -text$
   - id: go-issue-templates-required             # multi-path file_exists for the 6 load-bearing templates
   - id: go-pull-request-template-no-markdown-warning  # file_content_matches for + No Markdown
-  - id: go-no-AUTHORS-file                      # file_absent — both retired during Gerrit migration
+  - id: go-no-authors-file                      # file_absent — both retired during Gerrit migration
   - id: go-{no-toplevel-bin,no-toplevel-pkg}    # dir_absent — build outputs
   - id: go-security-policy-references-go-dev    # file_content_matches for go.dev/security/policy URL
   - id: go-readme-references-canonical-source   # file_content_matches for go.googlesource.com/go

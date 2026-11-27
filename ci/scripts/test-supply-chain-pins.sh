@@ -39,7 +39,6 @@ REQUIRED = {
     ('cargo', '/'),
     ('github-actions', '/'),
     ('npm', '/editors/vscode'),
-    ('npm', '/npm'),
     ('cargo', '/editors/zed'),
     ('gradle', '/editors/jetbrains'),
     ('docker', '/'),
@@ -92,6 +91,48 @@ if toolchain_uses < 20:
 release = Path('.github/workflows/release.yml').read_text(encoding='utf-8')
 if 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' not in release:
     failures.append("release.yml: homebrew job must pin GitHub's published ed25519 host key")
+
+# Every tool `cargo install` under ci/scripts/ (excluding smoke-channel.sh which
+# intentionally tests the documented user `cargo install alint`, and test-*.sh
+# harnesses) and ci/Containerfile must isolate RUSTFLAGS, lock the graph, and
+# pin a version/rev.
+for script in [*sorted(Path('ci/scripts').glob('*.sh')), Path('ci/Containerfile')]:
+    if not script.is_file() or script.name.startswith('test-') or script.name == 'smoke-channel.sh':
+        continue
+    text = script.read_text(encoding='utf-8')
+    logical = re.sub(r'\\\s*\n\s*', ' ', text)
+    for n, line in enumerate(logical.splitlines(), 1):
+        stripped = line.lstrip()
+        if stripped.startswith('#') or 'cargo install' not in line:
+            continue
+        if stripped.startswith('echo '):
+            continue
+        if "RUSTFLAGS=''" not in line and 'RUSTFLAGS=""' not in line and 'env -u RUSTFLAGS' not in line:
+            failures.append(f'{script}:{n}: cargo install must clear RUSTFLAGS (RUSTFLAGS=\'\')')
+        if '--locked' not in line:
+            failures.append(f'{script}:{n}: cargo install must pass --locked')
+        if '--version' not in line and '--rev' not in line:
+            failures.append(f'{script}:{n}: cargo install must pin --version or --rev')
+
+# Every release tarball `curl` download in bench-record.yml, editors-e2e.yml,
+# and ci/Containerfile must verify a pinned SHA-256 digest with `sha256sum -c`.
+for target in (
+    Path('.github/workflows/bench-record.yml'),
+    Path('.github/workflows/editors-e2e.yml'),
+    Path('ci/Containerfile'),
+):
+    if not target.is_file():
+        continue
+    lines = target.read_text(encoding='utf-8').splitlines()
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith('#'):
+            continue
+        if re.search(r'\bcurl\b[^\n]*\.tar\.(?:gz|xz|zst)', line) or (
+            re.search(r'\bcurl\b', line) and i + 1 < len(lines) and re.search(r'\.tar\.(?:gz|xz|zst)', lines[i + 1])
+        ):
+            window = '\n'.join(lines[max(0, i - 3):min(len(lines), i + 10)])
+            if 'sha256sum -c' not in window:
+                failures.append(f'{target}:{i + 1}: tarball curl download must verify SHA-256 via sha256sum -c')
 
 if failures:
     for f in failures:

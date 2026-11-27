@@ -99,6 +99,7 @@ fn a_numeric_environment_value_stays_redacted_on_every_surface() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn a_top_level_value_read_from_the_environment_stays_redacted() {
     for (case, config, nested, env) in [
         (
@@ -140,15 +141,6 @@ fn a_top_level_value_read_from_the_environment_stays_redacted() {
             None,
             "canary-secret-line\n(canary-secret",
         ),
-        (
-            "nested absolute path",
-            "nested_configs: true\n",
-            Some(
-                "version: 1\nrules:\n  - id: nested\n    kind: file_exists\n    \
-                 paths: '{{env.VALUE}}'\n    level: error\n",
-            ),
-            "/canary-secret/x",
-        ),
     ] {
         let root = tempfile::tempdir().unwrap();
         write(root.path(), "README.md", "hi\n");
@@ -165,6 +157,39 @@ fn a_top_level_value_read_from_the_environment_stays_redacted() {
         }
         let output = run(root.path(), &["check"], &[("VALUE", env)]);
         assert_redacted(case, &output, &["canary-secret"]);
+    }
+
+    // Nested configs are untrusted and reject `{{env.*}}` before reading the
+    // environment at all, so neither paths nor top-level fields can leak.
+    for (case, nested_yaml, value) in [
+        (
+            "nested absolute path",
+            "version: 1\nrules:\n  - id: nested\n    kind: file_exists\n    \
+             paths: '{{env.VALUE}}'\n    level: error\n",
+            "/canary-secret/x",
+        ),
+        (
+            "nested version",
+            "version: '{{env.VALUE}}'\nrules: []\n",
+            "987654",
+        ),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), "README.md", "hi\n");
+        write(
+            root.path(),
+            ".alint.yml",
+            "version: 1\nnested_configs: true\nrules: []\n",
+        );
+        write(root.path(), "sub/.alint.yml", nested_yaml);
+        let output = run(root.path(), &["check"], &[("VALUE", value)]);
+        assert!(!output.status.success(), "{case}: expected failure");
+        assert_no_secret(case, &output, &[value, "canary-secret"]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("nested configs are untrusted and may not read the environment"),
+            "{case}: unexpected stderr:\n{stderr}"
+        );
     }
 
     // A parse error in an extended file names it by its normalized path,
@@ -190,20 +215,6 @@ fn a_top_level_value_read_from_the_environment_stays_redacted() {
     );
     let output = run(root.path(), &["check"], &[("VALUE", "987654")]);
     assert_redacted("version", &output, &["987654"]);
-
-    // A nested config's environment values are its own.
-    write(
-        root.path(),
-        ".alint.yml",
-        "version: 1\nnested_configs: true\nrules: []\n",
-    );
-    write(
-        root.path(),
-        "sub/.alint.yml",
-        "version: '{{env.VALUE}}'\nrules: []\n",
-    );
-    let output = run(root.path(), &["check"], &[("VALUE", "987654")]);
-    assert_redacted("nested version", &output, &["987654"]);
 }
 
 #[test]
@@ -793,13 +804,19 @@ fn a_custom_fact_that_prints_an_environment_value_shows_it_redacted() {
     write(
         root.path(),
         ".alint.yml",
-        "version: 1\nfacts:\n  - id: token\n    custom:\n      argv: ['echo', '{{env.VALUE}}']\n\
+        "version: 1\nfacts:\n  - id: token\n    custom:\n      argv: ['printf', '%s', '{{env.VALUE}}']\n\
          rules: []\n",
     );
-    for args in [&["facts"][..], &["facts", "--format", "json"]] {
-        let output = run(root.path(), args, &[("VALUE", "canary-secret")]);
-        assert!(output.status.success(), "{args:?}: {output:?}");
-        assert_left_out(&args.join(" "), &output, &["canary-secret"]);
+    for secret in ["canary-secret", r#"canary"sec\ret"#] {
+        for args in [&["facts"][..], &["facts", "--format", "json"]] {
+            let output = run(root.path(), args, &[("VALUE", secret)]);
+            assert!(output.status.success(), "{args:?}: {output:?}");
+            assert_left_out(
+                &format!("{} ({secret})", args.join(" ")),
+                &output,
+                &[secret, "canary"],
+            );
+        }
     }
 }
 

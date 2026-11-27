@@ -125,9 +125,11 @@
           "items": { "$ref": "#/$defs/proposed_edit" }
         },
         "policy_url": {
-          "type": "string",
-          "description": "Optional documentation URL provided by the rule, sanitized of terminal controls and invisible formatting characters.",
-          "format": "uri"
+          "description": "Optional documentation URL provided by the rule, sanitized of terminal controls and invisible formatting characters (or \"<redacted>\" when the URL carried a redacted environment value).",
+          "anyOf": [
+            { "type": "string", "format": "uri" },
+            { "const": "<redacted>" }
+          ]
         }
       }
     },

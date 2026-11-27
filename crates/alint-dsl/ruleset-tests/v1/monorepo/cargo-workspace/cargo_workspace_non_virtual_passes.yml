@@ -1,0 +1,22 @@
+test_version: 1
+name: cargo-workspace allows non-virtual workspace with [package] and no members list
+tags: [check, bundled, cargo-workspace]
+
+given:
+  tree:
+    Cargo.toml: |
+      [package]
+      name = "root-pkg"
+      version = "0.1.0"
+
+      [workspace]
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/monorepo/cargo-workspace@v1
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

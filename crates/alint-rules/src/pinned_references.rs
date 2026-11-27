@@ -729,6 +729,9 @@ impl YamlDocument {
         depth: usize,
     ) -> Option<Vec<MappingEntry>> {
         if depth > MAX_YAML_NESTING {
+            // Trip the merge-limit flag so callers emit a `ResourceParse`
+            // analysis failure rather than silently treating the mapping as empty.
+            self.merge_work.set(None);
             return None;
         }
         let (raw, mapping) = self.raw_mapping(reference)?;
@@ -758,7 +761,9 @@ impl YamlDocument {
             self.charge_merge_work(depth + 1, sources.len())?;
             for source in sources {
                 for entry in self.effective_mapping_inner(source, depth + 1)? {
-                    let name = self.scalar(entry.key)?.value;
+                    let Some(name) = self.scalar(entry.key).map(|scalar| scalar.value) else {
+                        continue;
+                    };
                     if !positions.contains_key(name) {
                         positions.insert(name, entries.len());
                         entries.push(entry);
@@ -778,7 +783,9 @@ impl YamlDocument {
                 id: *value_id,
                 use_span: mapping.use_span,
             };
-            let name = self.scalar(key)?.value;
+            let Some(name) = self.scalar(key).map(|scalar| scalar.value) else {
+                continue;
+            };
             if self.is_merge_entry(key, value) {
                 continue;
             }
@@ -811,6 +818,7 @@ impl YamlDocument {
 
     fn get_inner(&self, reference: YamlRef, wanted: &str, depth: usize) -> Option<YamlRef> {
         if depth > MAX_YAML_NESTING {
+            self.merge_work.set(None);
             return None;
         }
         let (entries, mapping) = self.raw_mapping(reference)?;
@@ -1653,10 +1661,15 @@ fn dockerfile_instructions(text: &str) -> std::result::Result<Vec<DockerInstruct
         }
         let (name, arguments) = split_instruction(&logical)
             .ok_or_else(|| format!("missing instruction at line {start_line}"))?;
-        let heredocs = docker_heredocs(arguments, escape);
+        let upper_name = name.to_ascii_uppercase();
+        let heredocs = if matches!(upper_name.as_str(), "RUN" | "COPY") {
+            docker_heredocs(arguments, escape)
+        } else {
+            Vec::new()
+        };
         let end_column = lines[end_line - 1].chars().count() + 1;
         instructions.push(DockerInstruction {
-            name: name.to_ascii_uppercase(),
+            name: upper_name,
             arguments: arguments.to_owned(),
             escape,
             span: FindingSpan {
@@ -1760,12 +1773,17 @@ fn docker_heredocs(arguments: &str, escape: char) -> Vec<(String, bool)> {
             None if matches!(byte, b'\'' | b'"') => quote = Some(byte),
             None if byte == b'<'
                 && bytes.get(index + 1) == Some(&b'<')
+                && bytes.get(index + 2) != Some(&b'<')
                 && (index == 0 || bytes[index - 1].is_ascii_whitespace()) =>
             {
                 index += 2;
                 let strip_tabs = bytes.get(index) == Some(&b'-');
                 index += usize::from(strip_tabs);
                 while bytes.get(index).is_some_and(u8::is_ascii_whitespace) {
+                    index += 1;
+                }
+                // `<<\EOF` disables interpolation just like `<<'EOF'`.
+                if bytes.get(index) == Some(&b'\\') {
                     index += 1;
                 }
                 let delimiter_quote = bytes
@@ -1775,9 +1793,13 @@ fn docker_heredocs(arguments: &str, escape: char) -> Vec<(String, bool)> {
                 index += usize::from(delimiter_quote.is_some());
                 let start = index;
                 while let Some(byte) = bytes.get(index) {
-                    if delimiter_quote
-                        .map_or_else(|| byte.is_ascii_whitespace(), |quote| *byte == quote)
-                    {
+                    if delimiter_quote.map_or_else(
+                        || {
+                            byte.is_ascii_whitespace()
+                                || matches!(byte, b';' | b'|' | b'&' | b')' | b'>' | b'<')
+                        },
+                        |quote| *byte == quote,
+                    ) {
                         break;
                     }
                     index += 1;
@@ -1830,10 +1852,25 @@ fn collect_docker_instruction(
     stages: &mut HashSet<String>,
     findings: &mut Vec<Violation>,
 ) -> std::result::Result<(), String> {
+    collect_docker_instruction_inner(rule, path, instruction, ordinal, stages, findings, false)
+}
+
+fn collect_docker_instruction_inner(
+    rule: &PinnedReferencesRule,
+    path: &Arc<Path>,
+    instruction: &DockerInstruction,
+    ordinal: usize,
+    stages: &mut HashSet<String>,
+    findings: &mut Vec<Violation>,
+    in_onbuild: bool,
+) -> std::result::Result<(), String> {
     match instruction.name.as_str() {
         "FROM" => collect_docker_from(rule, path, instruction, ordinal, stages, findings)?,
         "ADD" => collect_docker_add(rule, path, instruction, ordinal, findings)?,
         "ONBUILD" => {
+            if in_onbuild {
+                return Err("ONBUILD cannot be chained".to_owned());
+            }
             let (name, arguments) = split_instruction(&instruction.arguments)
                 .ok_or("ONBUILD requires a nested instruction")?;
             let nested = DockerInstruction {
@@ -1842,7 +1879,7 @@ fn collect_docker_instruction(
                 span: instruction.span,
                 escape: instruction.escape,
             };
-            collect_docker_instruction(rule, path, &nested, ordinal, stages, findings)?;
+            collect_docker_instruction_inner(rule, path, &nested, ordinal, stages, findings, true)?;
         }
         _ => {}
     }
@@ -1899,7 +1936,14 @@ fn collect_docker_add(
     }
     let checksum_is_full = checksum.is_some_and(sha256_is_full);
     for (index, source) in operands[..operands.len() - 1].iter().enumerate() {
-        let remote = source.value.starts_with("http://") || source.value.starts_with("https://");
+        let remote = source
+            .value
+            .get(..7)
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("http://"))
+            || source
+                .value
+                .get(..8)
+                .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https://"));
         if !source.has_variable && (!remote || checksum_is_full) {
             continue;
         }

@@ -19,9 +19,15 @@ version: 1
 rules:
   - id: adr-filename-pattern
     # NNNN-kebab-case-title.md. Matches both MADR and Nygard
-    # conventions; keeps the list sortable by number.
+    # conventions; keeps the list sortable by number. Standard MADR
+    # index and template files are excluded.
     kind: filename_regex
-    paths: "docs/adr/*.md"
+    paths:
+      include: ["docs/adr/*.md"]
+      exclude:
+        - "docs/adr/README.md"
+        - "docs/adr/index.md"
+        - "docs/adr/*template*.md"
     stem: true
     pattern: '^\d{4}-[a-z0-9][a-z0-9-]*$'
     level: warning
@@ -32,21 +38,36 @@ rules:
 
   - id: adr-has-status-section
     kind: file_content_matches
-    paths: "docs/adr/*.md"
+    paths:
+      include: ["docs/adr/*.md"]
+      exclude:
+        - "docs/adr/README.md"
+        - "docs/adr/index.md"
+        - "docs/adr/*template*.md"
     pattern: '(?m)^##\s+Status\b'
     level: info
     message: "MADR ADRs include a ## Status section."
 
   - id: adr-has-context-section
     kind: file_content_matches
-    paths: "docs/adr/*.md"
+    paths:
+      include: ["docs/adr/*.md"]
+      exclude:
+        - "docs/adr/README.md"
+        - "docs/adr/index.md"
+        - "docs/adr/*template*.md"
     pattern: '(?m)^##\s+Context\b'
     level: info
     message: "MADR ADRs include a ## Context section."
 
   - id: adr-has-decision-section
     kind: file_content_matches
-    paths: "docs/adr/*.md"
+    paths:
+      include: ["docs/adr/*.md"]
+      exclude:
+        - "docs/adr/README.md"
+        - "docs/adr/index.md"
+        - "docs/adr/*template*.md"
     pattern: '(?m)^##\s+Decision\b'
     level: info
     message: "MADR ADRs include a ## Decision section."

@@ -1,0 +1,24 @@
+test_version: 1
+name: java ruleset accepts root settings.gradle.kts multi-project Gradle repo
+tags: [check, extends, bundled, java]
+
+given:
+  tree:
+    settings.gradle.kts: 'rootProject.name = "demo"\ninclude(":app")\n'
+    gradlew: "#!/bin/sh\n"
+    app:
+      build.gradle.kts: "plugins { java }\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/java@v1
+  git:
+    init: true
+    add: [settings.gradle.kts, gradlew, app]
+    commit: true
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

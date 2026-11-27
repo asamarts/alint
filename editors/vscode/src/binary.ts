@@ -5,13 +5,23 @@
 //   4. otherwise prompt the user to download or locate one.
 // Auto-download is opt-in (the prompt) — never silent.
 
-import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { type ExtensionContext, type OutputChannel, window, workspace } from "vscode";
+import {
+  ConfigurationTarget,
+  type ExtensionContext,
+  type OutputChannel,
+  window,
+  workspace,
+} from "vscode";
 
+import {
+  findBinaryOnPath,
+  isExecutableFile,
+  pruneOldCachedVersions,
+  versionedCacheBinaryPath,
+} from "./binaryLookup";
 import { downloadAlint } from "./download";
-import { binaryName } from "./target";
 
 export async function resolveAlintBinary(
   context: ExtensionContext,
@@ -20,21 +30,24 @@ export async function resolveAlintBinary(
   // 1. Explicit setting.
   const configured = workspace.getConfiguration("alint").get<string>("path")?.trim();
   if (configured) {
-    if (fs.existsSync(configured)) {
+    if (isExecutableFile(configured)) {
       return configured;
     }
-    window.showWarningMessage(`alint.path points to a missing file: ${configured}`);
+    window.showWarningMessage(
+      `alint.path does not point to an executable file: ${configured}`,
+    );
   }
 
   // 2. PATH.
-  const onPath = findOnPath();
+  const onPath = findBinaryOnPath();
   if (onPath) {
     return onPath;
   }
 
-  // 3. Previously downloaded copy.
-  const cached = cachedBinaryPath(context);
-  if (fs.existsSync(cached)) {
+  // 3. Previously downloaded copy matching this extension version.
+  const version = (context.extension.packageJSON as { version: string }).version;
+  const cached = versionedCacheBinaryPath(context.globalStorageUri.fsPath, version);
+  if (isExecutableFile(cached)) {
     return cached;
   }
 
@@ -48,12 +61,11 @@ export async function resolveAlintBinary(
     try {
       // Download the alint release matching this extension's version.
       // The extension version is stamped to the alint release at publish
-      // time, so `v<version>` always exists. (JetBrains does the same;
-      // the Zed extension can't read its own version and uses latest.)
-      const version = (context.extension.packageJSON as { version: string }).version;
+      // time, so `v<version>` always exists.
       const dest = await downloadAlint(version, path.dirname(cached), (m) =>
         log.appendLine(`[download] ${m}`),
       );
+      pruneOldCachedVersions(context.globalStorageUri.fsPath, version);
       return dest;
     } catch (err) {
       window.showErrorMessage(`alint download failed: ${(err as Error).message}`);
@@ -66,32 +78,23 @@ export async function resolveAlintBinary(
       openLabel: "Select alint binary",
     });
     if (picked && picked[0]) {
-      return picked[0].fsPath;
-    }
-  }
-  return undefined;
-}
-
-function cachedBinaryPath(context: ExtensionContext): string {
-  return path.join(context.globalStorageUri.fsPath, "bin", binaryName(process.platform));
-}
-
-/** First directory on PATH that contains the alint binary, if any. */
-function findOnPath(): string | undefined {
-  const name = binaryName(process.platform);
-  const pathVar = process.env.PATH ?? "";
-  const sep = process.platform === "win32" ? ";" : ":";
-  for (const dir of pathVar.split(sep)) {
-    if (!dir) {
-      continue;
-    }
-    const candidate = path.join(dir, name);
-    try {
-      if (fs.existsSync(candidate)) {
-        return candidate;
+      const selectedPath = picked[0].fsPath;
+      if (!isExecutableFile(selectedPath)) {
+        window.showWarningMessage(
+          `Selected path is not an executable file: ${selectedPath}`,
+        );
+        return undefined;
       }
-    } catch {
-      // Unreadable PATH entry — skip it.
+      try {
+        await workspace
+          .getConfiguration("alint")
+          .update("path", selectedPath, ConfigurationTarget.Global);
+      } catch (err) {
+        log.appendLine(
+          `could not persist alint.path setting: ${(err as Error).message}`,
+        );
+      }
+      return selectedPath;
     }
   }
   return undefined;

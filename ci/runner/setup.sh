@@ -94,6 +94,9 @@ if [[ -z "${ALINT_RUNNER_RECOVERY:-}" ]]; then
     REPO_ROOT="$(cd "${CI_DIR}/.." && pwd)"
     UNIT_DIR="${HOME}/.config/systemd/user"
     mkdir -p "${UNIT_DIR}"
+    # Safely shell-quote paths/names interpolated into ExecStartPre.
+    Q_CONTAINER="$(printf '%q' "${CONTAINER_NAME}")"
+    Q_REPO_ROOT="$(printf '%q' "${REPO_ROOT}")"
     cat > "${UNIT_DIR}/container-${CONTAINER_NAME}.service" <<UNIT
 [Unit]
 Description=${CONTAINER_NAME} self-hosted GitHub Actions runner (podman)
@@ -104,8 +107,8 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStartPre=/bin/sh -c 'podman container exists ${CONTAINER_NAME} || (cd ${REPO_ROOT} && ALINT_RUNNER_RECOVERY=1 bash ci/runner/setup.sh)'
-ExecStart=/usr/bin/podman start ${CONTAINER_NAME}
+ExecStartPre=/bin/bash -c 'podman container exists ${Q_CONTAINER} || (cd ${Q_REPO_ROOT} && ALINT_RUNNER_RECOVERY=1 bash ci/runner/setup.sh)'
+ExecStart=/usr/bin/podman start ${Q_CONTAINER}
 
 [Install]
 WantedBy=default.target

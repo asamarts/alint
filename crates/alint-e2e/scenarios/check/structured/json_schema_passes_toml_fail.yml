@@ -1,0 +1,42 @@
+test_version: 1
+name: json_schema_passes flags a TOML document that violates its JSON Schema
+tags: [check, json_schema_passes, structured, toml, failing]
+
+given:
+  tree:
+    schemas:
+      pyproject.schema.json: |
+        {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "required": ["project"],
+          "properties": {
+            "project": {
+              "type": "object",
+              "required": ["name", "version"],
+              "properties": {
+                "name": {"type": "string"},
+                "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"}
+              }
+            }
+          }
+        }
+    pyproject.toml: |
+      [project]
+      name = "demo"
+      version = "not-semver"
+  config: |
+    version: 1
+    rules:
+      - id: pyproject-toml-schema
+        kind: json_schema_passes
+        paths: "pyproject.toml"
+        schema_path: "schemas/pyproject.schema.json"
+        level: error
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: pyproject-toml-schema, level: error, path: pyproject.toml}

@@ -1390,3 +1390,57 @@ fn structured_rules_share_parsed_trees_per_file_across_partitions_and_skip_singl
         "programmatic composite rule with nested_rule_specs must share run structured cache"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn build_filtered_index_preserves_matching_escaping_symlinks() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join("a.txt"), b"a").unwrap();
+    std::fs::write(root.join("b.txt"), b"b").unwrap();
+    std::os::unix::fs::symlink("missing_1", root.join("bad_link")).unwrap();
+    std::os::unix::fs::symlink("missing_2", root.join("other_link")).unwrap();
+    let full = crate::walk(root, &crate::WalkOptions::test_default()).unwrap();
+    let changed: HashSet<PathBuf> = [PathBuf::from("bad_link"), PathBuf::from("a.txt")].into();
+    let engine = Engine::new(vec![], RuleRegistry::new()).with_changed_paths(changed);
+    let filtered = engine.build_filtered_index(&full, None).unwrap();
+    assert_eq!(
+        filtered.escaping_symlinks(),
+        &[Arc::<Path>::from(Path::new("bad_link"))]
+    );
+}
+
+#[test]
+fn run_for_file_rejects_unresolvable_manifest_scope_without_path_scope() {
+    #[derive(Debug)]
+    struct OpaqueRule;
+    impl Rule for OpaqueRule {
+        fn id(&self) -> &'static str {
+            "opaque-manifest"
+        }
+        fn level(&self) -> Level {
+            Level::Error
+        }
+        fn evaluate(&self, _ctx: &Context<'_>) -> Result<Vec<Violation>> {
+            Ok(Vec::new())
+        }
+    }
+
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(tmp.path().join("a.txt"), b"x").unwrap();
+    let spec: crate::RuleSpec = crate::yaml::from_str(
+        "id: opaque-manifest\nkind: x\nlevel: error\n\
+         scope_filter:\n  include_manifest_paths:\n    source: missing.json\n    extract: { json: \"$.*\" }\n",
+    )
+    .unwrap();
+    let entry = RuleEntry::new(Box::new(OpaqueRule)).with_spec(Arc::new(spec));
+    let engine = Engine::from_entries(vec![entry], RuleRegistry::new());
+    let index = crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
+    let err = engine
+        .run_for_file(tmp.path(), &index, Path::new("a.txt"), b"x")
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("include_manifest_paths"),
+        "expected manifest scope resolvability error, got: {err}"
+    );
+}

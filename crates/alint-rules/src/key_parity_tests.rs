@@ -2067,3 +2067,34 @@ fn key_pattern_blocks_wildcard_injection_and_supports_rendered_dotted_flat_names
     // Author-authored unrendered multi-segment bracketed flat name stays refused.
     assert!(KeyPattern::parse("['v1.0'].TOKEN", KeyModel::Flat, false).is_err());
 }
+
+#[test]
+fn dotenv_and_properties_key_parity_mark_files_sensitive_by_default() {
+    let (tmp, idx) = crate::test_support::tempdir_with_files(&[
+        (".env.example", b"API_KEY=placeholder\n"),
+        (
+            ".env.local",
+            b"API_KEY=real-secret\nEXTRA_SECRET=super-secret\n",
+        ),
+    ]);
+    let spec = crate::test_support::spec_yaml(
+        "id: env-parity\nkind: key_parity\nreference: \".env.example\"\n\
+         peers: \".env.*\"\nlevel: error\n",
+    );
+    let rule = build(&spec).unwrap();
+    assert!(rule.path_contents_sensitive_by_default());
+    let mut visited = Vec::new();
+    rule.visit_sensitive_paths(
+        false,
+        &crate::test_support::ctx(tmp.path(), &idx),
+        &mut |p| visited.push(p.to_path_buf()),
+    );
+    assert!(
+        visited.contains(&std::path::PathBuf::from(".env.example")),
+        "{visited:?}"
+    );
+    assert!(
+        visited.contains(&std::path::PathBuf::from(".env.local")),
+        "{visited:?}"
+    );
+}

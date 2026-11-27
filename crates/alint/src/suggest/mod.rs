@@ -17,11 +17,12 @@ mod proposal;
 mod scan;
 mod suggesters;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::str::FromStr;
 use std::time::Instant;
 
+use alint_output::GlyphSet;
 use anyhow::Result;
 
 pub use output::OutputFormat;
@@ -32,6 +33,7 @@ use crate::progress::Progress;
 
 /// Options resolved from CLI flags. Threaded into [`run`].
 #[derive(Debug)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct RunOptions {
     pub format: OutputFormat,
     pub confidence: Confidence,
@@ -42,6 +44,12 @@ pub struct RunOptions {
     /// to the alint-output `HumanOptions::DEFAULT_WIDTH` (80 cols).
     /// Wired from the global `--width` flag in v0.9.20.
     pub width: Option<usize>,
+    /// Honor global `--no-gitignore` when walking the repo.
+    pub no_gitignore: bool,
+    /// Explicit `--config` path to inspect for already-extended rulesets.
+    pub config_path: Option<PathBuf>,
+    /// Resolved glyph set (`--ascii` / `TERM=dumb`).
+    pub glyphs: GlyphSet,
 }
 
 impl FromStr for Confidence {
@@ -91,7 +99,12 @@ pub fn run(
 ) -> Result<ExitCode> {
     let started = Instant::now();
     progress.status("Scanning repository");
-    let scan = Scan::collect(root, progress)?;
+    let scan = Scan::collect(
+        root,
+        opts.no_gitignore,
+        opts.config_path.as_deref(),
+        progress,
+    )?;
 
     let mut proposals: Vec<Proposal> = Vec::new();
     proposals.extend(suggesters::bundled::propose(&scan, progress));

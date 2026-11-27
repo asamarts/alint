@@ -208,24 +208,16 @@ checklist so the release-gated pieces land and nothing drifts:
      `docs/` to find all (`docs/rules.md`, `docs/site/reference/**`,
      `docs/site/concepts/**`, and `docs/site/configuration/variable-interpolation.md`
      hold them), and stage each file you unwrap.
-   For v0.14: remove `#[schemars(extend("x-since" = "0.14"))]` from
-   `crates/alint-rules/src/{file_absent,dir_absent,dir_exists}.rs` (`root_only`),
-   and unwrap the six `alint:since=0.14` blocks: five in `docs/rules.md`
-   (`root_only` on `file_absent`/`dir_absent`/`dir_exists`, plus
-   `no_zero_width_chars` and `no_symlinks`) and one in
-   `docs/site/reference/output-formats/index.md`.
 2. **Claims whose scope changed.** Narrow any published claim the cut walked
    back. The Kani proof is scoped to the *lexical* path-confinement policy since
    the post-v0.13 H1 fix, so `roadmap.json` / CHANGELOG wording must not imply
    the filesystem layer is machine-checked (E2).
 3. **New user-facing features need narrative site docs.** A new subcommand
    auto-documents from clap `--help` and counts flow from `facts.json`, but
-   guide/reference prose does not. For v0.14: baseline mode needs a concept
-   page, the `baseline:` configuration-reference entry, and an output-formats
-   suppression note. Pages under tag-pinned `docs/site/**` (configuration,
-   cookbook, getting-started) are safe to pre-write; the output-formats note is
-   under the main-overlaid `docs/site/reference/**`, so wrap any unreleased part
-   in `<!-- alint:since=X -->`.
+   guide/reference prose does not. Pages under tag-pinned `docs/site/**`
+   (configuration, cookbook, getting-started) are safe to pre-write; pages under
+   the main-overlaid `docs/site/reference/**` and `docs/site/concepts/**` must
+   wrap any unreleased part in `<!-- alint:since=X -->`.
 4. **Refresh the published Action pin after the release exists.** A release
    commit cannot contain its own SHA, so this is deliberately a follow-up
    commit on `main`: update `ci/action-doc-pin.env` and every
@@ -271,7 +263,7 @@ checklist so the release-gated pieces land and nothing drifts:
 | Workflow | Triggered by | What it does | Time |
 |---|---|---|---|
 | `ci.yml` | tag + main pushes | fmt + clippy + test + doc + dogfood, plus audit + deny (both blocking on RustSec vulnerabilities), build, bench-smoke, examples, shell-tests, editors, the plugin-contract check against the pinned witforge, and the advisory perf-gate. GitHub-hosted `ubuntu-latest`. | ~5 min |
-| `release.yml` | tag push only | preflight gate → supply-chain (SBOM + license bundle) → cross-platform build matrix → GitHub Release (cosign-signed `SHA256SUMS` + build-provenance + SBOM attestations) → ghcr.io Docker (attested + cosign-signed by digest) → npm → Homebrew tap → crates.io → VS Code Marketplace + Open VSX → JetBrains Marketplace. | ~15-25 min |
+| `release.yml` | tag push only | preflight gate → supply-chain (SBOM + license bundle) → cross-platform build matrix → GitHub Release (cosign-signed `SHA256SUMS` + build-provenance + SBOM attestations) → ghcr.io Docker (attested + cosign-signed by digest) → npm → PyPI (`build-wheels` → `publish-pypi`) → Homebrew tap → crates.io → VS Code Marketplace + Open VSX → JetBrains Marketplace. | ~15-25 min |
 | `docs-bundle.yml` | tag + main pushes | `xtask docs-export` → push refreshed bundle to `docs-bundle` branch → Cloudflare deploy hook → alint.org rebuilds. The sibling `check-pins.yml` workflow in the alint.org repo (PR + push + daily cron) asserts that alint.org's five version-pin sites agree and are not older than the latest release; fires automatically. | ~3-5 min |
 | `bench-docker.yml` | tag pushes | Build + push `ghcr.io/asamarts/alint-bench:<tag>` (the reproducible competitive-bench environment). | ~5 min |
 | **`bench-record.yml`** | tag push only | **Self-hosted full publish-grade `xtask bench-scale` matrix (S1-S4 check × {1k, 10k, 100k, 1m} × {full, changed} + the SFIX auto-fix scenario × {fix}) at `--warmup 3 --runs 10`. Opens a PR adding the new per-version macro/results dir + criterion micro snapshot.** | **~3.5 hr** |

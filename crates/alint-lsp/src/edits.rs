@@ -13,21 +13,40 @@ use alint_core::{CollectedEdit, FixEdit};
 
 use crate::diagnostics::{byte_offset_to_position, whole_document};
 
+/// Which `WorkspaceEdit.documentChanges` resource operations the client
+/// advertised in `capabilities.workspace.workspaceEdit`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct ResourceOpSupport {
+    pub(crate) create: bool,
+    pub(crate) delete: bool,
+    pub(crate) rename: bool,
+}
+
+impl ResourceOpSupport {
+    #[cfg(test)]
+    pub(crate) const fn all() -> Self {
+        Self {
+            create: true,
+            delete: true,
+            rename: true,
+        }
+    }
+}
+
 /// Map a located fixer's collected byte-range edits (Phase 1 `replace`) to an LSP
 /// [`WorkspaceEdit`] for one file: each [`FixEdit::ReplaceRange`] becomes a
 /// [`TextEdit`] whose range is the byte offsets converted to UTF-16 positions
 /// against `text` (the current buffer, which is what the offsets index).
 /// `collect_edits` yields DISJOINT, left-to-right matches, so the `TextEdit`s never
 /// overlap -- exactly what the LSP requires of a single edit set. Returns `None`
-/// when there are no range edits, a replacement isn't UTF-8, or the path can't
-/// become a URI, so the caller offers no action rather than a partial one.
+/// when there are no range edits, a range is out-of-bounds or mid-scalar, or a
+/// replacement isn't UTF-8, so the caller offers no action rather than a partial
+/// or corrupt one.
 pub(crate) fn located_edits_to_workspace_edit(
     edits: &[CollectedEdit],
     text: &str,
-    rel: &Path,
-    root: &Path,
+    doc_uri: &Url,
 ) -> Option<WorkspaceEdit> {
-    let uri = Url::from_file_path(root.join(rel)).ok()?;
     let mut text_edits = Vec::new();
     for ce in edits {
         // Every located fixer today (ReplaceFixer, the only one) emits ReplaceRange.
@@ -38,6 +57,13 @@ pub(crate) fn located_edits_to_workspace_edit(
             debug_assert!(false, "located edit is not a ReplaceRange: {:?}", ce.edit);
             continue;
         };
+        if range.start > range.end
+            || range.end > text.len()
+            || !text.is_char_boundary(range.start)
+            || !text.is_char_boundary(range.end)
+        {
+            return None;
+        }
         let new_text = String::from_utf8(content.clone()).ok()?;
         let start = byte_offset_to_position(text, range.start);
         let end = byte_offset_to_position(text, range.end);
@@ -50,7 +76,7 @@ pub(crate) fn located_edits_to_workspace_edit(
         return None;
     }
     let mut changes = HashMap::new();
-    changes.insert(uri, text_edits);
+    changes.insert(doc_uri.clone(), text_edits);
     Some(WorkspaceEdit {
         changes: Some(changes),
         document_changes: None,
@@ -58,15 +84,30 @@ pub(crate) fn located_edits_to_workspace_edit(
     })
 }
 
+fn edit_uri(path: &Path, root: &Path, active_doc: Option<(&Path, &Url)>) -> Option<Url> {
+    if let Some((rel, uri)) = active_doc
+        && path == rel
+    {
+        return Some(uri.clone());
+    }
+    Url::from_file_path(root.join(path)).ok()
+}
+
 /// Map a core [`FixEdit`] to an LSP [`WorkspaceEdit`]. Content edits use
 /// the widely-supported `changes` map; create/delete/rename use resource
-/// operations (the client must advertise `resourceOperations` support).
-/// Returns `None` when content isn't UTF-8 or a path can't become a URI.
-pub(crate) fn fix_edit_to_workspace_edit(edit: &FixEdit, root: &Path) -> Option<WorkspaceEdit> {
+/// operations only when the client advertised support in `resource_ops`.
+/// Returns `None` when content isn't UTF-8, a path can't become a URI, or
+/// the client did not advertise the needed resource operation.
+pub(crate) fn fix_edit_to_workspace_edit(
+    edit: &FixEdit,
+    root: &Path,
+    active_doc: Option<(&Path, &Url)>,
+    resource_ops: ResourceOpSupport,
+) -> Option<WorkspaceEdit> {
     match edit {
         FixEdit::SetContent { path, content } => {
             let new_text = String::from_utf8(content.clone()).ok()?;
-            let uri = Url::from_file_path(root.join(path)).ok()?;
+            let uri = edit_uri(path, root, active_doc)?;
             let mut changes = HashMap::new();
             changes.insert(
                 uri,
@@ -82,8 +123,11 @@ pub(crate) fn fix_edit_to_workspace_edit(edit: &FixEdit, root: &Path) -> Option<
             })
         }
         FixEdit::CreateFile { path, content } => {
+            if !resource_ops.create {
+                return None;
+            }
             let new_text = String::from_utf8(content.clone()).ok()?;
-            let uri = Url::from_file_path(root.join(path)).ok()?;
+            let uri = edit_uri(path, root, active_doc)?;
             let ops = vec![
                 DocumentChangeOperation::Op(ResourceOp::Create(CreateFile {
                     uri: uri.clone(),
@@ -101,14 +145,20 @@ pub(crate) fn fix_edit_to_workspace_edit(edit: &FixEdit, root: &Path) -> Option<
             Some(operations(ops))
         }
         FixEdit::DeleteFile { path } => {
-            let uri = Url::from_file_path(root.join(path)).ok()?;
+            if !resource_ops.delete {
+                return None;
+            }
+            let uri = edit_uri(path, root, active_doc)?;
             Some(operations(vec![DocumentChangeOperation::Op(
                 ResourceOp::Delete(DeleteFile { uri, options: None }),
             )]))
         }
         FixEdit::RenameFile { from, to } => {
-            let old_uri = Url::from_file_path(root.join(from)).ok()?;
-            let new_uri = Url::from_file_path(root.join(to)).ok()?;
+            if !resource_ops.rename {
+                return None;
+            }
+            let old_uri = edit_uri(from, root, active_doc)?;
+            let new_uri = edit_uri(to, root, active_doc)?;
             Some(operations(vec![DocumentChangeOperation::Op(
                 ResourceOp::Rename(RenameFile {
                     old_uri,

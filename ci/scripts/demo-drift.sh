@@ -7,7 +7,7 @@
 # discovery surface, and nothing else in CI would notice.
 #
 # This gate replays the tape's exact sequence and pins alint's real behaviour.
-# When it fails, the fix is usually: re-record the GIF (`vhs demo/alint.tape`)
+# When it fails, the fix is usually: re-record the GIF (`demo/render.sh`)
 # and update the expectations below in the same commit.
 #
 # Deliberately a TEXT-level gate, not a byte-diff of the GIF: GIF encoding is not
@@ -44,7 +44,7 @@ git -C "$work" add -A
 cd "$work"
 
 fail() { echo "DEMO DRIFT: $1"; echo; echo "The README GIF now misrepresents alint."; \
-         echo "Re-record it (vhs demo/alint.tape) and update ci/scripts/demo-drift.sh."; exit 1; }
+         echo "Re-record it (demo/render.sh) and update ci/scripts/demo-drift.sh."; exit 1; }
 
 # --- 1. check: the state the GIF opens on -------------------------------------
 before="$("$ALINT" check --no-docs --color never 2>&1 || true)"

@@ -565,3 +565,23 @@ fn yaml_error_redaction_uses_masked_diagnostic_without_document_text() {
     assert!(shown.contains("<redacted>"), "{shown}");
     assert!(shown.starts_with("YAML parse error ("), "{shown}");
 }
+
+#[test]
+fn failed_redactor_matcher_fails_closed_for_errors_and_fact_hints() {
+    let redactor = EnvironmentRedactor::failed_for_test("secret-canary");
+    assert!(matches!(
+        redactor.redact("plain message"),
+        std::borrow::Cow::Owned(ref s) if s == CONFIGURATION_MASK
+    ));
+    let err = redactor.redact_error(crate::Error::Other("secret-canary leaked".into()));
+    assert_eq!(err.to_string(), CONFIGURATION_MASK);
+
+    let facts: Vec<crate::FactSpec> = crate::yaml::from_str(
+        "- id: f\n  file_content_matches:\n    paths: VERSION\n    pattern: '^1.0$'\n",
+    )
+    .unwrap();
+    assert!(
+        crate::pattern_hints::environment_fact_hints_with(&facts, &redactor).is_empty(),
+        "failed redactor must suppress fact pattern hints rather than assuming no match"
+    );
+}

@@ -16,8 +16,9 @@
 //! materialisation introduces unavoidable noise.
 
 use std::io::Write;
+use std::sync::Arc;
 
-use alint_core::{Engine, Rule, WalkOptions, walk};
+use alint_core::{Engine, RuleEntry, WalkOptions, walk};
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
 fn make_json_tree(n_files: usize) -> tempfile::TempDir {
@@ -130,34 +131,43 @@ fn make_schema_tree(n_files: usize) -> tempfile::TempDir {
 fn build_engine(yaml: &str) -> Engine {
     let config = alint_dsl::parse(yaml).expect("config parses");
     let registry = alint_rules::builtin_registry();
-    let rules: Vec<Box<dyn Rule>> = config
+    let entries: Vec<RuleEntry> = config
         .rules
-        .iter()
-        .map(|spec| registry.build(spec).expect("rule builds"))
+        .into_iter()
+        .map(|spec| {
+            let rule = registry.build(&spec).expect("rule builds");
+            RuleEntry::new(rule).with_spec(Arc::new(spec))
+        })
         .collect();
-    Engine::new(rules, alint_rules::builtin_registry())
+    Engine::from_entries(entries, registry)
 }
 
-fn bench_rule(c: &mut Criterion, group: &str, tree: &tempfile::TempDir, yaml: &str, n: usize) {
+fn bench_rule(
+    c: &mut Criterion,
+    group: &str,
+    make_tree: impl Fn(usize) -> tempfile::TempDir,
+    yaml: &str,
+) {
     let mut g = c.benchmark_group(group);
     let walk_opts = WalkOptions::default();
-    let index = walk(tree.path(), &walk_opts).expect("walk");
     let engine = build_engine(yaml);
-    g.throughput(Throughput::Elements(n as u64));
-    g.bench_with_input(BenchmarkId::from_parameter(n), &index, |b, idx| {
-        b.iter(|| engine.run(tree.path(), idx).unwrap());
-    });
+    for &n in &[100usize, 1000] {
+        let tree = make_tree(n);
+        let index = walk(tree.path(), &walk_opts).expect("walk");
+        g.throughput(Throughput::Elements(n as u64));
+        g.bench_with_input(BenchmarkId::from_parameter(n), &index, |b, idx| {
+            b.iter(|| engine.run(tree.path(), idx).unwrap());
+        });
+    }
     g.finish();
 }
 
 fn json_path_equals(c: &mut Criterion) {
-    for &n in &[100usize, 1000] {
-        let tmp = make_json_tree(n);
-        bench_rule(
-            c,
-            "structured_query/json_path_equals",
-            &tmp,
-            r#"
+    bench_rule(
+        c,
+        "structured_query/json_path_equals",
+        make_json_tree,
+        r#"
 version: 1
 rules:
   - id: scripts-build
@@ -167,19 +177,15 @@ rules:
     equals: "tsc"
     level: warning
 "#,
-            n,
-        );
-    }
+    );
 }
 
 fn yaml_path_matches(c: &mut Criterion) {
-    for &n in &[100usize, 1000] {
-        let tmp = make_yaml_tree(n);
-        bench_rule(
-            c,
-            "structured_query/yaml_path_matches",
-            &tmp,
-            r#"
+    bench_rule(
+        c,
+        "structured_query/yaml_path_matches",
+        make_yaml_tree,
+        r#"
 version: 1
 rules:
   - id: permissions-shape
@@ -189,19 +195,15 @@ rules:
     matches: "^read$"
     level: warning
 "#,
-            n,
-        );
-    }
+    );
 }
 
 fn toml_path_equals(c: &mut Criterion) {
-    for &n in &[100usize, 1000] {
-        let tmp = make_toml_tree(n);
-        bench_rule(
-            c,
-            "structured_query/toml_path_equals",
-            &tmp,
-            r#"
+    bench_rule(
+        c,
+        "structured_query/toml_path_equals",
+        make_toml_tree,
+        r#"
 version: 1
 rules:
   - id: cargo-edition
@@ -211,19 +213,15 @@ rules:
     equals: "2024"
     level: error
 "#,
-            n,
-        );
-    }
+    );
 }
 
 fn xml_path_equals(c: &mut Criterion) {
-    for &n in &[100usize, 1000] {
-        let tmp = make_xml_tree(n);
-        bench_rule(
-            c,
-            "structured_query/xml_path_equals",
-            &tmp,
-            r#"
+    bench_rule(
+        c,
+        "structured_query/xml_path_equals",
+        make_xml_tree,
+        r#"
 version: 1
 rules:
   - id: csproj-target-framework
@@ -233,19 +231,15 @@ rules:
     equals: "net8.0"
     level: warning
 "#,
-            n,
-        );
-    }
+    );
 }
 
 fn xml_path_matches(c: &mut Criterion) {
-    for &n in &[100usize, 1000] {
-        let tmp = make_xml_tree(n);
-        bench_rule(
-            c,
-            "structured_query/xml_path_matches",
-            &tmp,
-            r#"
+    bench_rule(
+        c,
+        "structured_query/xml_path_matches",
+        make_xml_tree,
+        r#"
 version: 1
 rules:
   - id: csproj-sdk-style
@@ -255,19 +249,15 @@ rules:
     matches: "^Microsoft\\.NET\\.Sdk$"
     level: warning
 "#,
-            n,
-        );
-    }
+    );
 }
 
 fn json_schema_passes(c: &mut Criterion) {
-    for &n in &[100usize, 1000] {
-        let tmp = make_schema_tree(n);
-        bench_rule(
-            c,
-            "structured_query/json_schema_passes",
-            &tmp,
-            r#"
+    bench_rule(
+        c,
+        "structured_query/json_schema_passes",
+        make_schema_tree,
+        r#"
 version: 1
 rules:
   - id: package-shape
@@ -276,9 +266,7 @@ rules:
     schema_path: "schemas/package.schema.json"
     level: error
 "#,
-            n,
-        );
-    }
+    );
 }
 
 criterion_group!(

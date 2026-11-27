@@ -37,6 +37,11 @@
          so it is NOT declared here (that would double-register). -->
     <extensions defaultExtensionNs="com.intellij">
         <notificationGroup id="alint" displayType="BALLOON"/>
+        <applicationConfigurable
+            id="org.alint.lsp.settings"
+            parentId="tools"
+            instance="org.alint.lsp.AlintConfigurable"
+            displayName="alint"/>
     </extensions>
 
     <applicationListeners>

@@ -30,6 +30,7 @@ import argparse
 import base64
 import hashlib
 import io
+import struct
 import sys
 import tarfile
 import zipfile
@@ -49,6 +50,42 @@ TARGET_PLATFORM_TAGS: dict[str, list[str]] = {
     "x86_64-pc-windows-msvc": ["win_amd64"],
     "aarch64-pc-windows-msvc": ["win_arm64"],
 }
+
+# Rust release target -> expected executable header (os, cpu) in npm/ELF/Mach-O/PE terms.
+TARGET_BINARY_PLATFORM: dict[str, tuple[str, str]] = {
+    "x86_64-unknown-linux-musl": ("linux", "x64"),
+    "aarch64-unknown-linux-musl": ("linux", "arm64"),
+    "x86_64-apple-darwin": ("darwin", "x64"),
+    "aarch64-apple-darwin": ("darwin", "arm64"),
+    "x86_64-pc-windows-msvc": ("win32", "x64"),
+    "aarch64-pc-windows-msvc": ("win32", "arm64"),
+}
+
+# Executable header checks, shared with stage_npm_packages.py so a mismatched
+# architecture binary can never ship in the wrong wheel or npm package.
+ELF_MACHINE = {"x64": 0x3E, "arm64": 0xB7}  # e_machine: EM_X86_64, EM_AARCH64
+MACHO_CPU = {"x64": 0x01000007, "arm64": 0x0100000C}  # CPU_TYPE_X86_64, CPU_TYPE_ARM64
+PE_MACHINE = {"x64": 0x8664, "arm64": 0xAA64}  # IMAGE_FILE_MACHINE_AMD64, _ARM64
+
+
+def binary_platform(data: bytes) -> tuple[str, str] | None:
+    """Return the ``(os, cpu)`` an executable is built for, in npm's terms."""
+    if data[:4] == b"\x7fELF" and len(data) >= 20:
+        machine = struct.unpack_from("<H", data, 18)[0]
+        cpu = next((c for c, m in ELF_MACHINE.items() if m == machine), None)
+        return ("linux", cpu) if cpu else None
+    if data[:4] == b"\xcf\xfa\xed\xfe" and len(data) >= 8:  # 64-bit little-endian Mach-O
+        cputype = struct.unpack_from("<I", data, 4)[0]
+        cpu = next((c for c, t in MACHO_CPU.items() if t == cputype), None)
+        return ("darwin", cpu) if cpu else None
+    if data[:2] == b"MZ" and len(data) >= 0x40:
+        pe = struct.unpack_from("<I", data, 0x3C)[0]
+        if data[pe : pe + 4] != b"PE\0\0" or len(data) < pe + 6:
+            return None
+        machine = struct.unpack_from("<H", data, pe + 4)[0]
+        cpu = next((c for c, m in PE_MACHINE.items() if m == machine), None)
+        return ("win32", cpu) if cpu else None
+    return None
 
 # License / attribution files copied out of the tarball into the wheel's
 # .dist-info so a `pip`-installed alint carries the same notices as the tarball
@@ -91,55 +128,79 @@ def record_hash(data: bytes) -> str:
     return "sha256=" + base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
 
-def find_tarball(tarball_dir: Path, target: str) -> Path:
-    """Locate the single ``alint-*-<target>.tar.gz`` for a target (tag-agnostic)."""
-    matches = sorted(tarball_dir.glob(f"alint-*-{target}.tar.gz"))
-    if not matches:
-        raise FileNotFoundError(f"no release tarball for {target} in {tarball_dir}")
-    if len(matches) > 1:
-        raise RuntimeError(f"ambiguous tarballs for {target}: {[str(m) for m in matches]}")
-    return matches[0]
+def find_tarball(tarball_dir: Path, tag: str, target: str) -> Path:
+    """Locate the exact ``alint-<tag>-<target>.tar.gz`` for a tag and target."""
+    tarball = tarball_dir / f"alint-{tag}-{target}.tar.gz"
+    if not tarball.is_file():
+        raise FileNotFoundError(
+            f"no release tarball for {target} ({tarball.name}) in {tarball_dir}"
+        )
+    return tarball
 
 
-def verify_sha256(tarball: Path) -> None:
-    """If a ``.sha256`` sidecar exists, verify the tarball against it (fail-closed)."""
+def verify_sha256(tarball: Path, allow_unsigned: bool = False) -> None:
+    """Verify the tarball against its ``.sha256`` sidecar (fail-closed by default)."""
     sidecar = tarball.with_name(tarball.name + ".sha256")
-    if not sidecar.exists():
-        print(f"  [wheel] note: no .sha256 sidecar for {tarball.name}; skipping verify")
-        return
-    # `sha256sum` format: "<hex>  <filename>"; take the first field.
-    expected = sidecar.read_text().split()[0].strip().lower()
+    if not sidecar.is_file():
+        if allow_unsigned:
+            print(f"  [wheel] note: no .sha256 sidecar for {tarball.name}; --allow-unsigned set")
+            return
+        raise RuntimeError(f"{tarball.name}: no .sha256 sidecar ({sidecar.name})")
+    # `sha256sum` format: "<hex>  <filename>" (or "<hex> *<filename>").
+    parts = sidecar.read_text(encoding="utf-8").strip().split(None, 1)
+    if not parts:
+        raise RuntimeError(f"{sidecar.name}: empty checksum file")
+    expected = parts[0].strip().lower()
+    if len(expected) != 64 or any(c not in "0123456789abcdef" for c in expected):
+        raise RuntimeError(f"{sidecar.name}: invalid SHA-256 digest {expected!r}")
+    if len(parts) == 2:
+        listed = parts[1].strip().lstrip("*")
+        if listed != tarball.name:
+            raise RuntimeError(
+                f"{sidecar.name}: checksum names {listed!r}, expected {tarball.name!r}"
+            )
     actual = hashlib.sha256(tarball.read_bytes()).hexdigest()
     if actual != expected:
         raise RuntimeError(f"sha256 mismatch for {tarball.name}: expected {expected}, got {actual}")
     print(f"  [wheel] verified {tarball.name} against .sha256")
 
 
-def extract_payload(tarball: Path, is_windows: bool) -> tuple[bytes, dict[str, bytes]]:
+def extract_payload(
+    tarball: Path,
+    tag: str,
+    target: str,
+    is_windows: bool,
+) -> tuple[bytes, dict[str, bytes]]:
     """Return ``(binary_bytes, {license_name: bytes})`` from a release tarball.
 
-    The tarball lays out ``alint-<tag>-<target>/alint[.exe]`` plus side-by-side
-    license files (see release-binary.sh). The binary bytes are copied verbatim
-    so the wheel payload stays byte-identical to the attested release binary.
+    Strictly matches top-level ``alint-<tag>-<target>/alint[.exe]`` and
+    side-by-side license files (see release-binary.sh) so nested decoy files
+    can never be picked up. Binary bytes are copied verbatim so the wheel
+    payload stays byte-identical to the attested release binary.
     """
+    prefix = f"alint-{tag}-{target}/"
     bin_leaf = "alint.exe" if is_windows else "alint"
+    expected_bin = prefix + bin_leaf
+    expected_licenses = {prefix + leaf: leaf for leaf in LICENSE_FILES}
     binary: bytes | None = None
     licenses: dict[str, bytes] = {}
     with tarfile.open(tarball, "r:gz") as tf:
         for member in tf.getmembers():
             if not member.isfile():
                 continue
-            leaf = member.name.rsplit("/", 1)[-1]
-            if leaf == bin_leaf and binary is None:
+            norm = member.name.lstrip("./") if member.name.startswith("./") else member.name
+            if norm == expected_bin:
+                if binary is not None:
+                    raise RuntimeError(f"{tarball.name}: duplicate {expected_bin} inside archive")
                 fh = tf.extractfile(member)
                 assert fh is not None
                 binary = fh.read()
-            elif leaf in LICENSE_FILES and leaf not in licenses:
+            elif norm in expected_licenses and expected_licenses[norm] not in licenses:
                 fh = tf.extractfile(member)
                 assert fh is not None
-                licenses[leaf] = fh.read()
+                licenses[expected_licenses[norm]] = fh.read()
     if binary is None:
-        raise RuntimeError(f"{tarball.name}: no {bin_leaf} found inside the archive")
+        raise RuntimeError(f"{tarball.name}: no {expected_bin} found inside the archive")
     return binary, licenses
 
 
@@ -246,6 +307,11 @@ def main() -> int:
         default=list(TARGET_PLATFORM_TAGS),
         help="subset of targets to build (default: all)",
     )
+    ap.add_argument(
+        "--allow-unsigned",
+        action="store_true",
+        help="allow missing .sha256 sidecars (local dev testing only; never use in release CI)",
+    )
     args = ap.parse_args()
 
     version = args.tag[1:] if args.tag.startswith("v") else args.tag
@@ -257,13 +323,19 @@ def main() -> int:
         if target not in TARGET_PLATFORM_TAGS:
             print(f"  [wheel] unknown target {target}; skipping", file=sys.stderr)
             continue
-        tarball = find_tarball(args.tarball_dir, target)
-        verify_sha256(tarball)
-        binary, licenses = extract_payload(tarball, "windows" in target)
+        tarball = find_tarball(args.tarball_dir, args.tag, target)
+        verify_sha256(tarball, allow_unsigned=args.allow_unsigned)
+        binary, licenses = extract_payload(tarball, args.tag, target, "windows" in target)
+        expected_plat = TARGET_BINARY_PLATFORM[target]
+        actual_plat = binary_platform(binary)
+        if actual_plat != expected_plat:
+            raise RuntimeError(
+                f"{tarball.name}: binary header is {actual_plat}, expected {expected_plat} for {target}"
+            )
         # Use the first target's README (identical across targets) as the PyPI
         # long description, if the tarball carried one.
         if long_description is None:
-            readme = _read_readme(tarball)
+            readme = _read_readme(tarball, args.tag, target)
             if readme is not None:
                 long_description = readme
         wheel = build_wheel(version, target, binary, licenses, long_description, args.out)
@@ -277,10 +349,12 @@ def main() -> int:
     return 0
 
 
-def _read_readme(tarball: Path) -> str | None:
+def _read_readme(tarball: Path, tag: str, target: str) -> str | None:
+    expected = f"alint-{tag}-{target}/README.md"
     with tarfile.open(tarball, "r:gz") as tf:
         for member in tf.getmembers():
-            if member.isfile() and member.name.rsplit("/", 1)[-1] == "README.md":
+            norm = member.name.lstrip("./") if member.name.startswith("./") else member.name
+            if member.isfile() and norm == expected:
                 fh = tf.extractfile(member)
                 if fh is not None:
                     return fh.read().decode("utf-8", errors="replace")

@@ -60,9 +60,21 @@ pub fn read_prefix(path: &Path) -> std::io::Result<Vec<u8>> {
 /// count in the returned `Vec`'s length.
 pub fn read_prefix_n(path: &Path, n: usize) -> std::io::Result<Vec<u8>> {
     let mut file = open_regular(path)?;
+    read_prefix_from_reader(&mut file, n)
+}
+
+fn read_prefix_from_reader<R: std::io::Read>(reader: &mut R, n: usize) -> std::io::Result<Vec<u8>> {
     let mut buf = vec![0u8; n];
-    let read = file.read(&mut buf)?;
-    buf.truncate(read);
+    let mut total = 0;
+    while total < n {
+        match reader.read(&mut buf[total..]) {
+            Ok(0) => break,
+            Ok(read) => total += read,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+    buf.truncate(total);
     Ok(buf)
 }
 
@@ -789,5 +801,37 @@ mod tests {
     fn character_locations_recognize_cr_and_crlf_line_endings() {
         let find = |b: &[u8]| first_char_where(b, |c, _| c == 'x');
         assert_eq!(find(b"a\rb\r\nx"), Some((3, 1, 'x')));
+    }
+
+    #[test]
+    fn read_prefix_handles_short_reads_and_eintr() {
+        struct FlakyReader<'a> {
+            data: &'a [u8],
+            pos: usize,
+            calls: usize,
+        }
+        impl std::io::Read for FlakyReader<'_> {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                self.calls += 1;
+                if self.calls.is_multiple_of(2) {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Interrupted,
+                        "EINTR",
+                    ));
+                }
+                if self.pos >= self.data.len() {
+                    return Ok(0);
+                }
+                buf[0] = self.data[self.pos];
+                self.pos += 1;
+                Ok(1)
+            }
+        }
+        let mut reader = FlakyReader {
+            data: b"hello world",
+            pos: 0,
+            calls: 0,
+        };
+        assert_eq!(read_prefix_from_reader(&mut reader, 5).unwrap(), b"hello");
     }
 }

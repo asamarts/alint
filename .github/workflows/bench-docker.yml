@@ -69,6 +69,7 @@ jobs:
         id: tags
         shell: bash
         env:
+          EVENT_NAME: ${{ github.event_name }}
           REF: ${{ github.ref }}
           REF_NAME: ${{ github.ref_name }}
           OWNER: ${{ github.repository_owner }}
@@ -78,16 +79,25 @@ jobs:
           owner_lc="$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')"
           image="ghcr.io/${owner_lc}/alint-bench"
           tags=()
-          if [[ "$REF" == refs/tags/v* ]]; then
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            # Check workflow_dispatch first: dispatching on `main` still sets
+            # REF=refs/heads/main, which would otherwise swallow inputs.tag.
+            t="${OVERRIDE:-edge}"
+            tags+=("${image}:${t}")
+          elif [[ "$REF" == refs/tags/v* ]]; then
             # Strip leading `v`: refs/tags/v0.5.7 → 0.5.7
             ver="${REF_NAME#v}"
-            tags+=("${image}:${ver}" "${image}:latest")
+            tags+=("${image}:${ver}")
+            guard_out="$(mktemp)"
+            trap 'rm -f "$guard_out"' EXIT
+            GITHUB_OUTPUT="$guard_out" ci/scripts/release-pointer-guard.sh "$REF_NAME"
+            if grep -qx 'move_latest=true' "$guard_out"; then
+              tags+=("${image}:latest")
+            fi
           elif [[ "$REF" == refs/heads/main ]]; then
             tags+=("${image}:edge")
           else
-            # workflow_dispatch
-            t="${OVERRIDE:-edge}"
-            tags+=("${image}:${t}")
+            tags+=("${image}:edge")
           fi
           # Comma-joined for docker/build-push-action.
           IFS=,

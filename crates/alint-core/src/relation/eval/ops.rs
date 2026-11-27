@@ -859,14 +859,20 @@ impl Evaluator<'_> {
 
     /// [`super::resources_kept`] of relation `id`, which the memo holds with
     /// every relation it reads.
+    #[allow(clippy::too_many_lines)]
     pub(super) fn resources_kept(&self, id: RelationId, resources: &[Resource]) -> Vec<bool> {
         let kept_all = || vec![true; resources.len()];
         let Some(levels) = self.path_levels(id) else {
             return kept_all();
         };
-        // Each level's tests, built as its `where:` builds them.
+        // Each level's `where:` tests on path-derived fields, plus inner-join
+        // membership constraints so join-excluded resources are not resurrected
+        // as phantom zero-row groups in `set` / `count` (#audit-domain2-5).
         let mut tested = Vec::new();
-        for level in &levels {
+        let mut path_joins: Vec<(Vec<&FromPath>, HashSet<Vec<Value>>)> = Vec::new();
+        let mut non_path_excluded: HashSet<Resource> = HashSet::new();
+
+        for (idx, level) in levels.iter().enumerate() {
             let Ok(rows) = self.computed(level.at) else {
                 return kept_all();
             };
@@ -886,21 +892,96 @@ impl Evaluator<'_> {
             for test in tests {
                 tested.push((&level.fields[test.field], test));
             }
+            if let Rows::Join(join) = &named.relation.rows
+                && idx > 0
+            {
+                let inner_level = &levels[idx - 1];
+                let unique_id = match join.unique {
+                    JoinSide::Left => join.left.id,
+                    JoinSide::Right => join.right.id,
+                };
+                if let (Ok(unique_rows), Ok(probe_rows)) =
+                    (self.computed(unique_id), self.computed(inner_level.at))
+                {
+                    let mut probe_from_paths: Vec<&FromPath> = Vec::with_capacity(join.on.len());
+                    let mut unique_positions: Vec<usize> = Vec::with_capacity(join.on.len());
+                    let mut all_path_derived = true;
+                    for (left_field, right_field) in &join.on {
+                        let (unique_field, probe_field) = match join.unique {
+                            JoinSide::Left => (left_field.as_str(), right_field.as_str()),
+                            JoinSide::Right => (right_field.as_str(), left_field.as_str()),
+                        };
+                        let Some(unique_pos) = unique_rows.field(unique_field) else {
+                            all_path_derived = false;
+                            break;
+                        };
+                        if let Some(fp) = inner_level.fields.get(probe_field) {
+                            probe_from_paths.push(fp);
+                            unique_positions.push(unique_pos);
+                        } else {
+                            all_path_derived = false;
+                            break;
+                        }
+                    }
+                    if all_path_derived && !probe_from_paths.is_empty() {
+                        let mut unique_keys: HashSet<Vec<Value>> =
+                            HashSet::with_capacity(unique_rows.rows.len());
+                        for urow in &unique_rows.rows {
+                            let key: Option<Vec<Value>> = unique_positions
+                                .iter()
+                                .map(|&pos| comparable(&urow.cells[pos]).cloned())
+                                .collect();
+                            if let Some(key) = key {
+                                unique_keys.insert(key);
+                            }
+                        }
+                        path_joins.push((probe_from_paths, unique_keys));
+                    } else {
+                        // A non-path join key cannot match from path tokens alone:
+                        // any probe resource that had rows (or stubs) before the
+                        // join and produced none after it was excluded by the join.
+                        let surviving: HashSet<&Resource> = rows
+                            .rows
+                            .iter()
+                            .chain(&rows.stub_rows)
+                            .map(|r| &r.at.resource)
+                            .collect();
+                        for prow in probe_rows.rows.iter().chain(&probe_rows.stub_rows) {
+                            if !surviving.contains(&prow.at.resource) {
+                                non_path_excluded.insert(prow.at.resource.clone());
+                            }
+                        }
+                    }
+                }
+            }
         }
-        if tested.is_empty() {
+        if tested.is_empty() && path_joins.is_empty() && non_path_excluded.is_empty() {
             return kept_all();
         }
         resources
             .iter()
             .map(|resource| {
+                if non_path_excluded.contains(resource) {
+                    return false;
+                }
                 let tokens = super::read::resource_tokens(resource);
-                tested.iter().all(|((token, transforms), test)| {
+                let eval_from_path = |(token, transforms): &FromPath| -> Option<Value> {
                     let mut text = Some(super::read::token_text(&tokens, *token).to_string());
                     for transform in transforms {
                         text = text.and_then(|value| transform.apply_optional(&value));
                     }
-                    let value = text.map(|t| Value::String(t.into()));
+                    text.map(|t| Value::String(t.into()))
+                };
+                let passes_where = tested.iter().all(|(fp, test)| {
+                    let value = eval_from_path(fp);
                     test.verdict_of(value.as_ref()) != Verdict::Fail
+                });
+                if !passes_where {
+                    return false;
+                }
+                path_joins.iter().all(|(fps, unique_keys)| {
+                    let key: Option<Vec<Value>> = fps.iter().map(|fp| eval_from_path(fp)).collect();
+                    key.is_some_and(|k| unique_keys.contains(&k))
                 })
             })
             .collect()
@@ -948,7 +1029,7 @@ fn key_type_clash(
             unique_kinds.add(&row.cells[key.unique_at]);
         }
         let mut probe_kinds = Kinds::default();
-        for row in &probe.rows {
+        for row in probe.rows.iter().chain(&probe.stub_rows) {
             probe_kinds.add(&row.cells[key.probe_at]);
         }
         let Some((mine, theirs)) = probe_kinds.clash(&unique_kinds) else {

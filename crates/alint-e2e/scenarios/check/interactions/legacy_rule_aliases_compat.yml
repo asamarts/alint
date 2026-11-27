@@ -1,0 +1,78 @@
+test_version: 1
+name: all 10 legacy rule kind aliases evaluate identically to their canonical kinds
+tags: [check, interactions, aliases, compat]
+
+given:
+  tree:
+    good.sh: |
+      #!/usr/bin/env bash
+      # HEADER
+      echo ok
+      # FOOTER
+    bad.sh: |
+      echo FIXME
+      line2
+      line3
+      line4
+  config: |
+    version: 1
+    rules:
+      - id: alias-content-forbidden
+        kind: content_forbidden
+        paths: "*.sh"
+        pattern: "FIXME"
+        level: error
+      - id: alias-content-matches
+        kind: content_matches
+        paths: "good.sh"
+        pattern: "echo ok"
+        level: error
+      - id: alias-header
+        kind: header
+        paths: "good.sh"
+        lines: 2
+        pattern: "# HEADER"
+        level: error
+      - id: alias-footer
+        kind: footer
+        paths: "good.sh"
+        lines: 2
+        pattern: "# FOOTER"
+        level: error
+      - id: alias-is-text
+        kind: is_text
+        paths: "*.sh"
+        level: error
+      - id: alias-max-lines
+        kind: max_lines
+        paths: "bad.sh"
+        max_lines: 3
+        level: error
+      - id: alias-min-lines
+        kind: min_lines
+        paths: "good.sh"
+        min_lines: 2
+        level: error
+      - id: alias-max-size
+        kind: max_size
+        paths: "good.sh"
+        max_bytes: 1024
+        level: error
+      - id: alias-min-size
+        kind: min_size
+        paths: "good.sh"
+        min_bytes: 10
+        level: error
+      - id: alias-shebang
+        kind: shebang
+        paths: "good.sh"
+        shebang: "^#!/usr/bin/env bash"
+        level: error
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: alias-content-forbidden, level: error, path: bad.sh}
+      - {rule: alias-max-lines, level: error, path: bad.sh}

@@ -267,6 +267,61 @@ impl FactValues {
     }
 }
 
+/// Validate a config's `facts:` specifications (globs, regexes, and structured
+/// extractors) without walking the filesystem or spawning commands.
+pub fn validate_facts(facts: &[FactSpec]) -> Result<()> {
+    for spec in facts {
+        match &spec.kind {
+            FactKind::AnyFileExists { any_file_exists } => {
+                let patterns = any_file_exists.as_slice();
+                if literal_paths(patterns).is_none() {
+                    let _ = Scope::from_patterns(patterns)?;
+                }
+            }
+            FactKind::AllFilesExist { all_files_exist } => {
+                for pattern in all_files_exist.as_slice() {
+                    if crate::template::literal_glob_path(pattern).is_none() {
+                        let _ = Scope::from_patterns(std::slice::from_ref(pattern))?;
+                    }
+                }
+            }
+            FactKind::CountFiles { count_files } => {
+                if crate::template::literal_glob_path(count_files).is_none() {
+                    let _ = Scope::from_patterns(std::slice::from_ref(count_files))?;
+                }
+            }
+            FactKind::FileContentMatches {
+                file_content_matches,
+            } => {
+                let patterns = file_content_matches.paths.as_slice();
+                if literal_paths(patterns).is_none() {
+                    let _ = Scope::from_patterns(patterns)?;
+                }
+                let _ = Regex::new(&file_content_matches.pattern).map_err(|e| {
+                    Error::Other(format!(
+                        "fact pattern /{}/: {e}",
+                        file_content_matches.pattern
+                    ))
+                })?;
+                if let Some(extract_spec) = file_content_matches.extract.as_deref() {
+                    let extract = extract_spec
+                        .clone()
+                        .resolve()
+                        .map_err(|e| Error::Other(format!("fact extract: {e}")))?;
+                    if !matches!(extract, Extract::Structured(_)) {
+                        return Err(Error::Other(
+                            "fact extract must use one of json/yaml/toml/xml/dotenv/properties/ini/hcl"
+                                .to_string(),
+                        ));
+                    }
+                }
+            }
+            FactKind::GitBranch { .. } | FactKind::Custom { .. } => {}
+        }
+    }
+    Ok(())
+}
+
 /// Evaluate a whole fact list against a prebuilt `FileIndex`. Invoked by
 /// `Engine::run` before any rule evaluates, inheriting the host process
 /// environment for backward-compatible production behavior.

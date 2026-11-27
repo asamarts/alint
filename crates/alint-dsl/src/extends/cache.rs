@@ -117,6 +117,11 @@ pub struct Cache {
     root: PathBuf,
 }
 
+/// Maximum cached remote ruleset body size read from disk (16 MiB, matching
+/// the remote fetcher cap so a poisoned/oversized cache entry cannot OOM or
+/// hang on a special file before SRI verification).
+const MAX_CACHE_BYTES: u64 = 16 * 1024 * 1024;
+
 impl Cache {
     /// Cache under the user's platform-specific cache directory.
     /// Linux:   `$XDG_CACHE_HOME/alint/rulesets/` or
@@ -153,7 +158,7 @@ impl Cache {
     /// fails loudly instead of returning bad content.
     pub fn get(&self, sri: &Sri) -> Result<Option<Vec<u8>>, CacheError> {
         let path = self.entry_path(sri);
-        match std::fs::read(&path) {
+        match alint_core::bounded_file::read_regular_capped(&path, MAX_CACHE_BYTES) {
             Ok(bytes) => {
                 sri.verify(&bytes).map_err(|e| CacheError::CorruptEntry {
                     path: path.clone(),
@@ -193,7 +198,15 @@ impl Cache {
             sri.encoded(),
             std::process::id()
         ));
-        if let Err(source) = std::fs::write(&tmp_path, bytes) {
+        let write_result = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp_path)
+            .and_then(|mut file| {
+                use std::io::Write as _;
+                file.write_all(bytes)
+            });
+        if let Err(source) = write_result {
             let _ = std::fs::remove_file(&tmp_path);
             return Err(CacheError::Io {
                 path: tmp_path,
@@ -587,6 +600,38 @@ mod tests {
                 .join("Caches")
                 .join("org.asamarts.alint")
                 .join("rulesets")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cache_get_rejects_fifo_and_oversized_entry_without_blocking() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = Cache::at(tmp.path().to_path_buf());
+        let sri = Sri::parse(EMPTY_SHA256).unwrap();
+        let entry = cache.entry_path(&sri);
+
+        // 1. FIFO at cache entry path must fail cleanly without hanging.
+        let status = std::process::Command::new("mkfifo")
+            .arg(&entry)
+            .status()
+            .expect("mkfifo available on unix");
+        assert!(status.success());
+        let err = cache.get(&sri).unwrap_err();
+        assert!(
+            matches!(err, CacheError::Io { .. }),
+            "expected Io error on FIFO, got: {err}"
+        );
+        std::fs::remove_file(&entry).unwrap();
+
+        // 2. Sparse oversized file (> MAX_CACHE_BYTES) must fail before reading into RAM.
+        let file = std::fs::File::create(&entry).unwrap();
+        file.set_len(MAX_CACHE_BYTES + 1).unwrap();
+        drop(file);
+        let err = cache.get(&sri).unwrap_err();
+        assert!(
+            matches!(err, CacheError::Io { .. }),
+            "expected Io error on oversized cache entry, got: {err}"
         );
     }
 }

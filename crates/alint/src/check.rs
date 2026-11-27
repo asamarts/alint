@@ -296,7 +296,7 @@ pub(super) fn cmd_check(
     // Human output keeps non-violation notes on stderr so stdout stays
     // byte-clean. Machine formats carry their own lossless or summary
     // projection.
-    if format == Format::Human {
+    if format == Format::Human && (!cli.quiet || cli.show_notes) {
         report_notes_to_stderr(&report, cli.show_notes);
     }
 

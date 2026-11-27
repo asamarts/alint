@@ -138,7 +138,7 @@ pub struct RegistryPathsResolveRule {
     expect: Expect,
     must_contain: Option<String>,
     exclude_extract: Option<Extract>,
-    orphans: Option<OrphansSpec>,
+    orphans: Option<(OrphansSpec, Scope)>,
     /// Permit reading a `source:` registry file that escapes the repo
     /// root - set post-build from the top-level `allow_out_of_root:`
     /// policy. (The declared *entries* stay confined regardless.)
@@ -454,10 +454,7 @@ impl RegistryPathsResolveRule {
         covered: &[PathBuf],
         out: &mut Vec<Violation>,
     ) {
-        let Some(orph) = &self.orphans else {
-            return;
-        };
-        let Ok(space) = Scope::from_patterns(std::slice::from_ref(&orph.space)) else {
+        let Some((orph, space)) = &self.orphans else {
             return;
         };
         // `space` describes artefacts, not only files. Cargo workspaces, for
@@ -511,7 +508,7 @@ impl RegistryPathsResolveRule {
     }
 
     fn glob_matches(ctx: &Context<'_>, pattern: &Path) -> Vec<PathBuf> {
-        let pat = pattern.to_string_lossy().into_owned();
+        let pat = crate::slash(pattern);
         let Ok(scope) = Scope::from_patterns(&[pat]) else {
             return Vec::new();
         };
@@ -815,6 +812,16 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         })
         .transpose()?;
 
+    let orphans = opts
+        .orphans
+        .map(|orph| -> Result<(OrphansSpec, Scope)> {
+            let scope = Scope::from_patterns(std::slice::from_ref(&orph.space)).map_err(|e| {
+                Error::rule_config(&spec.id, format!("invalid `orphans.space` glob: {e}"))
+            })?;
+            Ok((orph, scope))
+        })
+        .transpose()?;
+
     Ok(Box::new(RegistryPathsResolveRule {
         id: spec.id.clone(),
         level: spec.level,
@@ -828,7 +835,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         expect: opts.expect,
         must_contain: opts.must_contain,
         exclude_extract,
-        orphans: opts.orphans,
+        orphans,
         allow_out_of_root: false,
     }))
 }
@@ -878,7 +885,11 @@ mod tests {
             expect: opts.expect,
             must_contain: opts.must_contain,
             exclude_extract,
-            orphans: opts.orphans,
+            orphans: opts.orphans.map(|orph| {
+                let scope = Scope::from_patterns(std::slice::from_ref(&orph.space))
+                    .expect("test orphans.space valid");
+                (orph, scope)
+            }),
             allow_out_of_root: false,
         }
     }
@@ -1252,5 +1263,20 @@ mod tests {
         // `b` is excluded, so its absence must not fail; `a` exists.
         let idx = index(&["Cargo.toml"], &["a"]);
         assert!(eval(&r, dir.path(), &idx).is_empty());
+    }
+
+    #[test]
+    fn build_rejects_invalid_orphans_space_glob() {
+        let spec = crate::test_support::spec_yaml(
+            "id: t\nkind: registry_paths_resolve\nsource: Cargo.toml\n\
+             extract: { toml: \"$.workspace.members[*]\" }\n\
+             orphans: { space: \"crates/[unclosed\" }\nlevel: error\n",
+        );
+        assert!(
+            build(&spec)
+                .unwrap_err()
+                .to_string()
+                .contains("orphans.space")
+        );
     }
 }

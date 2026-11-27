@@ -17,6 +17,7 @@ use std::path::Path;
 pub struct Detection {
     pub languages: Vec<Language>,
     pub workspace: Option<WorkspaceFlavor>,
+    pub monorepo_requested: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,6 +27,8 @@ pub enum Language {
     Python,
     Go,
     Java,
+    Dotnet,
+    Php,
 }
 
 impl Language {
@@ -36,6 +39,8 @@ impl Language {
             Self::Python => "alint://bundled/python@v1",
             Self::Go => "alint://bundled/go@v1",
             Self::Java => "alint://bundled/java@v1",
+            Self::Dotnet => "alint://bundled/dotnet@v1",
+            Self::Php => "alint://bundled/php@v1",
         }
     }
 
@@ -46,6 +51,8 @@ impl Language {
             Self::Python => "Python",
             Self::Go => "Go",
             Self::Java => "Java",
+            Self::Dotnet => ".NET",
+            Self::Php => "PHP",
         }
     }
 }
@@ -103,6 +110,12 @@ pub fn detect(root: &Path, with_monorepo: bool) -> Detection {
     {
         languages.push(Language::Java);
     }
+    if has_dotnet_root_manifest(root) {
+        languages.push(Language::Dotnet);
+    }
+    if root.join("composer.json").is_file() {
+        languages.push(Language::Php);
+    }
 
     let workspace = if with_monorepo {
         detect_workspace(root)
@@ -113,7 +126,37 @@ pub fn detect(root: &Path, with_monorepo: bool) -> Detection {
     Detection {
         languages,
         workspace,
+        monorepo_requested: with_monorepo,
     }
+}
+
+fn has_dotnet_root_manifest(root: &Path) -> bool {
+    if [
+        "global.json",
+        "Directory.Build.props",
+        "Directory.Packages.props",
+    ]
+    .iter()
+    .any(|f| root.join(f).is_file())
+    {
+        return true;
+    }
+    std::fs::read_dir(root).is_ok_and(|entries| {
+        entries.flatten().any(|entry| {
+            entry.file_type().is_ok_and(|ft| ft.is_file())
+                && entry
+                    .path()
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .is_some_and(|ext| {
+                        ext.eq_ignore_ascii_case("csproj")
+                            || ext.eq_ignore_ascii_case("fsproj")
+                            || ext.eq_ignore_ascii_case("vbproj")
+                            || ext.eq_ignore_ascii_case("sln")
+                            || ext.eq_ignore_ascii_case("slnx")
+                    })
+        })
+    })
 }
 
 fn read_root_manifest(root: &Path, name: &str) -> Option<String> {
@@ -176,7 +219,7 @@ pub fn render(detection: &Detection) -> String {
     out.push_str("# See https://alint.org for the full ruleset reference.\n");
     out.push('\n');
     out.push_str("version: 1\n");
-    if detection.workspace.is_some() {
+    if detection.workspace.is_some() || detection.monorepo_requested {
         // `nested_configs: true` lets each subdirectory layer
         // its own `.alint.yml` on top of this one — the canonical
         // shape for workspace-tier monorepos where individual
@@ -200,6 +243,8 @@ pub fn render(detection: &Detection) -> String {
         out.push_str("  - ");
         out.push_str(flavor.ruleset());
         out.push('\n');
+    } else if detection.monorepo_requested {
+        out.push_str("  - alint://bundled/monorepo@v1\n");
     }
     out
 }
@@ -387,6 +432,7 @@ mod tests {
         let det = Detection {
             languages: vec![Language::Rust, Language::Node],
             workspace: None,
+            monorepo_requested: false,
         };
         let out = render(&det);
         assert!(out.contains("rust@v1"));
@@ -399,6 +445,7 @@ mod tests {
         let det = Detection {
             languages: vec![Language::Rust],
             workspace: Some(WorkspaceFlavor::Cargo),
+            monorepo_requested: true,
         };
         let out = render(&det);
         assert!(out.contains("nested_configs: true"));
@@ -418,6 +465,7 @@ mod tests {
             let rendered = render(&Detection {
                 languages: Vec::new(),
                 workspace: Some(flavor),
+                monorepo_requested: true,
             });
             std::fs::write(&config_path, rendered).unwrap();
             let registry = alint_rules::builtin_registry();
@@ -452,6 +500,7 @@ mod tests {
         let det = Detection {
             languages: vec![Language::Rust],
             workspace: Some(WorkspaceFlavor::Cargo),
+            monorepo_requested: true,
         };
         let out = render(&det);
         assert!(out.contains("# Detected: Rust, Cargo workspace."));
@@ -462,5 +511,25 @@ mod tests {
         let det = Detection::default();
         let out = render(&det);
         assert!(!out.contains("# Detected:"));
+    }
+
+    #[test]
+    fn detects_dotnet_php_and_monorepo_flag_without_manifest() {
+        let tmp = td();
+        touch(tmp.path(), "App.csproj", "<Project />\n");
+        touch(tmp.path(), "composer.json", "{}\n");
+        let det = detect(tmp.path(), true);
+        assert!(det.languages.contains(&Language::Dotnet));
+        assert!(det.languages.contains(&Language::Php));
+        assert_eq!(det.workspace, None);
+        assert!(det.monorepo_requested);
+        let rendered = render(&det);
+        assert!(rendered.contains("alint://bundled/dotnet@v1"), "{rendered}");
+        assert!(rendered.contains("alint://bundled/php@v1"), "{rendered}");
+        assert!(rendered.contains("nested_configs: true"), "{rendered}");
+        assert!(
+            rendered.contains("alint://bundled/monorepo@v1"),
+            "{rendered}"
+        );
     }
 }

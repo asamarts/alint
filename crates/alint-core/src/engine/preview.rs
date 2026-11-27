@@ -93,11 +93,10 @@ impl Engine {
         };
         for (result, item, entry, path, names, is_dir, _) in &creates {
             // A sensitive item's reason leaves the target out: its rule's
-            // configuration or evidence can hold it, as the redacted summary
-            // already does.
-            let sensitive = report.results[*result].items[*item]
-                .violation
-                .is_sensitive();
+            // configuration, path selection, or evidence can hold it, as the
+            // redacted summary already does.
+            let violation = &report.results[*result].items[*item].violation;
+            let sensitive = violation.is_sensitive() || violation.path_is_sensitive();
             let shown = |path: &Path| {
                 if sensitive {
                     "the target".to_string()

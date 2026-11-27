@@ -206,6 +206,55 @@ impl StructuredFixer {
             selected_occurrence: Some(occurrence),
         }
     }
+
+    /// Select `(path_segments, rewritten_string_value)` pairs for live violating
+    /// string nodes in `located`, shared between span formats and document-rewrite
+    /// formats (TOML).
+    fn select_replace_targets(
+        &self,
+        located: &serde_json_path::LocatedNodeList<'_>,
+        violations: &[Violation],
+        search: &regex::Regex,
+        replacement: &str,
+        matches: &str,
+    ) -> Vec<(Vec<PathSeg>, Value)> {
+        let compliant = regex::Regex::new(matches).ok();
+        let mut live: HashMap<&str, usize> = HashMap::new();
+        for v in violations {
+            if let Some(k) = v.baseline_key.as_deref() {
+                *live.entry(k).or_default() += 1;
+            }
+        }
+        let correlate = !live.is_empty();
+        located
+            .iter()
+            .filter_map(|node| {
+                let current = node.node().as_str()?;
+                if compliant.as_ref().is_some_and(|re| re.is_match(current)) {
+                    return None;
+                }
+                let rewritten = search.replace_all(current, replacement);
+                if rewritten == current {
+                    return None;
+                }
+                if correlate {
+                    let key = crate::structured_path::matches_baseline_key(
+                        &self.path_src,
+                        matches,
+                        node.node(),
+                    );
+                    match live.get_mut(key.as_str()) {
+                        Some(n) if *n > 0 => *n -= 1,
+                        _ => return None,
+                    }
+                }
+                Some((
+                    to_segs(node.location()),
+                    Value::String(rewritten.into_owned()),
+                ))
+            })
+            .collect()
+    }
 }
 
 /// The intent of removing each of `paths`, for the whole-document check.
@@ -312,14 +361,13 @@ impl Fixer for StructuredFixer {
             // "fixable" and a later `fix` may `skip` it: the tolerated over-promise
             // in the safe direction, exercised by `remove_value_xml_root_is_declined`.
             StructuredOp::Remove => structured_fix::format_supports_removal(self.format),
-            // `replace` is advertised fixable for a SPAN format (all but TOML): it
-            // rewrites the value at a resolved span. TOML is document-rewrite with
-            // no value span, so its `replace` declines on EVERY document (a
-            // statically-knowable never-appliable case -> `check` must not promise
-            // it, mirroring the `remove_value` / `format_supports_removal` gate).
-            // Whether a span-format node is a STRING the search rewrites stays
-            // document-dependent -> a fix-time skip (tolerated, safe direction).
-            StructuredOp::Replace { .. } => !structured_fix::uses_document_rewrite(self.format),
+            // `replace` is advertised fixable for all 8 structured formats: span
+            // formats splice the rewritten scalar value directly, and TOML
+            // rewrites each live violating node via `toml_edit` `document_set`
+            // reduced to its minimal changed byte range. Whether a matched node
+            // is a STRING the search rewrites stays document-dependent -> a
+            // fix-time skip (tolerated, safe direction).
+            StructuredOp::Replace { .. } => true,
         }
     }
 
@@ -467,11 +515,35 @@ impl Fixer for StructuredFixer {
                         None => Vec::new(),
                     }
                 }
-                // `replace` on a document-rewrite format (TOML) is DEFERRED: it has
-                // no value span to splice, and a document-level string rewrite is a
-                // separate increment. Declines (skipped); the other 7 formats do
-                // `toml_path_matches`-style replace via the span path below.
-                StructuredOp::Replace { .. } => Vec::new(),
+                StructuredOp::Replace {
+                    search,
+                    replacement,
+                    matches,
+                } => {
+                    let targets = self.select_replace_targets(
+                        &located,
+                        violations,
+                        search,
+                        replacement,
+                        matches,
+                    );
+                    let mut out = Vec::new();
+                    for (segs, rewritten) in targets {
+                        let Some(doc) =
+                            structured_fix::document_set(self.format, bytes, &segs, &rewritten)
+                        else {
+                            continue;
+                        };
+                        let verify = EditVerifier::Structured {
+                            format: self.format,
+                            strict: self.strict,
+                            query: segs_to_query(&segs),
+                            expect: ExpectedValue::Matches(matches.clone()),
+                        };
+                        out.extend(one(doc, verify, &[(segs, Intent::Set(rewritten))]));
+                    }
+                    out
+                }
             };
         }
 
@@ -696,81 +768,13 @@ impl Fixer for StructuredFixer {
                 replacement,
                 matches,
             } => {
-                // One rewrite edit per matched STRING node whose value the search
-                // actually changes. Decode the value (the check-side string), apply
-                // `search` -> `replacement`, re-serialize as a format token, and
-                // splice it over the value span (reusing the `set_value` machinery).
-                // A non-string node, an un-serializable result, an unresolvable span,
-                // or a search that matched nothing emits NO edit -- the `Matches`
-                // verifier would demote a no-op anyway, and this keeps it honest.
-                // Rewrite ONLY the VIOLATING nodes: skip any that already satisfy
-                // the rule's `matches:` (a wildcard `path:` selects compliant AND
-                // non-compliant nodes; rewriting a compliant one would clobber it --
-                // e.g. `^`->`v` on an already-`v`-prefixed value). Compiled once here.
-                let compliant = regex::Regex::new(matches).ok();
-                // W4 (`fix --baseline`): rewrite only the nodes the engine handed us
-                // as LIVE violations. The baseline filter (Engine::fix_run) drops the
-                // grandfathered nodes upstream, but this fixer re-derives every
-                // failing node from the file, so without this it would rewrite
-                // accepted, reviewed debt (an under-suppression trust bug: `check
-                // --baseline` reports only the new node, but `fix` would mutate the
-                // grandfathered ones). Correlate each candidate back to a handed
-                // violation by the SAME key the host recorded it under
-                // (`matches_baseline_key`, the single shared definition), COUNT-aware
-                // so N identical values with M live get exactly M edits -- the
-                // check-side budget semantics. Under a plain `fix` (no baseline) the
-                // engine passes ALL failing nodes, so every key has budget and every
-                // node is fixed: this is transparent to the non-baseline path.
-                let mut live: HashMap<&str, usize> = HashMap::new();
-                for v in violations {
-                    if let Some(k) = v.baseline_key.as_deref() {
-                        *live.entry(k).or_default() += 1;
-                    }
-                }
-                // Correlation is active only when the caller handed us KEYED
-                // violations (the fix pass, `check --baseline`, and
-                // `attach_proposed_edits` all pass the host's keyed violations).
-                // The LSP `code_action` synthesizes a positional violation with NO
-                // baseline_key to offer a "fix every occurrence" action; there the
-                // budget is empty, so fall back to the legacy file-scoped behavior
-                // (rewrite every non-compliant node). This never re-opens the
-                // grandfather bug: a baseline run always carries keys, so `live` is
-                // non-empty and the filter engages.
-                let correlate = !live.is_empty();
-                let (paths, rewrites): (Vec<Vec<PathSeg>>, Vec<Value>) = located
-                    .iter()
-                    .filter_map(|node| {
-                        let current = node.node().as_str()?;
-                        if compliant.as_ref().is_some_and(|re| re.is_match(current)) {
-                            return None; // already matches `matches:` -- leave it
-                        }
-                        let rewritten = search.replace_all(current, replacement.as_str());
-                        if rewritten == current {
-                            return None;
-                        }
-                        // Grandfathered (key absent from the live set, or its budget
-                        // already spent by an earlier identical node) -> leave it.
-                        if correlate {
-                            let key = crate::structured_path::matches_baseline_key(
-                                &self.path_src,
-                                matches,
-                                node.node(),
-                            );
-                            match live.get_mut(key.as_str()) {
-                                Some(n) if *n > 0 => *n -= 1,
-                                _ => return None,
-                            }
-                        }
-                        let rewritten = Value::String(rewritten.into_owned());
-                        Some((to_segs(node.location()), rewritten))
-                    })
-                    .unzip();
+                let sets =
+                    self.select_replace_targets(&located, violations, search, replacement, matches);
                 // A verified-edit format (dotenv) consumes its editor's exact range
                 // and replacement per node; a span format resolves every node's
                 // span from one parse of the file, and a whole-document format's
                 // rewrites must together change these nodes only
                 // (`checked_value_edits`).
-                let sets: Vec<(Vec<PathSeg>, Value)> = paths.into_iter().zip(rewrites).collect();
                 let edits = if structured_fix::uses_verified_edits(self.format) {
                     vec![None; sets.len()]
                 } else {
@@ -1353,10 +1357,34 @@ mod tests {
             )
         };
         let v = Violation::new("x");
-        // TOML replace is document-rewrite (no value span) -> declines on EVERY
-        // document, so `check` must NOT advertise it; a span format (JSON) IS.
-        assert!(!mk(Format::Toml).can_fix(&v));
+        // Both span formats (JSON) and document-rewrite formats (TOML) support
+        // `replace` and advertise it honestly via `can_fix`.
+        assert!(mk(Format::Toml).can_fix(&v));
         assert!(mk(Format::Json).can_fix(&v));
+        // TOML wildcard replace rewrites only the live violating node while
+        // keeping comments and compliant siblings untouched.
+        let toml_src = b"# header\n[deps]\nok = \"v9\"\nbad = \"2.0\" # comment\n";
+        let toml_bad = Violation::new("bad").with_baseline_key(
+            crate::structured_path::matches_baseline_key("$.deps.*", "^v", &json!("2.0")),
+        );
+        let toml_edits = mk(Format::Toml).collect_edits(
+            &[toml_bad],
+            Path::new("Cargo.toml"),
+            toml_src,
+            Path::new("/r"),
+        );
+        assert_eq!(
+            toml_edits.len(),
+            1,
+            "only the violating TOML node is rewritten"
+        );
+        let (ts, te, tcontent, _) = edit_of(&toml_edits[0]);
+        let mut patched = toml_src.to_vec();
+        patched.splice(ts..te, tcontent.bytes());
+        assert_eq!(
+            String::from_utf8(patched).unwrap(),
+            "# header\n[deps]\nok = \"v9\"\nbad = \"v2.0\" # comment\n"
+        );
         // A wildcard match hits a COMPLIANT node (`ok: "v9"`, already `^v`) and a
         // VIOLATING one (`bad: "2.0"`). Only the violating node is rewritten -- the
         // compliant one is left alone (rewriting it would clobber `v9` -> `vv9`).

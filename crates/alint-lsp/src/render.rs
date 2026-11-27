@@ -25,8 +25,10 @@ pub(crate) fn render_finding(f: &Finding) -> String {
         s.push_str("\n\n");
         s.push_str(description);
     }
-    s.push_str(if f.fixable {
+    s.push_str(if f.fixable && !f.sensitive {
         "\n\nFix: available (quick-fix, or `alint fix`)"
+    } else if f.fixable {
+        "\n\nFix: available via `alint fix` (withheld from LSP for sensitive findings)"
     } else {
         "\n\nFix: none (this rule has no auto-fix)"
     });

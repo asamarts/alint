@@ -191,9 +191,11 @@ jobs:
           # as the gh / python steps — then assert the version so
           # a silent pin miss fails the run loudly.
           hf_ver="1.20.0"
+          hf_sha256="af844f82e92e6ef206e0115b36742c8c79ad0a8ff39e10601c25e71d76048e2f"
           mkdir -p "$HOME/.local/bin"
           curl -fsSL -o "$RUNNER_TEMP/hf.tar.gz" \
             "https://github.com/sharkdp/hyperfine/releases/download/v${hf_ver}/hyperfine-v${hf_ver}-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${hf_sha256}  $RUNNER_TEMP/hf.tar.gz" | sha256sum -c -
           tar -xzf "$RUNNER_TEMP/hf.tar.gz" -C "$RUNNER_TEMP"
           cp "$RUNNER_TEMP/hyperfine-v${hf_ver}-x86_64-unknown-linux-gnu/hyperfine" \
             "$HOME/.local/bin/hyperfine"
@@ -219,9 +221,11 @@ jobs:
             # the runner has no sudo, so this falls back to the
             # tarball.
             gh_ver="2.62.0"
+            gh_sha256="41c8b0698ad3003cb5c44bde672a1ffd5f818595abd80162fbf8cc999418446a"
             mkdir -p "$HOME/.local/bin"
             curl -fsSL -o "$RUNNER_TEMP/gh.tar.gz" \
               "https://github.com/cli/cli/releases/download/v${gh_ver}/gh_${gh_ver}_linux_amd64.tar.gz"
+            echo "${gh_sha256}  $RUNNER_TEMP/gh.tar.gz" | sha256sum -c -
             tar -xzf "$RUNNER_TEMP/gh.tar.gz" -C "$RUNNER_TEMP"
             cp "$RUNNER_TEMP/gh_${gh_ver}_linux_amd64/bin/gh" "$HOME/.local/bin/gh"
             chmod +x "$HOME/.local/bin/gh"
@@ -245,9 +249,11 @@ jobs:
           if ! command -v python3 >/dev/null 2>&1; then
             python_ver="3.12.7"
             release_tag="20241016"
+            python_sha256="43576f7db1033dd57b900307f09c2e86f371152ac8a2607133afa51cbfc36064"
             mkdir -p "$HOME/.local"
             curl -fsSL -o "$RUNNER_TEMP/python.tar.gz" \
               "https://github.com/indygreg/python-build-standalone/releases/download/${release_tag}/cpython-${python_ver}+${release_tag}-x86_64-unknown-linux-gnu-install_only.tar.gz"
+            echo "${python_sha256}  $RUNNER_TEMP/python.tar.gz" | sha256sum -c -
             tar -xzf "$RUNNER_TEMP/python.tar.gz" -C "$HOME/.local/"
             echo "$HOME/.local/python/bin" >> "$GITHUB_PATH"
             export PATH="$HOME/.local/python/bin:$PATH"
@@ -553,7 +559,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           OUT_LABEL: ${{ steps.label.outputs.label }}
-          SOURCE_SHA: ${{ github.sha }}
+          SOURCE_SHA: ${{ needs.guard.outputs.head_sha }}
           PREV_TAG: ${{ needs.guard.outputs.prev }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
@@ -594,6 +600,7 @@ jobs:
           # touches workflow YAML (because main has the latest
           # YAML already).
           stage_root=$(mktemp -d)
+          trap 'rm -rf "$stage_root"' EXIT
           mkdir -p "$stage_root/macro" "$stage_root/micro"
           cp -r "docs/benchmarks/macro/results/linux-x86_64/${OUT_LABEL}/" \
             "$stage_root/macro/" || true
@@ -651,6 +658,9 @@ jobs:
           json=docs/benchmarks/macro/results/linux-x86_64/"${OUT_LABEL}"/results.json
           summary=$(jq -r '.rows[] | "- \(.scenario) \(.size_label) \(.mode): \(.mean_ms | tostring | .[0:6]) ms ± \(.stddev_ms | tostring | .[0:5])"' "$json")
 
+          if gh pr view "$branch" >/dev/null 2>&1; then
+            echo "PR for ${branch} already open; updated branch via force-push"
+          else
           gh pr create \
             --title "docs(bench): ${OUT_LABEL} bench-scale results" \
             --body "$(cat <<EOF
@@ -743,6 +753,7 @@ jobs:
             --head "$branch" \
             --base main \
             --label bench-record
+          fi
 
   # Deterministic micro gate for the release: `xtask micro-det` counts the
   # instructions of every criterion micro benchmark under Callgrind, the benched
