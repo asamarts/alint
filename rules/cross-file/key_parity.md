@@ -25,7 +25,6 @@ A missing reference or literal peer, an unparsable reference or peer, and a `pee
 | `peers` | string | yes |  | Glob selecting the peer files. The reference is excluded automatically. A value without glob metacharacters is a literal path, read even when gitignored (`peers: .env`). |
 | `plurals` | one of `exact` \| `cldr` |  |  | Treat a CLDR plural group (nested object or i18next `_other` siblings) as one key. Exact per-locale category checking is not part of v0.21. |
 | `reference` | string | yes |  | The authoritative key file. |
-| `strict` | boolean |  | `false` | When `true` on JSON files, enforce strict RFC 8259 JSON parsing (rejecting comments, trailing commas, leading UTF-8 BOM, and empty files; ADR-0050 D7). Rejected at build time for non-JSON formats. |
 | `strip_root` | boolean |  | `false` | Compare below each file's single top-level key, as in Rails locale files (`en:`, `fr:`). JSON, YAML, and TOML only. A file with keys must have exactly one top-level key, an object, or it is an analysis failure. |
 
 Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths` or `expect_matches`. This table is generated from the JSON Schema; option types and defaults are authoritative.

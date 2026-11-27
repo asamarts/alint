@@ -18,7 +18,6 @@ Check-only — fixing schema violations is a "the user knows what value belongs 
 |---|---|---|---|---|
 | `format` | one of `json` \| `yaml` \| `yml` \| `toml` \| `xml` \| `dotenv` \| `properties` \| `ini` \| `hcl` |  |  | Override the auto-detected target format. When omitted, format is inferred from each target file's extension (.json / .yaml / .yml / .toml / .properties / .ini / .cfg / .hcl / .tf / .tfvars / .nomad / .xml and the .csproj / .props / .targets XML family), or by filename for the `.env` family. |
 | `schema_path` | string | yes |  | Path to a JSON Schema file relative to the lint root. The schema must itself be JSON even when validating YAML / TOML targets. |
-| `strict` | boolean |  | `false` | When `true`, enforce strict RFC 8259 JSON parsing on JSON targets (rejecting comments, trailing commas, leading UTF-8 BOM, and empty files; ADR-0050 D7). Rejected at build time when `format:` is explicitly non-JSON. |
 
 Plus the common `paths`, `level`, `id`, `when`, `scope_filter`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
 

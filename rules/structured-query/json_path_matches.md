@@ -15,7 +15,6 @@ Same shape as the `*_equals` variants, but the asserted value is a **regex** mat
 | `if_present` | boolean |  | `false` | When true, a query returning zero matches is silently OK - only real matches that fail the op produce violations. |
 | `matches` | string | yes |  | Rust-regex pattern to match against the value at `path`. |
 | `path` | string | yes |  | `JSONPath` expression rooted at `$`. |
-| `strict` | boolean |  | `false` | When true, enforce strict RFC 8259 JSON parsing (rejecting comments, trailing commas, leading UTF-8 BOM, and empty files; ADR-0050 D7). |
 
 Plus the common `paths`, `level`, `id`, `when`, `scope_filter`, `fix`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
