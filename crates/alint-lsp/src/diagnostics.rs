@@ -234,13 +234,31 @@ pub(crate) fn hint_findings(
 
 /// The 1-indexed line of `id: <id>` (a rule or fact) in a config's text.
 fn declaring_line(text: &str, id: &str) -> Option<usize> {
-    text.lines()
-        .position(|line| {
-            let line = line.trim_start().trim_start_matches('-').trim_start();
-            line.strip_prefix("id:")
-                .is_some_and(|rest| rest.trim().trim_matches(['"', '\'']) == id)
+    alint_core::physical_lines(text)
+        .enumerate()
+        .find_map(|(index, (_, raw))| {
+            let line = raw
+                .trim_start()
+                .trim_start_matches('-')
+                .trim_start()
+                .trim_start_matches('{')
+                .trim_start();
+            let rest = line.strip_prefix("id:")?.trim_start();
+            let value = if let Some(quoted) = rest.strip_prefix('"') {
+                quoted.split_once('"')?.0
+            } else if let Some(quoted) = rest.strip_prefix('\'') {
+                quoted.split_once('\'')?.0
+            } else {
+                // Stop at flow delimiter `,` / `}` or inline `#` comment.
+                let before_flow = rest.split([',', '}']).next().unwrap_or(rest);
+                let before_comment = before_flow
+                    .split_once(" #")
+                    .or_else(|| before_flow.split_once("\t#"))
+                    .map_or(before_flow, |(head, _)| head);
+                before_comment.trim()
+            };
+            (value == id).then_some(index + 1)
         })
-        .map(|index| index + 1)
 }
 
 pub(crate) fn severity_of(level: Level) -> Option<DiagnosticSeverity> {
@@ -460,4 +478,17 @@ pub(crate) fn byte_offset_to_position(text: &str, byte_offset: usize) -> Positio
         }
     }
     Position::new(line, character)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn declaring_line_handles_flow_mappings_comments_and_cr_endings() {
+        let yaml = "version: 1\rrules:\r  - { id: flow_rule, kind: file_exists }\r  - id: inline_comment # note\r    kind: file_exists\r";
+        assert_eq!(declaring_line(yaml, "flow_rule"), Some(3));
+        assert_eq!(declaring_line(yaml, "inline_comment"), Some(4));
+        assert_eq!(declaring_line(yaml, "missing"), None);
+    }
 }

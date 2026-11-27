@@ -201,7 +201,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
                     format!(
                         "dir_create with `root_only` requires a root-level (single-component) \
                      directory; {} is nested and could never satisfy the rule",
-                        dir.display()
+                        crate::slash(&dir)
                     ),
                 ));
             }

@@ -4,7 +4,7 @@
 
 use std::borrow::Cow;
 
-use alint_core::semver_eval::{SemverRange, SemverVersion, parse_range, parse_version};
+use alint_core::semver_eval::{SemverRange, SemverVersion, parse_range};
 
 use super::{Related, Run, Spot, type_of};
 use crate::constraint::values::{Key, Scalar};
@@ -76,7 +76,10 @@ impl Run<'_> {
                             self.fail(Some(cell.at.resource.path().as_path()), message);
                             return;
                         };
-                        let parsed = match parse_version(raw) {
+                        let parsed = match alint_core::semver_eval::parse_version_for_dialect(
+                            raw,
+                            satisfies.dialect,
+                        ) {
                             Ok(v) => v,
                             Err(err) => {
                                 let cell = self.cell(row, pos);

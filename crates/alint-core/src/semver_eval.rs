@@ -282,6 +282,24 @@ impl SemverRange {
     }
 }
 
+/// Parse a concrete semantic version under a specific [`SemverDialect`],
+/// rejecting unsupported PEP 440 version forms (`+local`, `N!`, `.post`/`-post`,
+/// `.dev`/`-dev`) when `dialect == SemverDialect::Pep440Basic`.
+///
+/// # Errors
+///
+/// Returns a descriptive error string when `raw` is invalid or uses syntax
+/// unsupported by `dialect`.
+pub fn parse_version_for_dialect(
+    raw: &str,
+    dialect: SemverDialect,
+) -> Result<SemverVersion, String> {
+    if dialect == SemverDialect::Pep440Basic {
+        reject_unsupported_pep440_range_token(raw)?;
+    }
+    parse_version(raw)
+}
+
 /// Parse a concrete semantic version, normalizing partial versions (`22` ->
 /// `22.0.0`, `22.13` -> `22.13.0`) and stripping an optional leading `v`/`V`.
 ///
@@ -640,13 +658,14 @@ fn desugar_hyphen(lhs_raw: &str, rhs_raw: &str) -> Result<Vec<Comparator>, Strin
             patch: lhs.patch.unwrap_or(0),
             pre: lhs.pre,
         };
+        let is_partial = lhs.patch.is_none();
         push_bounded(
             &mut out,
             Comparator::Rel {
                 op: CompOp::Ge,
                 version: ver,
                 explicit_pre,
-                pre_floor_when_included: !explicit_pre,
+                pre_floor_when_included: is_partial && !explicit_pre,
             },
         )?;
     } else {
@@ -1378,12 +1397,15 @@ mod tests {
                 true,
                 true,
             ),
+            // Full MAJOR.MINOR.PATCH hyphen lower bound desugars to >=1.2.3
+            // (matches `>=1.2.3 <=2.3.4` in node-semver: prerelease below 1.2.3
+            // does NOT satisfy even with include_prerelease).
             (
                 "1.2.3-alpha.1",
                 "1.2.3 - 2.3.4",
                 SemverDialect::Node,
                 true,
-                true,
+                false,
             ),
             // Tilde stays >=2.0.0 even with include_prerelease (node-semver parity).
             ("2.0.0-alpha.1", "~2", SemverDialect::Node, true, false),
@@ -1482,5 +1504,24 @@ mod tests {
                 "expected cargo rejection for {bad_cargo:?}"
             );
         }
+
+        // Audit regression: `parse_version_for_dialect` rejects PEP 440 local,
+        // epoch, post, and dev forms that would otherwise invert ordering.
+        for bad_pep_ver in [
+            "1.0.0+local",
+            "1!2.0.0",
+            "1.0.0.post1",
+            "1.0.0-post1",
+            "1.0.0.dev0",
+            "1.0.0-dev0",
+        ] {
+            assert!(
+                parse_version_for_dialect(bad_pep_ver, SemverDialect::Pep440Basic).is_err(),
+                "expected pep440-basic version rejection for {bad_pep_ver:?}"
+            );
+        }
+        assert!(parse_version_for_dialect("1.0.0+build.1", SemverDialect::Node).is_ok());
+        assert!(parse_version_for_dialect("1.0.0+build.1", SemverDialect::Cargo).is_ok());
+        assert!(parse_version_for_dialect("3.12.0-rc.1", SemverDialect::Pep440Basic).is_ok());
     }
 }

@@ -88,12 +88,18 @@ fn error_is_internal(err: &anyhow::Error) -> bool {
 static ENVIRONMENT_VALUES: std::sync::LazyLock<std::sync::Mutex<alint_core::EnvironmentRedactor>> =
     std::sync::LazyLock::new(|| std::sync::Mutex::new(alint_core::EnvironmentRedactor::new()));
 
-/// Record `config`'s environment values for [`redact_environment_values`].
-fn remember_environment_values(config: &alint_core::Config) {
+/// Record `values` for [`redact_environment_values`] (used by the CLI and LSP
+/// tracing redaction hook).
+fn remember_environment_value_slice(values: &[String]) {
     let mut known = ENVIRONMENT_VALUES
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    known.extend(&config.environment_values);
+    known.extend(values);
+}
+
+/// Record `config`'s environment values for [`redact_environment_values`].
+fn remember_environment_values(config: &alint_core::Config) {
+    remember_environment_value_slice(&config.environment_values);
 }
 
 /// `message` without the environment values of any config loaded so far.
@@ -534,7 +540,10 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
 /// by `init` and `lsp`, which — unlike `check`/`list`/`baseline`/… — take no
 /// `&cli` of their own.
 fn reject_non_human_format(cli: &Cli, cmd: &str) -> anyhow::Result<()> {
-    if cli.format != "human" {
+    if !matches!(
+        cli.format.to_ascii_lowercase().as_str(),
+        "human" | "pretty" | "text"
+    ) {
         anyhow::bail!(
             "`{cmd}` does not support `--format {}` - it produces no formatted report; drop `--format`",
             cli.format
@@ -544,7 +553,10 @@ fn reject_non_human_format(cli: &Cli, cmd: &str) -> anyhow::Result<()> {
 }
 
 fn reject_non_human_baseline_format(cli: &Cli) -> anyhow::Result<()> {
-    if cli.format != "human" {
+    if !matches!(
+        cli.format.to_ascii_lowercase().as_str(),
+        "human" | "pretty" | "text"
+    ) {
         anyhow::bail!(
             "`baseline` does not support `--format {}` - it writes the baseline file and a \
              human summary; drop `--format` (use `--quiet` to silence the summary)",
@@ -577,6 +589,7 @@ fn cmd_lsp(cli: &Cli) -> Result<ExitCode> {
         }
         None => None,
     };
+    alint_lsp::set_tracing_env_hook(remember_environment_value_slice);
     let options = alint_lsp::LspOptions::default()
         .with_show_notes(cli.show_notes)
         .with_analysis_time(cli.as_of)

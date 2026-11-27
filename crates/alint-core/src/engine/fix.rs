@@ -873,6 +873,9 @@ impl Engine {
                 self.relation_limits
                     .get(crate::relation::LimitKind::FindingsPerRule),
             ),
+            findings_per_rule_redacted: self
+                .relation_limits
+                .is_redacted(crate::relation::LimitKind::FindingsPerRule),
         };
         let filtered_ctx = filtered_index.as_ref().map(|fi| Context {
             root,
@@ -891,6 +894,9 @@ impl Engine {
                 self.relation_limits
                     .get(crate::relation::LimitKind::FindingsPerRule),
             ),
+            findings_per_rule_redacted: self
+                .relation_limits
+                .is_redacted(crate::relation::LimitKind::FindingsPerRule),
         });
         let git_file_only_ctx = git_tracked_indexes
             .as_ref()
@@ -912,6 +918,9 @@ impl Engine {
                     self.relation_limits
                         .get(crate::relation::LimitKind::FindingsPerRule),
                 ),
+                findings_per_rule_redacted: self
+                    .relation_limits
+                    .is_redacted(crate::relation::LimitKind::FindingsPerRule),
             });
         let git_dir_aware_ctx = git_tracked_indexes
             .as_ref()
@@ -933,6 +942,9 @@ impl Engine {
                     self.relation_limits
                         .get(crate::relation::LimitKind::FindingsPerRule),
                 ),
+                findings_per_rule_redacted: self
+                    .relation_limits
+                    .is_redacted(crate::relation::LimitKind::FindingsPerRule),
             });
         // Compose mode for a real (non-dry-run) pass: content fixers route
         // their whole-file writes into this buffer instead of hitting disk, so
@@ -1882,7 +1894,14 @@ impl Engine {
                 if hits_env_config && let Some(path) = item.violation.path.as_deref() {
                     let raw = path.display().to_string();
                     let slash = raw.replace('\\', "/");
-                    if item.violation.message.contains(&raw)
+                    if raw.len() < 4 {
+                        // Never substring-replace short (1-3 char) env-chosen
+                        // config filenames across built-in violation templates:
+                        // doing so mutates fixed words (e.g. "line" -> "l<redacted>e")
+                        // and creates a deterministic substring oracle.
+                        item.violation.message =
+                            format!("violation on {CONFIGURATION_MASK}").into();
+                    } else if item.violation.message.contains(&raw)
                         || item.violation.message.contains(&slash)
                     {
                         let replaced = item

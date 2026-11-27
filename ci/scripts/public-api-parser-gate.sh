@@ -147,6 +147,8 @@ PLATFORM_ALLOWLIST=(
   "crates/alint-core/src/baseline.rs|cfg(not(any(unix, windows)))|fn normalize_path"
   "crates/alint-core/src/baseline.rs|cfg(unix)|fn normalize_path|use"
   "crates/alint-core/src/baseline.rs|cfg(windows)|fn normalize_path"
+  "crates/alint-core/src/pathsafe.rs|cfg(not(windows))|pub(crate) fn metadata_is_symlink_or_reparse"
+  "crates/alint-core/src/pathsafe.rs|cfg(windows)|pub(crate) fn metadata_is_symlink_or_reparse|const, use"
   "crates/alint-core/src/walker_ignore_files.rs|cfg(not(unix))|fn open_nonblocking"
   "crates/alint-core/src/walker_ignore_files.rs|cfg(unix)|fn open_nonblocking|use"
   "crates/alint-core/src/walker_parallel.rs|cfg(not(any(unix, windows)))|fn is_eloop_io"

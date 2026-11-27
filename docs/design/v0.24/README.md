@@ -214,9 +214,10 @@ and owner ADR approval ([ADR-0050](../../adr/0050-v024-phase-3-completion-design
   parent ignore-file warning for #568, and v2 additions), tag `v0.24.0`, verify all release and
   post-publish smoke channels, review `bench-record`, sync `alint.org`, and land the post-tag
   doc follow-up PR once `v0.24.0` is live (refreshing overlay-gated pre-v0.24 prose in
-  `docs/rules.md` [lines 306, 972, 974, 1046, 1048, 1054],
-  `docs/site/concepts/composition/bundled-rulesets.md` [lines 8, 31, 46, 54: `24` -> `25` rulesets
-  and `alint://bundled/<name>@<rev>` note], and
+  `docs/rules.md` [lines 212, 300, 306, 914, 972, 974, 1046, 1048, 1054, 1576],
+  `docs/site/concepts/composition/bundled-rulesets.md` [line 46: `alint://bundled/<name>@<rev>`
+  note; the `24` -> `25` ruleset count is pinned automatically from `facts.json` by
+  `ci/scripts/pin-docs-counts.py`], and
   `docs/site/concepts/composition/composition-and-trust.md` [lines 57-62], and unwrapping shipped
   `<!-- alint:since=0.23.0 -->` / `<!-- alint:since=0.24 -->` / `<!-- alint:since=0.24.0 -->`
   markers).

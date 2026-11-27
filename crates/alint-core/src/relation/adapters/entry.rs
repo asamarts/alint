@@ -148,6 +148,7 @@ pub(crate) fn key_rows(
                 kind: LimitKind::BytesPerRun,
                 limit: run_limit,
                 reached: total_pointer_bytes,
+                redacted: limits.is_redacted(LimitKind::BytesPerRun),
             }));
         }
         if total_pointer_bytes > decode_limit {
@@ -155,6 +156,7 @@ pub(crate) fn key_rows(
                 kind: LimitKind::KeyPathBytesPerDecode,
                 limit: decode_limit,
                 reached: total_pointer_bytes,
+                redacted: limits.is_redacted(LimitKind::KeyPathBytesPerDecode),
             }));
         }
     }
@@ -190,6 +192,7 @@ fn entry_error(error: EntryRowsError) -> AdapterError {
             kind: LimitKind::RowsPerExtractor,
             limit,
             reached: limit.saturating_add(1),
+            redacted: false,
         }),
     }
 }
@@ -375,7 +378,8 @@ mod tests {
             AdapterError::Limit(crate::relation::LimitExceeded {
                 kind: crate::relation::LimitKind::RowsPerExtractor,
                 limit: 1,
-                reached: 2
+                reached: 2,
+                redacted: false,
             })
         ));
     }

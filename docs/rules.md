@@ -209,8 +209,9 @@ Default `shebang:` is `^#!`, which only enforces presence; almost every useful c
 
 **Categories:** Content, Encoding
 
+Content is detected as text (magic bytes + UTF-8 validity check) — fails on binary files matched by `paths`.
 <!-- alint:since=0.24 -->
-Content is detected as text (BOM, NUL-byte, magic-header, and control-byte heuristics over the first 8 KiB) -- fails on binary files matched by `paths`.
+From v0.24, detection uses an owned heuristic over the first 8 KiB covering BOMs, NUL bytes, common binary magic headers (PNG, JPEG, GIF, PDF, ZIP, GZIP, ELF, Mach-O, PE/MZ, WebAssembly), and control-byte density.
 <!-- /alint:since -->
 
 ### `file_is_ascii`

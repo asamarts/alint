@@ -51,11 +51,12 @@ pub enum LimitKind {
     /// cap; this tighter per-decode cap stops such expansion early while still
     /// allowing large real-world key files.
     KeyPathBytesPerDecode,
-    /// Findings one relation-backed rule (`constraint`, `key_parity`) may emit
-    /// in a single evaluation. When a rule produces more (for example `G x V`
-    /// missing values across empty groups), it stops emitting further findings
-    /// at this cap and adds one non-baselinable analysis-failure finding
-    /// naming the cap and suppressed count.
+    /// Findings one relation-backed or duplicate-key rule (`constraint`,
+    /// `key_parity`, `no_duplicate_keys`) may emit in a single evaluation. When
+    /// a rule produces more (for example `G x V` missing values across empty
+    /// groups), it stops emitting further findings at this cap and adds one
+    /// non-baselinable analysis-failure finding naming the cap and suppressed
+    /// count.
     FindingsPerRule,
 }
 
@@ -138,33 +139,87 @@ impl LimitKind {
 }
 
 /// A limit was reached: the analysis is incomplete.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("relation limit `{}` ({limit}) reached: {reached} {}", kind.name(), kind.unit())]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LimitExceeded {
     pub kind: LimitKind,
     pub limit: usize,
     pub reached: usize,
+    /// True when the limit value came from an environment interpolation
+    /// (`{{env.*}}`), so neither the configured bound nor the reached count
+    /// (which would reveal `limit + 1`) may appear in user-facing diagnostics.
+    pub redacted: bool,
 }
 
+impl std::fmt::Display for LimitExceeded {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.redacted {
+            write!(
+                f,
+                "relation limit `{}` (<redacted>) reached",
+                self.kind.name()
+            )
+        } else {
+            write!(
+                f,
+                "relation limit `{}` ({}) reached: {} {}",
+                self.kind.name(),
+                self.limit,
+                self.reached,
+                self.kind.unit()
+            )
+        }
+    }
+}
+
+impl std::error::Error for LimitExceeded {}
+
 /// A configured limit outside `1..=hard_cap`.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("relation limit `{}` must be between 1 and {cap}, not {value}", kind.name())]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LimitConfigError {
     pub kind: LimitKind,
     pub value: usize,
     pub cap: usize,
+    /// True when the configured value came from an environment interpolation
+    /// (`{{env.*}}`), so the error displays `<redacted>` instead of quoting the
+    /// raw value (even when shorter than four characters).
+    pub redacted: bool,
 }
+
+impl std::fmt::Display for LimitConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.redacted {
+            write!(
+                f,
+                "relation limit `{}` must be between 1 and {}, not <redacted>",
+                self.kind.name(),
+                self.cap
+            )
+        } else {
+            write!(
+                f,
+                "relation limit `{}` must be between 1 and {}, not {}",
+                self.kind.name(),
+                self.cap,
+                self.value
+            )
+        }
+    }
+}
+
+impl std::error::Error for LimitConfigError {}
 
 /// The limits one evaluation runs under.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Limits {
     values: [usize; LimitKind::ALL.len()],
+    redacted_mask: u16,
 }
 
 impl Default for Limits {
     fn default() -> Self {
         Self {
             values: LimitKind::ALL.map(LimitKind::default_value),
+            redacted_mask: 0,
         }
     }
 }
@@ -172,18 +227,48 @@ impl Default for Limits {
 impl Limits {
     /// These limits with `kind` set to `value`, refusing zero and anything
     /// above the hard cap.
-    pub fn with(mut self, kind: LimitKind, value: usize) -> Result<Self, LimitConfigError> {
+    pub fn with(self, kind: LimitKind, value: usize) -> Result<Self, LimitConfigError> {
+        self.with_redacted(kind, value, false)
+    }
+
+    /// Like [`Self::with`], marking `kind` as environment-derived when
+    /// `redacted` is true so out-of-range and runtime limit messages omit its
+    /// numeric value.
+    pub fn with_redacted(
+        mut self,
+        kind: LimitKind,
+        value: usize,
+        redacted: bool,
+    ) -> Result<Self, LimitConfigError> {
         let cap = kind.hard_cap();
         if value == 0 || value > cap {
-            return Err(LimitConfigError { kind, value, cap });
+            return Err(LimitConfigError {
+                kind,
+                value,
+                cap,
+                redacted,
+            });
         }
         self.values[kind.slot()] = value;
+        let bit = 1u16 << kind.slot();
+        if redacted {
+            self.redacted_mask |= bit;
+        } else {
+            self.redacted_mask &= !bit;
+        }
         Ok(self)
     }
 
     #[must_use]
     pub fn get(&self, kind: LimitKind) -> usize {
         self.values[kind.slot()]
+    }
+
+    /// Whether `kind`'s value came from an environment interpolation and must
+    /// be structurally redacted from limit diagnostics.
+    #[must_use]
+    pub fn is_redacted(&self, kind: LimitKind) -> bool {
+        (self.redacted_mask & (1u16 << kind.slot())) != 0
     }
 
     /// Fail once `count` exceeds the limit for `kind`.
@@ -194,6 +279,7 @@ impl Limits {
                 kind,
                 limit,
                 reached: count,
+                redacted: self.is_redacted(kind),
             });
         }
         Ok(())
@@ -208,6 +294,7 @@ pub struct RunBudget {
     used: AtomicUsize,
     limit: usize,
     kind: LimitKind,
+    redacted: bool,
 }
 
 impl RunBudget {
@@ -230,6 +317,7 @@ impl RunBudget {
             used: AtomicUsize::new(0),
             limit: limits.get(kind),
             kind,
+            redacted: limits.is_redacted(kind),
         }
     }
 
@@ -245,6 +333,7 @@ impl RunBudget {
                 kind: self.kind,
                 limit: self.limit,
                 reached: total,
+                redacted: self.redacted,
             });
         }
         Ok(())
@@ -259,6 +348,7 @@ impl RunBudget {
                 kind: self.kind,
                 limit: self.limit,
                 reached: used,
+                redacted: self.redacted,
             });
         }
         Ok(())
@@ -296,7 +386,8 @@ mod tests {
                 Err(LimitExceeded {
                     kind,
                     limit: 3,
-                    reached: 4
+                    reached: 4,
+                    redacted: false,
                 })
             );
             // Other limits keep their defaults.
@@ -313,6 +404,7 @@ mod tests {
                 kind,
                 limit: 3,
                 reached: 4,
+                redacted: false,
             }
             .to_string()
         };
@@ -361,7 +453,8 @@ mod tests {
                 Err(LimitConfigError {
                     kind,
                     value: cap + 1,
-                    cap
+                    cap,
+                    redacted: false,
                 })
             );
             assert!(Limits::default().with(kind, 0).is_err());

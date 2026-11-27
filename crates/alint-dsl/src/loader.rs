@@ -682,6 +682,7 @@ fn parse_config_interpolated_shown(
 }
 
 /// [`parse_config_interpolated_shown`] past the YAML guards.
+#[allow(clippy::too_many_lines)]
 fn parse_guarded(
     contents: &str,
     source_path: &Path,
@@ -725,6 +726,14 @@ fn parse_guarded(
         let extends_environment = entries_reading_environment(value.get("extends"));
         let extends_filter_environment = entry_filters_reading_environment(value.get("extends"));
         let baseline_from_environment = value.get("baseline").is_some_and(value_reads_environment);
+        let limits_findings_from_env = value
+            .get("limits")
+            .and_then(|v| v.get("findings_per_rule"))
+            .is_some_and(value_reads_environment);
+        let limits_key_path_from_env = value
+            .get("limits")
+            .and_then(|v| v.get("key_path_bytes_per_decode"))
+            .is_some_and(value_reads_environment);
         let rule_env_vars = rule_env_derived_vars(value.get("rules"));
         // The names the top-level fields other than rules, templates and vars
         // read (`extends:`, `ignore:`, `facts:`, `baseline:` and the rest). The
@@ -766,6 +775,12 @@ fn parse_guarded(
         config.extends_environment = extends_environment;
         config.extends_filter_environment = extends_filter_environment;
         config.baseline_from_environment = baseline_from_environment;
+        if limits_findings_from_env {
+            config.limits.mark_findings_per_rule_from_env();
+        }
+        if limits_key_path_from_env {
+            config.limits.mark_key_path_bytes_per_decode_from_env();
+        }
         mark_entries(&mut config.rules, crate::ENV_VARS_MARKER, rule_env_vars);
         mark_entries(
             &mut config.rules,

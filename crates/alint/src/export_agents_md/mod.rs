@@ -43,11 +43,11 @@ pub enum OutputFormat {
 impl FromStr for OutputFormat {
     type Err = String;
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s {
-            "markdown" => Ok(Self::Markdown),
+        match s.to_ascii_lowercase().as_str() {
+            "markdown" | "md" => Ok(Self::Markdown),
             "json" => Ok(Self::Json),
-            other => Err(format!(
-                "invalid format {other:?}; expected one of `markdown`, `json`"
+            _ => Err(format!(
+                "invalid format {s:?}; expected one of `markdown`, `json`"
             )),
         }
     }

@@ -142,7 +142,7 @@ points are explicit.
 
    ```sh
    git switch -c release/v<x.y.z>
-   git add Cargo.toml Cargo.lock facts.json action.yml README.md SECURITY.md CHANGELOG.md \
+   git add Cargo.toml Cargo.lock facts.json roadmap.json action.yml README.md SECURITY.md CHANGELOG.md \
      docs/design/ROADMAP.md npm/package.json npm/README.md editors/zed/Cargo.toml \
      editors/zed/Cargo.lock editors/zed/extension.toml \
      schemas/v2/config.json xtask/src/gen_schema_v2.rs xtask/src/gen_schema_v2_tests.rs \
@@ -173,7 +173,7 @@ points are explicit.
    `[workspace.package].version` bumps, the workspace internal-crate
    entries in `Cargo.lock` (`alint`, `alint-core`, `alint-dsl`,
    `alint-rules`, `alint-output`, `alint-lsp`, `alint-bench`, `alint-e2e`,
-   `alint-testkit`) need to track. `bump-version.sh` refreshes the
+   `alint-testkit`, `alint-witforge-consumer`, `xtask`) need to track. `bump-version.sh` refreshes the
    lockfile via `cargo metadata --offline` as part of the bump; the
    refresh must be committed alongside `Cargo.toml`, or CI's
    `cargo build --locked` in `release-binary.sh` fails with "cannot
@@ -199,7 +199,9 @@ checklist so the release-gated pieces land and nothing drifts:
      fails `--check`. For a hand-authored branch, drop the keyword from
      `config.json`, then `gen-schema`.
    - **Prose sentinels (post-tag follow-up PR).** After `v<ver>` is pushed and
-     reachable on `main`, unwrap every `<!-- alint:since=<ver> -->` block in
+     reachable on `main`, unwrap every shipped `<!-- alint:since=<ver> -->`
+     block (including both minor `0.24` and patch `0.24.0` forms, plus any
+     remaining earlier-release markers such as `0.23.0`) in
      the post-tag follow-up PR alongside the Action pin refresh (never in the
      pre-tag bump PR, because `check-docs-overlay-since.py` diffs against the
      previous release tag until `v<ver>` exists). Grep `alint:since=` across
@@ -243,15 +245,12 @@ checklist so the release-gated pieces land and nothing drifts:
    another release.
 
 5. **Publish the release's security advisories.** For each draft advisory the
-   release fixes (for v0.23.0, GHSA-78jj-xfpm-g6px, ADR-0040 and ADR-0043),
-   once the release is out: check that the advisory's description matches the
-   CHANGELOG's Security section, and set its patched versions to the released
-   ones, in the advisory's page or its API. For v0.23.0, the language
-   server's holes stay in GHSA-78jj-xfpm-g6px (ADR-0046 decision 5), so there
-   is one advisory to publish. Then publish it:
+   release fixes, once the release is out: check that the advisory's description
+   matches the CHANGELOG's Security section, and set its patched versions to the
+   released ones, in the advisory's page or its API. Then publish it:
 
    ```sh
-   gh api -X PATCH repos/asamarts/alint/security-advisories/GHSA-78jj-xfpm-g6px \
+   gh api -X PATCH repos/asamarts/alint/security-advisories/<GHSA-id> \
      -f state=published
    ```
 

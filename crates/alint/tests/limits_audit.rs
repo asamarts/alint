@@ -438,3 +438,103 @@ fn key_path_bytes_per_decode_bounds_ini_xml_resx_and_v2_entries_leaves() {
         );
     }
 }
+
+#[test]
+fn env_interpolated_limits_redact_short_values_and_nested_no_duplicate_keys_caps_findings() {
+    let root = tempfile::tempdir().unwrap();
+    write(
+        root.path(),
+        "pkgs/a/dup.yaml",
+        "k: 1\nk: 2\nk: 3\nk: 4\nk: 5\n",
+    );
+    write(
+        root.path(),
+        "en.json",
+        r#"{"a":"1","b":"2","c":"3","d":"4"}"#,
+    );
+    write(root.path(), "fr.json", "{}\n");
+
+    // 1. Out-of-range 1-char env value (`CAP=0`) is structurally redacted at load.
+    write(
+        root.path(),
+        ".alint.yml",
+        "version: 1\nlimits:\n  findings_per_rule: \"{{env.CAP}}\"\nrules: []\n",
+    );
+    let out = crate::hermetic::command(alint_bin())
+        .current_dir(root.path())
+        .args(["validate-config"])
+        .env("CAP", "0")
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("not <redacted>"),
+        "expected structural `<redacted>` for short env limit: {stderr}"
+    );
+    assert!(
+        !stderr.contains("not 0"),
+        "short env limit value leaked in load error: {stderr}"
+    );
+
+    // 2. Valid 1-char env value (`CAP=2`) truncates top-level `no_duplicate_keys`,
+    //    nested `for_each_dir` -> `no_duplicate_keys` (Audit F8), and `key_parity`
+    //    without leaking `2` or `emitted 2`.
+    write(
+        root.path(),
+        ".alint.yml",
+        r#"version: 1
+limits:
+  findings_per_rule: "{{env.CAP}}"
+rules:
+  - id: top-dup
+    kind: no_duplicate_keys
+    paths: "pkgs/a/dup.yaml"
+    level: warning
+  - id: nested-dup
+    kind: for_each_dir
+    select: "pkgs/*"
+    level: warning
+    require:
+      - kind: no_duplicate_keys
+        paths: "{path}/*.yaml"
+  - id: kp
+    kind: key_parity
+    reference: en.json
+    peers: fr.json
+    level: warning
+"#,
+    );
+    let out = crate::hermetic::command(alint_bin())
+        .current_dir(root.path())
+        .args(["check", "--format", "json"])
+        .env("CAP", "2")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let parsed: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    for rule_id in ["top-dup", "nested-dup", "kp"] {
+        let r = parsed["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["id"] == rule_id)
+            .unwrap();
+        assert_eq!(
+            r["violations"].as_array().unwrap().len(),
+            2,
+            "{rule_id} must cap emitted findings at 2: {r}"
+        );
+        let failures = r["analysis_failures"].as_array().unwrap();
+        assert_eq!(failures.len(), 1, "{rule_id}: {r}");
+        let msg = failures[0]["message"].as_str().unwrap();
+        assert!(
+            msg.contains("relation limit `findings_per_rule` (<redacted>) reached"),
+            "{rule_id} must structurally redact env-derived cap: {msg}"
+        );
+        assert!(
+            !msg.contains("(2)") && !msg.contains("emitted 2"),
+            "{rule_id} leaked env-derived cap value: {msg}"
+        );
+    }
+}

@@ -1,0 +1,29 @@
+test_version: 1
+name: set_value on multi-BOM dotenv converges cleanly without corrupting keys
+tags: [fix, dotenv_path_equals, set_value, dotenv]
+
+given:
+  tree:
+    .env: "\uFEFF\uFEFFNODE_ENV=development\nAPP_NAME=demo\n"
+  config: |
+    version: 1
+    rules:
+      - id: prod-env
+        kind: dotenv_path_equals
+        paths: ".env"
+        path: "$.NODE_ENV"
+        equals: "production"
+        level: error
+        fix:
+          set_value: {}
+
+when: [check, fix, check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: prod-env, level: error, path: .env}
+  - exit: success
+    applied: [prod-env]
+  - exit: success
+    violations: []

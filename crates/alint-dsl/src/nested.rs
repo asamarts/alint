@@ -273,7 +273,7 @@ fn nested_config_rules(
         )));
     }
     reject_nested_execution_settings(&config, source)?;
-    if !config.limits.is_empty() {
+    if config.limits.is_declared() {
         return Err(Error::Other(format!(
             "nested config {source} declares `limits:` - runtime limits are \
              root-only; declare them in the top-level config"

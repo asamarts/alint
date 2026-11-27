@@ -454,8 +454,15 @@ impl Engine {
         if let Some(trigger) = rule.trigger_scope() {
             return !pass.trigger_runs(trigger, true);
         }
+        // A full-index per-file rule (e.g. `markdown_paths_resolve`,
+        // `markdown_links_resolve`) is never `--changed`-skipped by its own
+        // path scope: a change outside its scope (a deleted target) can still
+        // change its verdict in both `check --changed` and `fix --changed`.
+        if rule.as_per_file().is_some() && rule.requires_full_index() {
+            return false;
+        }
         let (index, created) = (pass.index, pass.created);
-        let Some(scope) = rule.path_scope() else {
+        let Some(scope) = effective_path_scope(rule) else {
             return false;
         };
         // If manifest resolution failed, matching through the unavailable set
@@ -504,6 +511,9 @@ impl Engine {
         }
         if let Some(trigger) = rule.trigger_scope() {
             return !pass.trigger_runs(trigger, false);
+        }
+        if rule.as_per_file().is_some() && rule.requires_full_index() {
+            return false;
         }
         let Some(scope) = effective_path_scope(rule) else {
             return false;

@@ -110,15 +110,14 @@ impl Rule for NoCaseConflictsRule {
 impl NoCaseConflictsRule {
     /// One violation per member of a colliding set of same-directory paths.
     fn report(&self, paths: &[std::sync::Arc<std::path::Path>], violations: &mut Vec<Violation>) {
-        let names: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
-        for p in paths {
+        let names: Vec<String> = paths.iter().map(crate::slash).collect();
+        for (p, own_name) in paths.iter().zip(&names) {
             let msg = self.message.clone().unwrap_or_else(|| {
                 format!(
-                    "case-insensitive collision: {} (collides with: {})",
-                    p.display(),
+                    "case-insensitive collision: {own_name} (collides with: {})",
                     names
                         .iter()
-                        .filter(|n| *n != &p.display().to_string())
+                        .filter(|n| *n != own_name)
                         .cloned()
                         .collect::<Vec<_>>()
                         .join(", ")

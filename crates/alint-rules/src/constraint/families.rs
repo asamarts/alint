@@ -238,21 +238,25 @@ impl<'r> Run<'r> {
                 }
             }
             if failures.is_empty() && suppressed_findings > 0 {
-                let emitted = earlier.len();
-                let omitted = if suppressed_is_lower_bound {
-                    format!("at least {suppressed_findings}")
+                let message = if limits.is_redacted(LimitKind::FindingsPerRule) {
+                    "relation limit `findings_per_rule` (<redacted>) reached: remaining findings \
+                     were omitted to bound run memory and output"
+                        .to_string()
                 } else {
-                    suppressed_findings.to_string()
-                };
-                earlier.push(rule.failure(
-                    None,
+                    let emitted = earlier.len();
+                    let omitted = if suppressed_is_lower_bound {
+                        format!("at least {suppressed_findings}")
+                    } else {
+                        suppressed_findings.to_string()
+                    };
                     format!(
                         "relation limit `findings_per_rule` ({cap}) reached: emitted {emitted} \
                          {} and suppressed {omitted} more; remaining findings were omitted to \
                          bound run memory and output",
                         findings_word(emitted)
-                    ),
-                ));
+                    )
+                };
+                earlier.push(rule.failure(None, message));
             }
         }
         verdict(earlier, failures)

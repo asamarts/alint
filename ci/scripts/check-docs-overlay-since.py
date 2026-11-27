@@ -143,8 +143,8 @@ def load_pinner():
     return module
 
 
-def pin_counts(repo: Path, base: str, text: str) -> str:
-    """Render the count-bearing page with the tag's facts, as docs-bundle.yml does."""
+def pin_counts(repo: Path, base: str, rel: str, text: str) -> str:
+    """Render a count-bearing page with the tag's facts, as docs-bundle.yml does."""
     facts = at_base(repo, base, "facts.json")
     if facts is None:
         raise SetupError(f"{base} has no facts.json to pin the count page with")
@@ -152,8 +152,8 @@ def pin_counts(repo: Path, base: str, text: str) -> str:
     with tempfile.TemporaryDirectory() as scratch:
         path = Path(scratch) / "facts.json"
         path.write_text(facts, encoding="utf-8")
-        canonical, aliases, multi = pinner.release_counts(path)
-    return pinner.pin_page(text, canonical, aliases, multi)
+        pinned, _summary = pinner.pin_named_page(path, Path(rel), text)
+    return pinned
 
 
 def coverage(lines: list[str]) -> tuple[list[bool], list[tuple[int, str]]]:
@@ -257,7 +257,7 @@ def check(repo: Path, base: str) -> list[str]:
         new = full.read_text(encoding="utf-8")
         old = at_base(repo, base, rel) or ""
         if rel in pinned:
-            new = pin_counts(repo, base, new)
+            new = pin_counts(repo, base, rel, new)
         lines = new.splitlines()
         covered, bad = coverage(lines)
         for i, version in bad:

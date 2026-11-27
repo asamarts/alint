@@ -217,6 +217,15 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
             "unique_by `key` must not be empty",
         ));
     }
+    let key_template = if spec.extra.contains_key("key") {
+        PathTemplate::new(opts.key, spec)
+    } else {
+        // When `key:` is omitted inside a nested rule (`spec.rendered == true`),
+        // serde's default `"{basename}"` must still expand per matched file
+        // rather than treating `"{basename}"` as a literal rendered string.
+        let unrendered = RuleSpec::new(&spec.id, &spec.kind, spec.level);
+        PathTemplate::new(opts.key, &unrendered)
+    };
     let select_scope = Scope::from_patterns(&[opts.select])?;
     Ok(Box::new(UniqueByRule {
         id: spec.id.clone(),
@@ -224,7 +233,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
         select_scope,
-        key_template: PathTemplate::new(opts.key, spec),
+        key_template,
         case_insensitive: opts.case_insensitive,
     }))
 }

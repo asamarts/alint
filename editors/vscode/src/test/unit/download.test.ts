@@ -656,4 +656,38 @@ describe("downloadAlint + USTAR extractor", () => {
       fs.rmSync(destDir, { recursive: true, force: true });
     }
   });
+
+  it("rejects truncated tar archives missing a POSIX zero-block EOF trailer", () => {
+    const expected = "alint-v0.24.0-x86_64-unknown-linux-musl/alint";
+    const payload = Buffer.from("truncated-without-eof", "utf8");
+    const noZeroTrailer = zlib.gzipSync(
+      Buffer.concat([buildHeader(expected, payload.length, "0"), padToBlock(payload)]),
+    );
+    assert.throws(
+      () => extractSingleFileFromTarGz(noZeroTrailer, expected),
+      /tar archive truncated before end-of-archive zero block/,
+    );
+  });
+
+  it("supports GNU base-256 encoded entry sizes", () => {
+    const expected = "alint-v0.24.0-x86_64-unknown-linux-musl/alint";
+    const payload = Buffer.from("base256-payload-bytes", "utf8");
+    const hdr = buildHeader(expected, 0, "0");
+    // Encode payload.length using GNU base-256 (0x80 high bit + big-endian length).
+    hdr.fill(0, 124, 136);
+    hdr[124] = 0x80;
+    hdr[135] = payload.length;
+    hdr.fill(0x20, 148, 156);
+    let sum = 0;
+    for (let i = 0; i < 512; i++) {
+      sum += hdr[i];
+    }
+    hdr.write(sum.toString(8).padStart(6, "0"), 148, 6, "ascii");
+    hdr[154] = 0;
+    hdr[155] = 0x20;
+    const archive = zlib.gzipSync(
+      Buffer.concat([hdr, padToBlock(payload), Buffer.alloc(1024, 0)]),
+    );
+    assert.deepEqual(extractSingleFileFromTarGz(archive, expected), payload);
+  });
 });

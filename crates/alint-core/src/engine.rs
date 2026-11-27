@@ -791,21 +791,45 @@ fn nested_iteration_accepts_entry(spec: Option<&crate::RuleSpec>, is_dir: bool) 
     }
 }
 
-/// Whether a nested spec reaches at least one runtime iteration.
-///
-/// The scan is dependency preparation only: it never builds or evaluates the
-/// child. It mirrors the parent's configured selector and `when_iter:` gate,
-/// then evaluates the child's already-compiled `when:` with the exact
-/// per-iteration facts. This prevents a dependency probe/read for a child whose
-/// gate is false for every iteration.
-fn nested_rule_can_activate(
+fn scope_filter_uses_path_tokens(spec: &crate::NestedRuleSpec) -> bool {
+    let Some(sf) = &spec.scope_filter else {
+        return false;
+    };
+    let mut uses = false;
+    sf.for_each_template(&mut |s| {
+        if crate::template::TokenSet::of(s) != crate::template::TokenSet::NONE {
+            uses = true;
+        }
+    });
+    uses
+}
+
+fn nested_spec_needs_real_tokens(compiled: &crate::CompiledNestedSpec) -> bool {
+    !compiled.rendered
+        && (scope_filter_uses_path_tokens(&compiled.spec)
+            || compiled.spec.extra.parser().contains_key("require")
+            || matches!(
+                compiled.spec.kind.as_str(),
+                "for_each_dir" | "for_each_file" | "every_matching_has"
+            ))
+}
+
+/// Visit every matching entry for a parent selector/gate + nested `when:` pair.
+/// When `stop_after_first` is true, stops as soon as one entry activates.
+#[allow(clippy::too_many_arguments)]
+fn for_each_active_nested_entry<'a, F>(
     parent_spec: Option<&crate::RuleSpec>,
     parent_gate: Option<&WhenExpr>,
     select: Option<&crate::Scope>,
     nested: &crate::CompiledNestedSpec,
-    index: &FileIndex,
+    index: &'a FileIndex,
     when_env: &WhenEnv<'_>,
-) -> bool {
+    stop_after_first: bool,
+    mut on_match: F,
+) -> Result<bool>
+where
+    F: FnMut(&'a crate::walker::FileEntry) -> Result<()>,
+{
     let child_uses_iter = nested.when.as_ref().is_some_and(when_expr_uses_iter);
     let parent_uses_iter = parent_gate.is_some_and(when_expr_uses_iter);
 
@@ -815,16 +839,16 @@ fn nested_rule_can_activate(
             .as_ref()
             .is_some_and(|expr| !matches!(expr.evaluate(when_env), Ok(true)))
     {
-        return false;
+        return Ok(false);
     }
     if !parent_uses_iter
         && parent_gate.is_some_and(|expr| !matches!(expr.evaluate(when_env), Ok(true)))
     {
-        return false;
+        return Ok(false);
     }
 
     let parent_kind = parent_spec.map(|spec| spec.kind.as_str());
-    let candidates: Box<dyn Iterator<Item = &crate::walker::FileEntry> + '_> =
+    let candidates: Box<dyn Iterator<Item = &'a crate::walker::FileEntry> + 'a> =
         match (select, parent_kind) {
             (Some(scope), Some("for_each_dir")) => Box::new(scope.candidate_dirs(index)),
             (Some(scope), Some("for_each_file")) => Box::new(scope.candidate_files(index)),
@@ -845,6 +869,7 @@ fn nested_rule_can_activate(
             (None, Some("for_each_file")) => Box::new(index.files()),
             (None, _) => Box::new(index.dirs().chain(index.files())),
         };
+    let mut matched = false;
     for entry in candidates {
         if !nested_iteration_accepts_entry(parent_spec, entry.is_dir)
             || select.is_some_and(|scope| !scope.matches(&entry.path, index))
@@ -870,9 +895,13 @@ fn nested_rule_can_activate(
         {
             continue;
         }
-        return true;
+        matched = true;
+        on_match(entry)?;
+        if stop_after_first {
+            break;
+        }
     }
-    false
+    Ok(matched)
 }
 
 fn visit_active_rule_tree_with_registry(
@@ -890,19 +919,52 @@ fn visit_active_rule_tree_with_registry(
 
     let parent_gate = configured_iteration_gate(spec)?;
     let select = configured_select_scope(spec)?;
-    let tokens = crate::template::PathTokens::placeholder();
+    let placeholder_tokens = crate::template::PathTokens::placeholder();
     for (idx, compiled) in rule.nested_rule_specs().iter().enumerate() {
-        if !nested_rule_can_activate(
+        if spec.is_some() && select.is_some() && nested_spec_needs_real_tokens(compiled) {
+            for_each_active_nested_entry(
+                spec,
+                parent_gate.as_ref(),
+                select.as_ref(),
+                compiled,
+                index,
+                when_env,
+                false,
+                |entry| {
+                    let tokens = crate::template::PathTokens::from_path(&entry.path);
+                    let nested_spec = compiled.instantiate(rule.id(), idx, rule.level(), &tokens);
+                    // Per-iteration build errors belong to `evaluate_for_each`
+                    // (which surfaces them as `NestedRuleBuild` analysis
+                    // failures) rather than aborting dependency preparation.
+                    let Ok(nested_rule) = registry.build(&nested_spec) else {
+                        return Ok(());
+                    };
+                    visit_active_rule_tree_with_registry(
+                        registry,
+                        nested_rule.as_ref(),
+                        Some(&nested_spec),
+                        index,
+                        when_env,
+                        visit,
+                    )
+                },
+            )?;
+            continue;
+        }
+        let active = for_each_active_nested_entry(
             spec,
             parent_gate.as_ref(),
             select.as_ref(),
             compiled,
             index,
             when_env,
-        ) {
+            true,
+            |_| Ok(()),
+        )?;
+        if !active {
             continue;
         }
-        let nested_spec = compiled.instantiate(rule.id(), idx, rule.level(), &tokens);
+        let nested_spec = compiled.instantiate(rule.id(), idx, rule.level(), &placeholder_tokens);
         let _preparing = crate::template::Preparation::enter(compiled.spec.templates());
         let nested_rule = prepare_nested_rule(registry, rule.id(), idx, compiled, &nested_spec)?;
         visit_active_rule_tree_with_registry(
@@ -1092,7 +1154,11 @@ fn evaluate_per_file_entries_capped<const TRACE: bool>(
                 .entry(idx)
                 .or_default()
                 .push(crate::rule::findings_per_rule_truncation_failure(
-                    cap, emitted, sup, is_lower,
+                    cap,
+                    emitted,
+                    sup,
+                    is_lower,
+                    per_file_ctx.findings_per_rule_is_redacted(),
                 ));
         }
     }

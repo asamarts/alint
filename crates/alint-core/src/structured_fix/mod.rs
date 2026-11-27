@@ -803,16 +803,22 @@ mod xml {
     }
 
     pub(super) fn xml_value_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
-        crate::structured_format::xml_within_parse_limits(text).ok()?;
-        let doc = Document::parse(text).ok()?;
-        resolve(&doc, path)?.value_span
+        let stripped = text.trim_start_matches('\u{feff}');
+        let bom_len = text.len() - stripped.len();
+        crate::structured_format::xml_within_parse_limits(stripped).ok()?;
+        let doc = Document::parse(stripped).ok()?;
+        let r = resolve(&doc, path)?.value_span?;
+        Some(r.start + bom_len..r.end + bom_len)
     }
 
     pub(super) fn xml_removal_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
-        crate::structured_format::xml_within_parse_limits(text).ok()?;
-        let doc = Document::parse(text).ok()?;
+        let stripped = text.trim_start_matches('\u{feff}');
+        let bom_len = text.len() - stripped.len();
+        crate::structured_format::xml_within_parse_limits(stripped).ok()?;
+        let doc = Document::parse(stripped).ok()?;
         let target = resolve(&doc, path)?;
-        let removal = target.removal_span?;
+        let raw_removal = target.removal_span?;
+        let removal = raw_removal.start + bom_len..raw_removal.end + bom_len;
         if target.is_attribute {
             // ` name="value"` -> also drop the single leading space separating it
             // from the previous attribute or the tag name.
@@ -1296,10 +1302,8 @@ mod ini {
     /// lines (so `remove_value` deletes the whole multi-line value), while its
     /// `value` is `None` for a multi-line value (so `set_value` declines it).
     fn locate(text: &str, want_section: Option<&str>, want_key: &str) -> Option<Located> {
-        let (body, base) = match text.strip_prefix('\u{feff}') {
-            Some(rest) => (rest, '\u{feff}'.len_utf8()),
-            None => (text, 0),
-        };
+        let body = text.trim_start_matches('\u{feff}');
+        let base = text.len() - body.len();
         let mut matches: Vec<Located> = Vec::new();
         let mut section: Option<String> = None;
         // The current key's indent, and its index in `matches` when it is the
@@ -1307,14 +1311,16 @@ mod ini {
         // marks it multi-line). `None` after a section header or a separator-less
         // line resets the current key.
         let mut cur: Option<(usize, Option<usize>)> = None;
-        let mut cursor = 0usize;
-        for chunk in body.split_inclusive('\n') {
-            let line_start = base + cursor;
-            let line_end = line_start + chunk.len();
-            cursor += chunk.len();
-            let content = chunk
-                .strip_suffix('\n')
-                .map_or(chunk, |c| c.strip_suffix('\r').unwrap_or(c));
+        let body_bytes = body.as_bytes();
+        for (rel_start, content) in crate::physical_lines(body) {
+            let line_start = base + rel_start;
+            let after_content = rel_start + content.len();
+            let nl_len = match body_bytes.get(after_content) {
+                Some(&b'\r') if body_bytes.get(after_content + 1) == Some(&b'\n') => 2,
+                Some(&b'\n' | &b'\r') => 1,
+                _ => 0,
+            };
+            let line_end = base + after_content + nl_len;
             let indent = content
                 .chars()
                 .take_while(|&c| c == ' ' || c == '\t')
@@ -1768,11 +1774,9 @@ mod json_ {
         path: &[PathSeg],
         strict: bool,
     ) -> Option<Range<usize>> {
-        if strict {
-            crate::structured_format::Format::Json
-                .parse_with_strict_json(text, true)
-                .ok()?;
-        }
+        crate::structured_format::Format::Json
+            .parse_with_strict_json(text, strict)
+            .ok()?;
         let stripped = if strict {
             text
         } else {
@@ -1825,11 +1829,9 @@ mod json_ {
         strict: bool,
     ) -> Option<Vec<u8>> {
         use jsonc_parser::cst::CstRootNode;
-        if strict {
-            crate::structured_format::Format::Json
-                .parse_with_strict_json(text, true)
-                .ok()?;
-        }
+        crate::structured_format::Format::Json
+            .parse_with_strict_json(text, strict)
+            .ok()?;
         // In tolerant mode strip any leading BOM before the CST parse and
         // re-prepend it to the reserialized output; in strict mode leading BOM
         // was already rejected above.

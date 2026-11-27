@@ -61,12 +61,12 @@ impl FromStr for Confidence {
 impl FromStr for OutputFormat {
     type Err = String;
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s {
-            "human" => Ok(Self::Human),
-            "yaml" => Ok(Self::Yaml),
+        match s.to_ascii_lowercase().as_str() {
+            "human" | "pretty" | "text" => Ok(Self::Human),
+            "yaml" | "yml" => Ok(Self::Yaml),
             "json" => Ok(Self::Json),
-            other => Err(format!(
-                "invalid format {other:?}; expected one of `human`, `yaml`, `json`"
+            _ => Err(format!(
+                "invalid format {s:?}; expected one of `human`, `yaml`, `json`"
             )),
         }
     }

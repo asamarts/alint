@@ -518,6 +518,8 @@ fn is_known_top_level_config_key(segment: &str) -> bool {
             | "respect_gitignore"
             | "fix_size_limit"
             | "allow_out_of_root"
+            | "nested_configs"
+            | "trusted_extends"
     )
 }
 
@@ -726,34 +728,58 @@ fn append_rule_subkey(segments: &mut Vec<alint_core::yaml::ConfigPathSegment>, t
         segments.push(ConfigPathSegment::Key("when".to_owned()));
         return;
     }
-    if let Some(unknown) = extract_unknown_field_name(tail) {
-        segments.push(ConfigPathSegment::Key(unknown));
-        return;
-    }
     if tail.contains("unknown rule kind") || tail.contains("unknown kind") {
         segments.push(ConfigPathSegment::Key("kind".to_owned()));
         return;
     }
-    // Unwrap wrapper phrases like `could not deserialize merged rule: level: ...`
-    // or `invalid options: YAML parse error: pattern: ...`.
+    // Unwrap wrapper phrases like `could not deserialize merged rule: level: ...`,
+    // `invalid options: YAML parse error: pattern: ...`, or
+    // `invalid `constraint` options: assert.unique.key: ...` BEFORE extracting
+    // parent key paths and unknown-field names so nested unknown fields (e.g.
+    // `scope_filter: unknown field `level``) anchor under `scope_filter.level`
+    // rather than highlighting an unrelated top-level `level:` key.
     let inner = tail
         .strip_prefix("could not deserialize merged rule: ")
         .or_else(|| tail.strip_prefix("invalid options: YAML parse error: "))
         .or_else(|| tail.strip_prefix("invalid options: "))
+        .or_else(|| tail.strip_prefix("invalid `constraint` options: "))
         .unwrap_or(tail);
+    if let Some(after_invalid) = inner.strip_prefix("invalid `")
+        && let Some((raw_field, rest)) = after_invalid.split_once("`: ")
+    {
+        let field = normalize_backtick_key(raw_field);
+        if is_plausible_key_path(field) {
+            segments.extend(parse_config_path(field));
+            if let Some(unknown) = extract_unknown_field_name(rest) {
+                segments.push(ConfigPathSegment::Key(unknown));
+            }
+            return;
+        }
+    }
+    if let Some((raw_field, rest)) = inner.split_once(": ") {
+        let field = raw_field
+            .strip_prefix('`')
+            .and_then(|s| s.strip_suffix('`'))
+            .map_or(raw_field, normalize_backtick_key);
+        if is_plausible_key_path(field) {
+            segments.extend(parse_config_path(field));
+            if let Some(unknown) = extract_unknown_field_name(rest) {
+                segments.push(ConfigPathSegment::Key(unknown));
+            }
+            return;
+        }
+    }
+    if let Some(unknown) = extract_unknown_field_name(inner) {
+        segments.push(ConfigPathSegment::Key(unknown));
+        return;
+    }
     if let Some(after_bt) = inner.strip_prefix('`')
         && let Some((raw, _)) = after_bt.split_once('`')
     {
         let field = normalize_backtick_key(raw);
         if is_plausible_key_path(field) {
             segments.extend(parse_config_path(field));
-            return;
         }
-    }
-    if let Some((field, _)) = inner.split_once(": ")
-        && is_plausible_key_path(field)
-    {
-        segments.extend(parse_config_path(field));
     }
 }
 
@@ -984,6 +1010,24 @@ fn build_entries(
             withheld |= !trusted && expr.first_env_ref().is_some();
             entry = entry.with_when(expr);
         }
+        if !trusted {
+            if let Some(when_iter) = spec.extra.get("when_iter").and_then(|v| v.as_str())
+                && alint_core::when::parse(when_iter)
+                    .ok()
+                    .and_then(|e| e.first_env_ref().map(|_| ()))
+                    .is_some()
+            {
+                withheld = true;
+            }
+            if entry.rule.nested_rule_specs().iter().any(|nested| {
+                nested
+                    .when
+                    .as_ref()
+                    .is_some_and(|e| e.first_env_ref().is_some())
+            }) {
+                withheld = true;
+            }
+        }
         // Resolve aliases through the session's registry, which may be an
         // injected one, so hover docs find the canonical kind.
         kinds.insert(
@@ -1030,6 +1074,7 @@ fn build_session_for_config(
     let effective_root = key.root.clone();
     let trusted = settings.trusted;
     let (config, mut withheld) = load_session_config(config_path, settings, registry)?;
+    crate::notify_tracing_env_values(&config.environment_values);
     // A top-level value read from the environment can reach an error below
     // (an unreadable `baseline:`, an invalid `ignore:` glob in the walk).
     let environment_redactor =
@@ -1723,5 +1768,58 @@ mod note_tests {
             ),
             Some(Range::new(Position::new(1, 0), Position::new(1, 1)))
         );
+
+        // 9. Nested unknown field under `scope_filter` highlights `scope_filter.level`,
+        //    NOT top-level rule `level:`, and v2 `constraint` option errors resolve inside
+        //    `assert:`.
+        let nested_unknown_yaml = "\
+version: 1
+rules:
+  - id: r1
+    kind: content_matches
+    paths: '*.rs'
+    pattern: foo
+    level: error
+    scope_filter:
+      level: error
+";
+        assert_eq!(
+            config_error_range_in_text(
+                cfg,
+                nested_unknown_yaml,
+                "rule \"r1\": invalid `scope_filter`: unknown field `level`, expected one of `has_ancestor`",
+            ),
+            Some(Range::new(Position::new(8, 6), Position::new(8, 11)))
+        );
+
+        let v2_constraint_yaml = "\
+version: 2
+relations:
+  r:
+    from: { paths: '*.json' }
+    entries: { format: json, at: '$' }
+    fields: { k: entry.key }
+rules:
+  - id: c1
+    kind: constraint
+    input: r
+    assert:
+      unique:
+        key: [missing_field]
+    level: error
+";
+        assert_eq!(
+            config_error_range_in_text(
+                cfg,
+                v2_constraint_yaml,
+                "rule \"c1\": invalid `constraint` options: `assert.unique.key`: unknown field `missing_field`",
+            ),
+            Some(Range::new(Position::new(12, 8), Position::new(12, 11)))
+        );
+
+        // 10. Top-level `nested_configs` and `trusted_extends` are recognized in
+        //     `is_known_top_level_config_key`.
+        assert!(is_known_top_level_config_key("nested_configs"));
+        assert!(is_known_top_level_config_key("trusted_extends"));
     }
 }

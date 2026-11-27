@@ -21,7 +21,7 @@
 
 use std::collections::BTreeMap;
 
-use alint_core::relation::eval::{Cell, Span, find_spans};
+use alint_core::relation::eval::{Cell, Span, find_spans_with_limits};
 use alint_core::relation::{
     DecodeCache, LimitExceeded, ReadCache, RelPath, Resource, ResourceRead,
 };
@@ -142,7 +142,13 @@ impl<'c> Places<'c> {
             }
             // A `read:` value's span is found now, in the text read again;
             // what finding it held counts with the text.
-            let (found, finding) = find_spans(bytes, spans.iter().map(|(_, span)| span));
+            let limits = self
+                .ctx
+                .index
+                .decode_cache()
+                .map_or_else(|| self.ctx.index.relation_limits(), |cache| *cache.limits());
+            let (found, finding) =
+                find_spans_with_limits(bytes, spans.iter().map(|(_, span)| span), &limits);
             let spans: Vec<(usize, _)> = spans
                 .iter()
                 .zip(found)

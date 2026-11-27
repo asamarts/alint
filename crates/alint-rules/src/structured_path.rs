@@ -149,6 +149,7 @@ struct JsonEqualsOptions {
     /// When true, enforce strict RFC 8259 JSON parsing (rejecting comments,
     /// trailing commas, leading UTF-8 BOM, and empty files; ADR-0050 D7).
     #[serde(default)]
+    #[schemars(extend("x-since" = "0.24"))]
     strict: bool,
 }
 
@@ -181,6 +182,7 @@ struct JsonMatchesOptions {
     /// When true, enforce strict RFC 8259 JSON parsing (rejecting comments,
     /// trailing commas, leading UTF-8 BOM, and empty files; ADR-0050 D7).
     #[serde(default)]
+    #[schemars(extend("x-since" = "0.24"))]
     strict: bool,
 }
 
@@ -234,6 +236,7 @@ struct JsonAbsentOptions {
     /// When true, enforce strict RFC 8259 JSON parsing (rejecting comments,
     /// trailing commas, leading UTF-8 BOM, and empty files; ADR-0050 D7).
     #[serde(default)]
+    #[schemars(extend("x-since" = "0.24"))]
     strict: bool,
 }
 

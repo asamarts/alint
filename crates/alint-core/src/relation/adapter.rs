@@ -183,7 +183,8 @@ mod tests {
             Err(AdapterError::Limit(LimitExceeded {
                 kind: LimitKind::RowsPerExtractor,
                 limit: 2,
-                reached: 3
+                reached: 3,
+                redacted: false,
             }))
         );
     }

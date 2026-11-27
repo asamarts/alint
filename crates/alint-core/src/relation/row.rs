@@ -360,7 +360,8 @@ mod tests {
             Err(LimitExceeded {
                 kind: LimitKind::DistinctValues,
                 limit: 2,
-                reached: 3
+                reached: 3,
+                redacted: false,
             })
         );
     }

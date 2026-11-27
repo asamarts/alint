@@ -526,3 +526,95 @@ fn lsp_exits_one_on_exit_without_shutdown() {
     server.send(&json!({ "jsonrpc": "2.0", "method": "exit", "params": null }));
     assert_eq!(wait_exit(&mut server, Duration::from_secs(10)), Some(1));
 }
+
+#[test]
+fn lsp_v024_config_spans_no_duplicate_keys_did_change_and_protocol_guards() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+
+    // 1. Pre-initialize request returns JSON-RPC `-32002` (ServerNotInitialized, #607).
+    let mut raw_server = spawn_server(root);
+    raw_server.send(&json!({
+        "jsonrpc": "2.0", "id": 99, "method": "textDocument/hover",
+        "params": {
+            "textDocument": { "uri": uri_of(&root.join("a.yaml")) },
+            "position": { "line": 0, "character": 0 }
+        }
+    }));
+    let err_resp = loop {
+        let msg = raw_server
+            .rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("timed out waiting for ServerNotInitialized response");
+        if msg["id"] == 99 {
+            break msg;
+        }
+    };
+    assert_eq!(
+        err_resp["error"]["code"].as_i64(),
+        Some(-32002),
+        "expected ServerNotInitialized (-32002): {err_resp}"
+    );
+    raw_server.send(&json!({ "jsonrpc": "2.0", "method": "exit", "params": null }));
+    let _ = wait_exit(&mut raw_server, Duration::from_secs(5));
+
+    // 2. `no_duplicate_keys` fires live on `didChange` and clears when fixed, and
+    //    `$/cancelRequest` is handled cleanly without crashing.
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nrules:\n  - id: no-dups\n    kind: no_duplicate_keys\n    paths: \"*.yaml\"\n    level: error\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("cfg.yaml"), "a: 1\nb: 2\n").unwrap();
+    let cfg_uri = uri_of(&root.join("cfg.yaml"));
+    let alint_uri = uri_of(&root.join(".alint.yml"));
+
+    let mut server = start(root);
+    open(&mut server, &cfg_uri, "a: 1\nb: 2\n");
+    let initial = wait_for_diagnostics(&server.rx, &cfg_uri);
+    assert!(
+        initial.is_empty(),
+        "clean yaml should have no diagnostics: {initial:?}"
+    );
+
+    change(&mut server, &cfg_uri, 2, "a: 1\na: 2\n");
+    let (_, dups) = next_publish(&server.rx, &cfg_uri);
+    assert_eq!(codes(&dups), vec!["no-dups"], "{dups:?}");
+
+    change(&mut server, &cfg_uri, 3, "a: 1\nb: 2\n");
+    let (_, cleared) = next_publish(&server.rx, &cfg_uri);
+    assert!(
+        cleared.is_empty(),
+        "fixed yaml should clear diagnostics: {cleared:?}"
+    );
+
+    server.send(&json!({
+        "jsonrpc": "2.0",
+        "method": "$/cancelRequest",
+        "params": { "id": 12345 }
+    }));
+
+    // 3. Config error spans (#571): nested unknown field highlights exact nested key,
+    //    not top-level `level:`.
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nrules:\n  - id: r1\n    kind: content_matches\n    paths: '*.rs'\n    pattern: foo\n    level: error\n    scope_filter:\n      level: error\n",
+    )
+    .unwrap();
+    server.send(&json!({
+        "jsonrpc": "2.0",
+        "method": "workspace/didChangeWatchedFiles",
+        "params": { "changes": [{ "uri": alint_uri, "type": 2 }] }
+    }));
+    let cfg_diags = wait_for_diagnostics(&server.rx, &alint_uri);
+    assert!(
+        !cfg_diags.is_empty(),
+        "expected config diagnostic on .alint.yml"
+    );
+    assert_eq!(
+        cfg_diags[0]["range"]["start"]["line"].as_u64(),
+        Some(8),
+        "expected nested `scope_filter.level` span at line 8: {cfg_diags:?}"
+    );
+    server.shutdown();
+}

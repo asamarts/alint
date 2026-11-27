@@ -123,7 +123,7 @@ struct Options {
     /// files; ADR-0050 D7). Rejected at build time when `format:` is explicitly
     /// non-JSON.
     #[serde(default, deserialize_with = "present")]
-    #[schemars(with = "bool", transform = no_default)]
+    #[schemars(with = "bool", transform = no_default, extend("x-since" = "0.24"))]
     strict: Option<bool>,
 }
 

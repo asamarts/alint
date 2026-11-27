@@ -491,13 +491,16 @@ pub fn locate_config_path_span(input: &str, path: &[ConfigPathSegment]) -> Optio
                 .or_else(|| locate_concrete_path_span(input, &resolved[..resolved.len() - 1]));
         }
         resolved.extend_from_slice(&path[pos + 1..]);
-        return locate_concrete_path_span(input, &resolved).or_else(|| {
-            // Sub-field may be inherited from an `extends:` or template; fall
-            // back to the entry's own `id:` key.
-            let mut fallback = resolved[..=pos].to_vec();
-            fallback.push(ConfigPathSegment::Key("id".to_owned()));
-            locate_concrete_path_span(input, &fallback)
-        });
+        for len in (pos + 2..=resolved.len()).rev() {
+            if let Some(span) = locate_concrete_path_span(input, &resolved[..len]) {
+                return Some(span);
+            }
+        }
+        // Sub-field may be inherited from an `extends:` or template; fall
+        // back to the entry's own `id:` key.
+        let mut fallback = resolved[..=pos].to_vec();
+        fallback.push(ConfigPathSegment::Key("id".to_owned()));
+        return locate_concrete_path_span(input, &fallback);
     }
     locate_concrete_path_span(input, path)
 }

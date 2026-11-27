@@ -1,0 +1,61 @@
+test_version: 1
+name: strict JSON v1 rules reject JSONC comments while tolerant JSONC rules on the same file pass
+tags: [check, json_path_equals, json_schema_passes, key_parity, structured, failing]
+
+given:
+  tree:
+    schema.json: |
+      { "type": "object", "required": ["name"], "properties": { "name": { "type": "string" } } }
+    en.json: |
+      {
+        // JSONC comment
+        "name": "demo",
+      }
+    fr.json: |
+      {
+        "name": "demo"
+      }
+  config: |
+    version: 1
+    rules:
+      - id: tolerant-equals
+        kind: json_path_equals
+        paths: en.json
+        path: "$.name"
+        equals: "demo"
+        level: error
+      - id: strict-equals
+        kind: json_path_equals
+        paths: en.json
+        path: "$.name"
+        equals: "demo"
+        strict: true
+        level: error
+      - id: strict-schema
+        kind: json_schema_passes
+        paths: en.json
+        schema_path: schema.json
+        strict: true
+        level: error
+      - id: strict-parity
+        kind: key_parity
+        reference: en.json
+        peers: fr.json
+        strict: true
+        level: error
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations: []
+    analysis_failures:
+      - rule: strict-equals
+        kind: resource_parse
+        path: en.json
+      - rule: strict-schema
+        kind: resource_parse
+        path: en.json
+      - rule: strict-parity
+        kind: resource_parse
+        path: en.json

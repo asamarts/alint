@@ -458,3 +458,69 @@ fn bad_ignore_files_above_root_warn_and_skip_while_inside_root_fail() {
         idx4.walk_warnings()
     );
 }
+
+#[test]
+fn walker_denies_alternate_git_spellings_and_handles_root_subtrees_and_relative_gitdir() {
+    // 1. Alternate `.git` spellings (`.GIT`, `.git.`, `.git `, `GIT~1`,
+    //    HFS+ invisible `.g\u{200c}it`) are unconditionally skipped even with
+    //    `!`-negated override or `respect_gitignore: false`.
+    let tmp = td();
+    for dir in [".GIT", ".git.", ".git ", "GIT~1", ".g\u{200c}it"] {
+        if std::fs::create_dir_all(tmp.path().join(dir)).is_ok() {
+            let _ = std::fs::write(tmp.path().join(dir).join("HEAD"), b"ref\n");
+        }
+    }
+    touch(tmp.path(), "keep.txt", b"ok\n");
+    let opts = WalkOptions::test_default().with_respect_gitignore(false);
+    let idx = walk(tmp.path(), &opts).unwrap();
+    assert!(idx.contains_file(Path::new("keep.txt")));
+    for entry in &idx.entries {
+        assert!(
+            !entry.path.components().any(|c| {
+                let s = c.as_os_str().to_string_lossy();
+                crate::pathsafe::names_git_directory(&s)
+            }),
+            "alternate .git spelling leaked into walk index: {:?}",
+            entry.path
+        );
+    }
+
+    // 2. `walk_subtrees` with `""` or `"."` falls back to full root walk.
+    let sub_empty = walk_subtrees(tmp.path(), &[Path::new("")], &opts).unwrap();
+    let sub_dot = walk_subtrees(tmp.path(), &[Path::new(".")], &opts).unwrap();
+    assert!(sub_empty.contains_file(Path::new("keep.txt")));
+    assert!(sub_dot.contains_file(Path::new("keep.txt")));
+
+    // 3. Relative `gitdir:` with submodule `info/exclude` (no `commondir`) and
+    //    relative non-dot `commondir` both resolve against the `.git` directory,
+    //    independent of process CWD.
+    let wt_tmp = td();
+    let common_git = wt_tmp.path().join("common.git");
+    touch(&common_git, "info/exclude", b"*.common_ignored\n");
+    let worktree_git = wt_tmp.path().join("modules/sub");
+    touch(&worktree_git, "commondir", b"../../common.git\n");
+    let worktree_dir = wt_tmp.path().join("wt");
+    touch(&worktree_dir, ".git", b"gitdir: ../modules/sub\n");
+    touch(&worktree_dir, "drop.common_ignored", b"x\n");
+    touch(&worktree_dir, "keep.rs", b"fn main() {}\n");
+    let idx_wt = walk(&worktree_dir, &WalkOptions::test_default()).unwrap();
+    assert!(idx_wt.contains_file(Path::new("keep.rs")));
+    assert!(
+        !idx_wt.contains_file(Path::new("drop.common_ignored")),
+        "relative gitdir + relative commondir info/exclude must apply"
+    );
+
+    let sub_tmp = td();
+    let sub_git = sub_tmp.path().join("sub_git");
+    touch(&sub_git, "info/exclude", b"*.sub_ignored\n");
+    let sub_repo = sub_tmp.path().join("sub");
+    touch(&sub_repo, ".git", b"gitdir: ../sub_git\n");
+    touch(&sub_repo, "drop.sub_ignored", b"x\n");
+    touch(&sub_repo, "keep.rs", b"fn main() {}\n");
+    let idx_sub = walk(&sub_repo, &WalkOptions::test_default()).unwrap();
+    assert!(idx_sub.contains_file(Path::new("keep.rs")));
+    assert!(
+        !idx_sub.contains_file(Path::new("drop.sub_ignored")),
+        "submodule gitdir info/exclude without commondir must apply"
+    );
+}

@@ -47,7 +47,7 @@ pub fn write_markdown(report: &Report, w: &mut dyn Write) -> std::io::Result<()>
         writeln!(
             w,
             "## `{}` ({})",
-            md_inline_code(&path.display().to_string()),
+            md_inline_code(&crate::slash_path_cow(path)),
             items.len()
         )?;
         writeln!(w)?;
@@ -76,13 +76,13 @@ pub fn write_markdown(report: &Report, w: &mut dyn Write) -> std::io::Result<()>
                     |path| match (failure.report_line(), failure.report_column()) {
                         (Some(line), Some(column)) => format!(
                             "`{}` (line {line}, col {column})",
-                            md_inline_code(&path.display().to_string())
+                            md_inline_code(&crate::slash_path_cow(path))
                         ),
                         (Some(line), None) => format!(
                             "`{}` (line {line})",
-                            md_inline_code(&path.display().to_string())
+                            md_inline_code(&crate::slash_path_cow(path))
                         ),
-                        _ => format!("`{}`", md_inline_code(&path.display().to_string())),
+                        _ => format!("`{}`", md_inline_code(&crate::slash_path_cow(path))),
                     },
                 );
                 writeln!(
@@ -168,7 +168,7 @@ pub fn write_fix_markdown(report: &FixReport, w: &mut dyn Write) -> std::io::Res
             let path_part = if show_path {
                 item.violation
                     .report_path()
-                    .map(|p| format!("`{}` - ", md_inline_code(&p.display().to_string())))
+                    .map(|p| format!("`{}` - ", md_inline_code(&crate::slash_path_cow(p))))
                     .unwrap_or_default()
             } else {
                 String::new()
@@ -182,7 +182,7 @@ pub fn write_fix_markdown(report: &FixReport, w: &mut dyn Write) -> std::io::Res
         for failure in &r.analysis_failures {
             let path_part = failure
                 .report_path()
-                .map(|p| format!("`{}` - ", md_inline_code(&p.display().to_string())))
+                .map(|p| format!("`{}` - ", md_inline_code(&crate::slash_path_cow(p))))
                 .unwrap_or_default();
             writeln!(
                 w,
@@ -433,14 +433,21 @@ fn md_url(s: &str) -> String {
     // `[ ] < >`) are left intact so valid URLs — e.g. an IPv6 literal
     // `http://[::1]/docs` — still render.
     let mut out = String::with_capacity(s.len());
+    let mut utf8 = [0u8; 4];
     for c in s.chars() {
+        let cp = c as u32;
         match c {
             '(' => out.push_str("%28"),
             ')' => out.push_str("%29"),
             ' ' => out.push_str("%20"),
-            c if c.is_ascii_control() => {
+            c if c.is_ascii_control()
+                || (0x80..=0x9f).contains(&cp)
+                || alint_core::invisible::is_deceptive_on_display(c) =>
+            {
                 use std::fmt::Write as _;
-                let _ = write!(out, "%{:02X}", c as u32);
+                for &b in c.encode_utf8(&mut utf8).as_bytes() {
+                    let _ = write!(out, "%{b:02X}");
+                }
             }
             c => out.push(c),
         }
@@ -856,5 +863,36 @@ mod tests {
             out.contains("**0 applied**, **1 skipped**, **0 unfixable**, **1 unresolved**."),
             "{out}"
         );
+    }
+
+    #[test]
+    fn markdown_policy_url_sanitizes_c1_and_invisible_characters() {
+        let mut v = Violation::new("issue").with_path(Path::new("src/a.rs"));
+        v.line = Some(1);
+        let report = Report {
+            results: vec![RuleResult {
+                rule_id: "r".into(),
+                level: Level::Error,
+                policy_url: Some("https://example.com/a\u{009b}31m\u{202e}\u{200b}b".into()),
+                violations: vec![v],
+                notes: Vec::new(),
+                analysis_failures: Vec::new(),
+                is_fixable: false,
+            }],
+        };
+        let out = render(&report);
+        assert!(
+            !out.contains('\u{009b}'),
+            "C1 CSI leaked into md_url: {out:?}"
+        );
+        assert!(
+            !out.contains('\u{202e}'),
+            "bidi RLO leaked into md_url: {out:?}"
+        );
+        assert!(
+            !out.contains('\u{200b}'),
+            "ZWSP leaked into md_url: {out:?}"
+        );
+        assert!(out.contains("https://example.com/a"), "{out}");
     }
 }

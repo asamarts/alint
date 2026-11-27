@@ -69,7 +69,7 @@ impl Rule for MaxFilesPerDirectoryRule {
                 let pretty = if dir.as_os_str().is_empty() {
                     "<repo root>".to_string()
                 } else {
-                    dir.display().to_string()
+                    crate::slash(&dir)
                 };
                 let msg = self.message.clone().unwrap_or_else(|| {
                     format!("{pretty} has {count} files; max is {}", self.max_files)

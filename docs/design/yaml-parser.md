@@ -192,8 +192,8 @@ superseding ADR-0039); the parser facade below uses it as its libyaml backend.
   rule by rule, each entry of `rules:` from its value tree into `RuleSpec` with `from_value`, as
   alint's loader decodes rules, each rule a case of its own, so that a refused rule hides none
   after it. The two typed decodes run only when the value trees agree, so that a typed
-  difference is about the decode. alint reads no ayaml events in v0.23, so the event stream
-  joins the harness when saphyr leaves in v0.24.
+  difference is about the decode. Starting in v0.24, when `saphyr` left default release builds
+  (#614), the event stream joined the differential harness alongside the four value/config decodes.
 - **Inputs.** Seeded token soup; generated documents in block and flow style, with anchors (on
   keys too), aliases (also aliases that fan out), merge keys, tags, comments, escapes, block
   scalars with blank lines, complex keys, tabs, CRLF line breaks, control characters, long

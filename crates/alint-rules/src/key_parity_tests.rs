@@ -525,10 +525,10 @@ fn ranges_use_a_line_index_and_ignore_the_bom_column() {
 
 #[test]
 fn ignore_globs_respect_segment_boundaries() {
-    assert!(key_glob_match("nav.*", "nav.home"));
-    assert!(!key_glob_match("nav.*", "nav.home.x"));
-    assert!(key_glob_match("nav.**", "nav.home.x"));
-    assert!(key_glob_match("nav.**", "nav."));
+    assert!(key_glob_match(&parse_bare_glob("nav.*"), "nav.home"));
+    assert!(!key_glob_match(&parse_bare_glob("nav.*"), "nav.home.x"));
+    assert!(key_glob_match(&parse_bare_glob("nav.**"), "nav.home.x"));
+    assert!(key_glob_match(&parse_bare_glob("nav.**"), "nav."));
 }
 
 #[test]
@@ -1057,17 +1057,17 @@ fn index_patterns_and_padded_peers_are_config_errors() {
 
 #[test]
 fn glob_matchers_compare_bytes_like_characters() {
-    assert!(key_glob_match("é*", "éa"));
-    assert!(key_glob_match("*é", "aé"));
-    assert!(!key_glob_match("a*b", "a.b"));
-    assert!(key_glob_match("a**b", "a.b"));
-    assert!(key_glob_match("app.**", "app.menu.item"));
-    assert!(!key_glob_match("app.*", "app.menu.item"));
-    assert!(key_glob_match("", ""));
-    assert!(!key_glob_match("", "x"));
-    assert!(wildcard_match("*é*", "aéb"));
-    assert!(!wildcard_match("é", "e"));
-    assert!(wildcard_match("a*", "a"));
+    assert!(key_glob_match(&parse_bare_glob("é*"), "éa"));
+    assert!(key_glob_match(&parse_bare_glob("*é"), "aé"));
+    assert!(!key_glob_match(&parse_bare_glob("a*b"), "a.b"));
+    assert!(key_glob_match(&parse_bare_glob("a**b"), "a.b"));
+    assert!(key_glob_match(&parse_bare_glob("app.**"), "app.menu.item"));
+    assert!(!key_glob_match(&parse_bare_glob("app.*"), "app.menu.item"));
+    assert!(key_glob_match(&parse_bare_glob(""), ""));
+    assert!(!key_glob_match(&parse_bare_glob(""), "x"));
+    assert!(wildcard_match(&parse_bare_glob("*é*"), "aéb"));
+    assert!(!wildcard_match(&parse_bare_glob("é"), "e"));
+    assert!(wildcard_match(&parse_bare_glob("a*"), "a"));
 }
 
 #[test]
@@ -1770,7 +1770,7 @@ fn a_literal_peer_is_evaluated_whenever_anything_changed() {
 #[test]
 fn tree_ignore_patterns_match_by_segment() {
     let keys = |pattern: &str| {
-        let pattern = KeyPattern::parse(pattern, KeyModel::Tree).unwrap();
+        let pattern = KeyPattern::parse(pattern, KeyModel::Tree, false).unwrap();
         [
             vec!["nav"],
             vec!["nav", "home"],
@@ -2033,4 +2033,37 @@ fn findings_are_identical_across_index_orders_and_thread_counts() {
             }
         }
     }
+}
+
+#[test]
+fn key_pattern_blocks_wildcard_injection_and_supports_rendered_dotted_flat_names() {
+    // Path-escaped `\*` and `\*\*` match only literal `*` / `**`, never arbitrary keys.
+    let star_tree = KeyPattern::parse(r"nav['\*']", KeyModel::Tree, true).unwrap();
+    assert!(star_tree.matches(&[Segment::Key("nav".into()), Segment::Key("*".into())]));
+    assert!(!star_tree.matches(&[Segment::Key("nav".into()), Segment::Key("home".into())]));
+
+    let double_star_tree = KeyPattern::parse(r"nav['\*\*']", KeyModel::Tree, true).unwrap();
+    assert!(double_star_tree.matches(&[Segment::Key("nav".into()), Segment::Key("**".into())]));
+    assert!(!double_star_tree.matches(&[Segment::Key("nav".into()), Segment::Key("home".into())]));
+    assert!(!double_star_tree.matches(&[
+        Segment::Key("nav".into()),
+        Segment::Key("a".into()),
+        Segment::Key("b".into())
+    ]));
+
+    // Rendered single-name format (`.env` / `.properties` / `.resx`) rejoins
+    // bracketed segments produced from a dotted directory name like `v1.0`.
+    let flat_leading = KeyPattern::parse("['v1.0'].TOKEN", KeyModel::Flat, true).unwrap();
+    assert!(flat_leading.matches(&[Segment::Key("v1.0.TOKEN".into())]));
+    assert!(!flat_leading.matches(&[Segment::Key("v1.0.OTHER".into())]));
+
+    let flat_mid = KeyPattern::parse("app['v1.0'].TOKEN", KeyModel::Flat, true).unwrap();
+    assert!(flat_mid.matches(&[Segment::Key("app.v1.0.TOKEN".into())]));
+
+    let flat_star = KeyPattern::parse(r"['\*'].TOKEN", KeyModel::Flat, true).unwrap();
+    assert!(flat_star.matches(&[Segment::Key("*.TOKEN".into())]));
+    assert!(!flat_star.matches(&[Segment::Key("foo.TOKEN".into())]));
+
+    // Author-authored unrendered multi-segment bracketed flat name stays refused.
+    assert!(KeyPattern::parse("['v1.0'].TOKEN", KeyModel::Flat, false).is_err());
 }

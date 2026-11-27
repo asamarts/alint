@@ -685,8 +685,7 @@ impl Baseline {
             entry.count > 0
                 && stale_by_fp.get(entry.fingerprint.as_str()).copied() == Some(entry.count)
                 && entry.fingerprint != hidden_path_fingerprint(&entry.rule_id)
-                && (live_hidden_rules.contains(entry.rule_id.as_str())
-                    || entry.path.as_deref() == Some(crate::CONFIGURATION_MASK))
+                && live_hidden_rules.contains(entry.rule_id.as_str())
         })
     }
 }

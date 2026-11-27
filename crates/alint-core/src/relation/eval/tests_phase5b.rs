@@ -832,3 +832,82 @@ fn split_clears_cell_path_and_handles_extreme_parts_and_bytes_budget() {
         "suffix growth must charge BytesPerRun: {errs:?}"
     );
 }
+
+#[test]
+fn join_propagates_matching_stub_rows_under_join_outputs_budget() {
+    // Audit M2: a `join:` over a left relation with a surviving `strip-root`
+    // stub row (`fr: {}`) must propagate matching stub rows so downstream
+    // `set`/`count` grouped by `entry.root` still anchor at the stub file.
+    let files = tree(&[
+        ("locales/en.yml", "en:\n  hello: hi\n"),
+        ("locales/fr.yml", "fr: {}\n"),
+        ("meta.json", r#"{"en":"English","fr":"French"}"#),
+    ]);
+    let mut locales = named(
+        "locales",
+        Rows::Part(Part {
+            from: from("locales/*.yml"),
+            reader: Reader::Entries(Entries {
+                format: EntriesFormat::Yaml,
+                at: vec!["$".into()],
+                leaves: true,
+                strict: false,
+            }),
+            fields: None,
+        }),
+        &[
+            ("locale", FieldSource::EntryRoot),
+            ("key", FieldSource::EntryPath),
+        ],
+    );
+    locales.relation.transforms = vec![("key".into(), vec![Transform::StripRoot])];
+    let meta = named(
+        "meta",
+        Rows::Part(Part {
+            from: from("meta.json"),
+            reader: Reader::Entries(Entries {
+                format: EntriesFormat::Json,
+                at: vec!["$".into()],
+                leaves: false,
+                strict: false,
+            }),
+            fields: None,
+        }),
+        &[
+            ("locale", FieldSource::EntryKey),
+            ("label", FieldSource::EntryValue),
+        ],
+    );
+    let joined = named(
+        "joined",
+        Rows::Join(crate::relation::plan::JoinDef {
+            left: crate::relation::plan::Reached {
+                id: RelationId(0),
+                alias: None,
+            },
+            right: crate::relation::plan::Reached {
+                id: RelationId(1),
+                alias: None,
+            },
+            on: vec![("locale".into(), "locale".into())],
+            unique: JoinSide::Right,
+        }),
+        &[
+            ("locale", FieldSource::Side(JoinSide::Left, "locale".into())),
+            ("key", FieldSource::Side(JoinSide::Left, "key".into())),
+            ("label", FieldSource::Side(JoinSide::Right, "label".into())),
+        ],
+    );
+    let p = plan(vec![locales, meta, joined]);
+    let rows = run(&p, 2, &files, Limits::default()).expect("join succeeds");
+    assert_eq!(rows.rows.len(), 1);
+    assert_eq!(rows.stub_rows.len(), 1, "fr stub row must survive join");
+    assert_eq!(
+        rows.stub_rows[0].cells[0].value,
+        Some(Value::String("fr".into()))
+    );
+    assert_eq!(
+        rows.stub_rows[0].cells[2].value,
+        Some(Value::String("French".into()))
+    );
+}

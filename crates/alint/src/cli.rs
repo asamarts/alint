@@ -434,6 +434,7 @@ pub(crate) enum Command {
             short = 'f',
             value_name = "FORMAT",
             default_value = "markdown",
+            ignore_case = true,
             value_parser = clap::builder::PossibleValuesParser::new(["markdown", "json"]),
         )]
         format: String,
@@ -457,6 +458,7 @@ pub(crate) enum Command {
             short = 'f',
             value_name = "FORMAT",
             default_value = "human",
+            ignore_case = true,
             value_parser = clap::builder::PossibleValuesParser::new(["human", "yaml", "json"]),
         )]
         format: String,
@@ -510,6 +512,7 @@ pub(crate) enum Command {
             short = 'f',
             value_name = "FORMAT",
             default_value = "human",
+            ignore_case = true,
             value_parser = clap::builder::PossibleValuesParser::new(["human", "json"]),
         )]
         format: String,
@@ -537,6 +540,7 @@ pub(crate) enum Command {
             short = 'f',
             value_name = "FORMAT",
             default_value = "human",
+            ignore_case = true,
             value_parser = clap::builder::PossibleValuesParser::new(["human", "json"]),
         )]
         format: String,

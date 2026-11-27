@@ -1,0 +1,50 @@
+test_version: 1
+name: conformance compare ordering passes for numeric, lexical, and semver comparisons
+tags: [check, constraint, cross_file, version_two, conformance, passing]
+
+given:
+  tree:
+    windows.json: |
+      {
+        "windows": [
+          { "min_port": 1024, "max_port": 8080, "start": "2026-01-01", "end": "2026-12-31", "min_ver": "1.2.0", "cur_ver": "1.10.0" }
+        ]
+      }
+  config: |
+    version: 2
+    relations:
+      windows:
+        from: { paths: windows.json }
+        records: { format: json, at: "$.windows[*]" }
+        fields:
+          min_port: "record: $.min_port"
+          max_port: "record: $.max_port"
+          start: "record: $.start"
+          end: "record: $.end"
+          min_ver: "record: $.min_ver"
+          cur_ver: "record: $.cur_ver"
+    rules:
+      - id: port-order
+        kind: constraint
+        input: windows
+        assert:
+          compare: { field: min_port, op: lt, to: { field: max_port }, order: numeric }
+        level: error
+      - id: date-order
+        kind: constraint
+        input: windows
+        assert:
+          compare: { field: start, op: le, to: { field: end }, order: lexical }
+        level: error
+      - id: semver-order
+        kind: constraint
+        input: windows
+        assert:
+          compare: { field: cur_ver, op: ge, to: { field: min_ver }, order: semver }
+        level: error
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

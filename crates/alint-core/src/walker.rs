@@ -1051,6 +1051,13 @@ pub fn walk_subtrees(root: &Path, subtrees: &[&Path], opts: &WalkOptions) -> Res
     // Deduplicate and drop subtrees covered by an ancestor subtree.
     let mut normalized: Vec<PathBuf> = Vec::with_capacity(subtrees.len());
     for &sub in subtrees {
+        if !sub.is_absolute()
+            && sub
+                .components()
+                .all(|c| matches!(c, std::path::Component::CurDir))
+        {
+            return walk(root, opts);
+        }
         if let Some(rel) = crate::pathsafe::normalize_confined(sub) {
             normalized.push(rel);
         }
@@ -1303,14 +1310,27 @@ fn git_exclude_file(dir: &Path) -> Option<PathBuf> {
     if !std::fs::metadata(&dot_git).is_ok_and(|meta| meta.is_file()) {
         return Some(dot_git.join("info/exclude"));
     }
-    let git_dir = PathBuf::from(first_line(&dot_git)?.strip_prefix("gitdir: ")?);
-    let common = first_line(&git_dir.join("commondir"))?;
-    let common = if common.starts_with('.') {
-        git_dir.join(common)
+    let raw_git_dir = PathBuf::from(first_line(&dot_git)?.strip_prefix("gitdir: ")?);
+    let git_dir = if raw_git_dir.is_relative() {
+        dir.join(raw_git_dir)
     } else {
-        PathBuf::from(common)
+        raw_git_dir
     };
-    Some(common.join("info/exclude"))
+    let commondir_path = git_dir.join("commondir");
+    let exclude_dir = match ignore_files::read_by_path(commondir_path) {
+        ignore_files::IgnoreFileRead::Bytes(bytes) => {
+            let common = ignore_files::first_line_from_bytes(&bytes)?;
+            let raw_common = PathBuf::from(common);
+            if raw_common.is_relative() {
+                git_dir.join(raw_common)
+            } else {
+                raw_common
+            }
+        }
+        ignore_files::IgnoreFileRead::Absent => git_dir,
+        ignore_files::IgnoreFileRead::Refused(_) => return None,
+    };
+    Some(exclude_dir.join("info/exclude"))
 }
 
 /// The names in `dir`'s listing. The walk finds the ignore files and

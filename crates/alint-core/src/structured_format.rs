@@ -25,7 +25,7 @@ mod xml_scan;
 mod yaml_value;
 
 use hcl::hcl_to_value;
-pub(crate) use hcl::parse_edit_body as parse_hcl_edit_body;
+pub(crate) use hcl::{body_to_value as hcl_body_to_value, parse_edit_body as parse_hcl_edit_body};
 #[cfg(test)]
 use xml_scan::MAX_XML_ATTRS_PER_ELEMENT;
 pub use xml_scan::MAX_XML_DEPTH;

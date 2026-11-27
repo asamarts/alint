@@ -1353,7 +1353,10 @@ impl JsonNode {
     }
 }
 
-fn body_to_value(body: hcl::edit::structure::Body, depth: usize) -> Result<Value, String> {
+pub(crate) fn body_to_value(
+    body: hcl::edit::structure::Body,
+    depth: usize,
+) -> Result<Value, String> {
     let mut map: BTreeMap<String, JsonNode> = BTreeMap::new();
     for structure in body {
         match structure {

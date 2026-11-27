@@ -1,0 +1,50 @@
+test_version: 1
+name: nested token escaping handles brackets, parens, and dots in directory names across options
+tags: [check, for_each_dir, cross_file, passing]
+
+given:
+  tree:
+    "pkgs/app[1].v1/meta.json": |
+      { "name": "app[1].v1", "items": { "app[1].v1": "ok" } }
+    "pkgs/app[1].v1/en.json": |
+      { "nav": { "app[1].v1": "Home", "shared": "Shared" } }
+    "pkgs/app[1].v1/fr.json": |
+      { "nav": { "shared": "Partage" } }
+    "pkgs/app[1].v1/README.md": |
+      # app[1].v1
+    "pkgs/app(2)+b/meta.json": |
+      { "name": "app(2)+b", "items": { "app(2)+b": "ok" } }
+    "pkgs/app(2)+b/en.json": |
+      { "nav": { "app(2)+b": "Home", "shared": "Shared" } }
+    "pkgs/app(2)+b/fr.json": |
+      { "nav": { "shared": "Partage" } }
+    "pkgs/app(2)+b/README.md": |
+      # app(2)+b
+  config: |
+    version: 1
+    rules:
+      - id: per-pkg-checks
+        kind: for_each_dir
+        select: "pkgs/*"
+        when_iter: 'iter.has_file("README.md")'
+        level: error
+        require:
+          - kind: file_header
+            paths: "{path}/README.md"
+            pattern: "(?m)^# {basename}$"
+          - kind: json_path_equals
+            paths: "{path}/meta.json"
+            path: "$.items[{basename}]"
+            equals: "ok"
+          - kind: key_parity
+            reference: "{path}/en.json"
+            peers: "{path}/fr.json"
+            ignore_keys: ["nav.{basename}"]
+          - kind: unique_by
+            select: "{path}/*.json"
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

@@ -1,0 +1,52 @@
+test_version: 1
+name: no_duplicate_keys passes across clean YAML, JSON, dotenv, properties, INI, TOML, and HCL
+tags: [check, no_duplicate_keys, structured, passing]
+
+given:
+  tree:
+    clean.yaml: |
+      base: &b
+        x: 1
+      target:
+        <<: *b
+        "<<": literal
+        1: int_key
+        "1": str_key
+      ---
+      base: 2
+    clean.json: |
+      { "a": 1, "b": { "c": 2 } }
+    .env: |
+      HOST=localhost
+      PORT=8080
+    app.properties: |
+      db.host = localhost
+      db.port = 5432
+    config.ini: |
+      [server]
+      host = localhost
+      [db]
+      host = db.internal
+    Cargo.toml: |
+      [package]
+      name = "demo"
+    main.tf: |
+      ingress {
+        port = 80
+      }
+      ingress {
+        port = 443
+      }
+  config: |
+    version: 1
+    rules:
+      - id: no-dups
+        kind: no_duplicate_keys
+        paths: ["clean.yaml", "clean.json", ".env", "app.properties", "config.ini", "Cargo.toml", "main.tf"]
+        level: error
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

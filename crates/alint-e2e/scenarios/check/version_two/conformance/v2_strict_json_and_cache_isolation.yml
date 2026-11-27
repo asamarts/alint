@@ -1,0 +1,45 @@
+test_version: 1
+name: conformance version 2 strict JSON fails on JSONC while tolerant JSONC relation on same file passes
+tags: [check, constraint, cross_file, version_two, conformance, failing]
+
+given:
+  tree:
+    data.json: |
+      {
+        // comment allowed in tolerant JSONC only
+        "name": "app",
+      }
+  config: |
+    version: 2
+    relations:
+      tolerant-rel:
+        from: { paths: data.json }
+        read: { json: "$.name" }
+        fields: { name: value }
+      strict-rel:
+        from: { paths: data.json }
+        read: { json: "$.name", strict: true }
+        fields: { name: value }
+    rules:
+      - id: tolerant-check
+        kind: constraint
+        input: tolerant-rel
+        assert:
+          set: { field: name, equal_to: { values: ["app"] } }
+        level: error
+      - id: strict-check
+        kind: constraint
+        input: strict-rel
+        assert:
+          set: { field: name, equal_to: { values: ["app"] } }
+        level: error
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations: []
+    analysis_failures:
+      - rule: strict-check
+        kind: resource_parse
+        path: data.json

@@ -113,6 +113,7 @@ private object AlintTrustCoordinator {
         var activeProvider: AlintConnectionProvider? = null
         var lastInitializedTrusted: Boolean? = null
         var restartInFlight: Boolean = false
+        var trustRestartInProgress: Boolean = false
         var reconnectOnStart: Boolean = false
     }
 
@@ -152,7 +153,10 @@ private object AlintTrustCoordinator {
             if (state.activeProvider === provider) {
                 state.activeProvider = null
                 state.lastInitializedTrusted = null
-                state.restartInFlight = false
+                if (!state.trustRestartInProgress) {
+                    state.restartInFlight = false
+                    state.reconnectOnStart = false
+                }
             }
         }
     }
@@ -167,9 +171,7 @@ private object AlintTrustCoordinator {
         val status = manager.getServerStatus(ALINT_SERVER_ID)
         val shouldDispatch = synchronized(lock) {
             val state = stateOf(project)
-            val hasLiveProvider = state.activeProvider?.isAlive == true
-            val isActiveOrStopping = hasLiveProvider ||
-                state.activeProvider != null ||
+            val isActiveOrStopping = state.activeProvider != null ||
                 status == ServerStatus.starting ||
                 status == ServerStatus.started ||
                 status == ServerStatus.stopping
@@ -189,6 +191,7 @@ private object AlintTrustCoordinator {
                 return@synchronized false
             }
             state.restartInFlight = true
+            state.trustRestartInProgress = true
             true
         }
         if (!shouldDispatch) return
@@ -203,6 +206,19 @@ private object AlintTrustCoordinator {
                 clearRestartInFlight(project)
                 return@executeOnPooledThread
             }
+            val currentManager = LanguageServerManager.getInstance(project)
+            val currentStatus = currentManager.getServerStatus(ALINT_SERVER_ID)
+            val stillActive = synchronized(lock) {
+                val state = states[project] ?: return@synchronized false
+                state.activeProvider != null ||
+                    currentStatus == ServerStatus.starting ||
+                    currentStatus == ServerStatus.started ||
+                    currentStatus == ServerStatus.stopping
+            }
+            if (!stillActive) {
+                clearRestartInFlight(project)
+                return@executeOnPooledThread
+            }
             try {
                 // In LSP4IJ, `start()` on a started server invokes
                 // `LanguageServerWrapper.restart()`, spawning a fresh process
@@ -212,7 +228,7 @@ private object AlintTrustCoordinator {
                 val options = LanguageServerManager.StartOptions()
                     .setWillEnable(false)
                     .setForceStart(false)
-                LanguageServerManager.getInstance(project).start(currentDef, options)
+                currentManager.start(currentDef, options)
             } catch (_: LanguageServerException) {
                 clearRestartInFlight(project)
             } catch (ex: Throwable) {
@@ -224,11 +240,22 @@ private object AlintTrustCoordinator {
 
     fun onServerStatusChanged(project: Project, status: ServerStatus) {
         if (project.isDisposed || project.isDefault) return
+        if (status == ServerStatus.stopped) {
+            synchronized(lock) {
+                val state = states[project] ?: return
+                if (!state.trustRestartInProgress) {
+                    state.restartInFlight = false
+                    state.reconnectOnStart = false
+                }
+            }
+            return
+        }
         if (status != ServerStatus.started) return
 
         val (shouldReconnect, needsFollowupRestart) = synchronized(lock) {
             val state = states[project] ?: return
             state.restartInFlight = false
+            state.trustRestartInProgress = false
             val currentTrusted = project.isTrusted()
             val drifted = state.lastInitializedTrusted != null &&
                 state.lastInitializedTrusted != currentTrusted
@@ -252,7 +279,11 @@ private object AlintTrustCoordinator {
 
     private fun clearRestartInFlight(project: Project) {
         synchronized(lock) {
-            states[project]?.restartInFlight = false
+            states[project]?.let { state ->
+                state.restartInFlight = false
+                state.trustRestartInProgress = false
+                state.reconnectOnStart = false
+            }
         }
     }
 

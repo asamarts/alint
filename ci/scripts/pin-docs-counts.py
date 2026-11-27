@@ -54,6 +54,17 @@ def release_counts(facts_path: Path) -> tuple[int, int, int]:
     return canonical, alias_count, multi_category
 
 
+def release_bundled_ruleset_count(facts_path: Path) -> int:
+    facts = json.loads(facts_path.read_text(encoding="utf-8"))
+    counts = facts.get("counts")
+    if not isinstance(counts, dict):
+        raise ValueError("facts.json must contain a counts map")
+    bundled = counts.get("bundled_rulesets")
+    if not isinstance(bundled, int) or bundled < 0:
+        raise ValueError("facts.json counts.bundled_rulesets must be a non-negative integer")
+    return bundled
+
+
 def replace_once(text: str, pattern: str, replacement: str, label: str) -> str:
     updated, count = re.subn(pattern, replacement, text, count=1)
     if count != 1:
@@ -125,6 +136,43 @@ def pin_page(text: str, canonical: int, aliases: int, multi_category: int) -> st
     return text
 
 
+def pin_bundled_rulesets_page(text: str, bundled_rulesets: int) -> str:
+    replacements = [
+        (
+            r"(alint ships \*\*)\d+( bundled rulesets\*\*)",
+            rf"\g<1>{bundled_rulesets}\g<2>",
+            "intro bundled rulesets count",
+        ),
+        (
+            r'(<text class="ui mut" x="442" y="16" text-anchor="end">)\d+( bundled rulesets</text>)',
+            rf"\g<1>{bundled_rulesets}\g<2>",
+            "diagram bundled rulesets count",
+        ),
+        (
+            r"(The )\d+( sets fall into a few families:)",
+            rf"\g<1>{bundled_rulesets}\g<2>",
+            "body bundled rulesets count",
+        ),
+    ]
+    for pattern, replacement, label in replacements:
+        text = replace_once(text, pattern, replacement, label)
+    return text
+
+
+def pin_named_page(facts_path: Path, page_path: Path, text: str) -> tuple[str, str]:
+    if page_path.name == "bundled-rulesets.md":
+        bundled = release_bundled_ruleset_count(facts_path)
+        return (
+            pin_bundled_rulesets_page(text, bundled),
+            f"{bundled} bundled rulesets OK",
+        )
+    canonical, aliases, multi_category = release_counts(facts_path)
+    return (
+        pin_page(text, canonical, aliases, multi_category),
+        f"{canonical} canonical kinds, {aliases} aliases, {multi_category} multi-category kinds OK",
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("facts", type=Path)
@@ -133,9 +181,8 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        canonical, aliases, multi_category = release_counts(args.facts)
         original = args.page.read_text(encoding="utf-8")
-        pinned = pin_page(original, canonical, aliases, multi_category)
+        pinned, summary = pin_named_page(args.facts, args.page, original)
     except (OSError, json.JSONDecodeError, ValueError) as error:
         print(f"pin-docs-counts: {error}", file=sys.stderr)
         return 2
@@ -150,11 +197,7 @@ def main() -> int:
     else:
         args.page.write_text(pinned, encoding="utf-8")
 
-    print(
-        "pin-docs-counts: "
-        f"{canonical} canonical kinds, {aliases} aliases, "
-        f"{multi_category} multi-category kinds OK"
-    )
+    print(f"pin-docs-counts: {summary}")
     return 0
 
 

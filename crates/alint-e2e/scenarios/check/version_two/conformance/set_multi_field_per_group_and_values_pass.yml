@@ -1,0 +1,63 @@
+test_version: 1
+name: conformance set multi-field group_by, per-group target, and inline values pass
+tags: [check, constraint, cross_file, version_two, conformance, passing]
+
+given:
+  tree:
+    actual.json: |
+      {
+        "rows": [
+          { "env": "prod", "region": "us", "flag": "auth" },
+          { "env": "prod", "region": "us", "flag": "billing" },
+          { "env": "prod", "region": "eu", "flag": "auth" }
+        ]
+      }
+    expected.json: |
+      {
+        "rows": [
+          { "e": "prod", "r": "us", "f": "auth" },
+          { "e": "prod", "r": "us", "f": "billing" },
+          { "e": "prod", "r": "eu", "f": "auth" }
+        ]
+      }
+  config: |
+    version: 2
+    relations:
+      actual:
+        from: { paths: actual.json }
+        records: { format: json, at: "$.rows[*]" }
+        fields:
+          env: "record: $.env"
+          region: "record: $.region"
+          flag: "record: $.flag"
+      expected:
+        from: { paths: expected.json }
+        records: { format: json, at: "$.rows[*]" }
+        fields:
+          e: "record: $.e"
+          r: "record: $.r"
+          f: "record: $.f"
+    rules:
+      - id: flags-match-per-group
+        kind: constraint
+        input: actual
+        assert:
+          set:
+            field: flag
+            group_by: [env, region]
+            equal_to: { relation: expected, field: f, group_by: [e, r], all_target_groups: true }
+        level: error
+      - id: flags-subset-of-inline-values
+        kind: constraint
+        input: actual
+        assert:
+          set:
+            field: flag
+            subset_of: { values: [auth, billing, search] }
+        level: error
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

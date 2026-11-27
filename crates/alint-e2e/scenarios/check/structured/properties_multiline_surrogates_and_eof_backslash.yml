@@ -1,0 +1,38 @@
+test_version: 1
+name: java properties parser handles multiline continuations, UTF-16 surrogates, and EOF trailing backslash
+tags: [check, properties_path_equals, structured, properties, passing]
+
+given:
+  tree:
+    app.properties: |
+      greeting = hello \
+        world
+      emoji = \uD83D\uDE00
+      trailing = keep\
+  config: |
+    version: 1
+    rules:
+      - id: multiline-ok
+        kind: properties_path_equals
+        paths: app.properties
+        path: "$.greeting"
+        equals: "hello world"
+        level: error
+      - id: surrogate-ok
+        kind: properties_path_equals
+        paths: app.properties
+        path: "$.emoji"
+        equals: "😀"
+        level: error
+      - id: eof-backslash-ok
+        kind: properties_path_equals
+        paths: app.properties
+        path: "$.trailing"
+        equals: "keep"
+        level: error
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

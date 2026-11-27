@@ -1,0 +1,27 @@
+test_version: 1
+name: xml duplicate default xmlns attribute is rejected as a resource_parse analysis failure
+tags: [check, xml_path_equals, structured, xml, failing]
+
+given:
+  tree:
+    dup_xmlns.xml: |
+      <root xmlns="urn:a" xmlns="urn:b"><name>ok</name></root>
+  config: |
+    version: 1
+    rules:
+      - id: xml-check
+        kind: xml_path_equals
+        paths: dup_xmlns.xml
+        path: "$.root.name"
+        equals: "ok"
+        level: error
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations: []
+    analysis_failures:
+      - rule: xml-check
+        kind: resource_parse
+        path: dup_xmlns.xml

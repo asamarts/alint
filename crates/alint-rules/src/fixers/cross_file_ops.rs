@@ -302,7 +302,19 @@ impl CrossFileValueFixer {
                 ));
             }
         };
-        let text = String::from_utf8_lossy(&source_bytes);
+        let strict_source = matches!(
+            &self.source_extract,
+            Extract::Structured(s) if s.format == Format::Json && s.strict
+        );
+        let text: std::borrow::Cow<'_, str> = if strict_source {
+            std::str::from_utf8(&source_bytes)
+                .map(std::borrow::Cow::Borrowed)
+                .map_err(|e| {
+                    format!("source extract failed: strict JSON requires valid UTF-8 ({e})")
+                })?
+        } else {
+            String::from_utf8_lossy(&source_bytes)
+        };
         let values = extract_values_bounded(
             &self.source_extract,
             &text,
@@ -823,9 +835,16 @@ impl Fixer for CrossFileValueFixer {
         let target_rel = violation.path.as_deref()?;
         let (extract, matches) = self.target_config(target_rel)?;
         let source_abs = confine_fix_path(&self.source_file, root, false).ok()?;
-        let source_text = crate::io::read_capped(&source_abs)
-            .ok()
-            .map(|b| String::from_utf8_lossy(&b).into_owned())?;
+        let source_bytes = crate::io::read_capped(&source_abs).ok()?;
+        let strict_source = matches!(
+            &self.source_extract,
+            Extract::Structured(s) if s.format == Format::Json && s.strict
+        );
+        let source_text: std::borrow::Cow<'_, str> = if strict_source {
+            std::borrow::Cow::Borrowed(std::str::from_utf8(&source_bytes).ok()?)
+        } else {
+            String::from_utf8_lossy(&source_bytes)
+        };
         let values = extract_values_bounded(
             &self.source_extract,
             &source_text,

@@ -836,6 +836,12 @@
         },
         {
           "additionalProperties": false,
+          "not": {
+            "required": [
+              "only",
+              "except"
+            ]
+          },
           "properties": {
             "except": {
               "description": "Drop these rule ids from the extended config.",
@@ -903,7 +909,8 @@
         },
         "strict": {
           "description": "When `true` alongside `json:`, parse using strict RFC 8259 JSON (rejecting comments, trailing commas, leading UTF-8 BOM, and empty files). Rejected with any non-`json` extractor.",
-          "type": "boolean"
+          "type": "boolean",
+          "x-since": "0.24"
         },
         "toml": {
           "type": "string"
@@ -4930,7 +4937,8 @@
         "strict": {
           "default": false,
           "description": "When true, enforce strict RFC 8259 JSON parsing (rejecting comments, trailing commas, leading UTF-8 BOM, and empty files; ADR-0050 D7).",
-          "type": "boolean"
+          "type": "boolean",
+          "x-since": "0.24"
         }
       },
       "required": [
@@ -4980,7 +4988,8 @@
         "strict": {
           "default": false,
           "description": "When true, enforce strict RFC 8259 JSON parsing (rejecting comments, trailing commas, leading UTF-8 BOM, and empty files; ADR-0050 D7).",
-          "type": "boolean"
+          "type": "boolean",
+          "x-since": "0.24"
         }
       },
       "required": [
@@ -5032,7 +5041,8 @@
         "strict": {
           "default": false,
           "description": "When true, enforce strict RFC 8259 JSON parsing (rejecting comments, trailing commas, leading UTF-8 BOM, and empty files; ADR-0050 D7).",
-          "type": "boolean"
+          "type": "boolean",
+          "x-since": "0.24"
         }
       },
       "required": [
@@ -5108,7 +5118,8 @@
         "strict": {
           "default": false,
           "description": "When `true`, enforce strict RFC 8259 JSON parsing on JSON targets (rejecting comments, trailing commas, leading UTF-8 BOM, and empty files; ADR-0050 D7). Rejected at build time when `format:` is explicitly non-JSON.",
-          "type": "boolean"
+          "type": "boolean",
+          "x-since": "0.24"
         }
       },
       "required": [
@@ -5212,7 +5223,8 @@
         "strict": {
           "default": false,
           "description": "When `true` on JSON files, enforce strict RFC 8259 JSON parsing (rejecting comments, trailing commas, leading UTF-8 BOM, and empty files; ADR-0050 D7). Rejected at build time for non-JSON formats.",
-          "type": "boolean"
+          "type": "boolean",
+          "x-since": "0.24"
         },
         "strip_root": {
           "default": false,
@@ -7583,14 +7595,14 @@
       "properties": {
         "findings_per_rule": {
           "default": 10000,
-          "description": "Maximum number of findings emitted per `key_parity` or `constraint` rule before truncation with an analysis failure. Default: 10000; valid range: 1..=1000000.",
+          "description": "Maximum number of findings emitted per `key_parity`, `constraint`, or `no_duplicate_keys` rule before truncation with an analysis failure. Default: 10000; valid range: 1..=1000000.",
           "maximum": 1000000,
           "minimum": 1,
           "type": "integer"
         },
         "key_path_bytes_per_decode": {
           "default": 33554432,
-          "description": "Maximum bytes of decoded key paths retained for a single file decode (`key_parity` and version 2 `entries:`). Default: 32 MiB; valid range: 1..=17179869184 (16 GiB).",
+          "description": "Maximum bytes of decoded key paths retained for a single file decode (`key_parity`, version 2 `entries:`, and version 2 `records:`). Default: 32 MiB; valid range: 1..=17179869184 (16 GiB).",
           "maximum": 17179869184,
           "minimum": 1,
           "type": "integer"

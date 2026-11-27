@@ -119,7 +119,7 @@ The full implications (including how absence-style rules interpret "tracked" vs 
 
 ### `vars`
 
-Free-form string variables, referenced from `when:` clauses as bare `vars.<name>`. To substitute a variable into a rule's own fields (a `pattern`, a `message`), use a [`templates:`](/docs/configuration/templates/) block, whose `{{vars.<name>}}` placeholders are filled per instance; a plain, non-template rule does not expand `{{vars.<name>}}` in its fields.
+Free-form string variables, referenced from `when:` clauses as bare `vars.<name>`. Duplicate keys inside `vars:` are rejected as config errors, matching every other YAML mapping in `.alint.yml`. To substitute a variable into a rule's own fields (a `pattern`, a `message`), use a [`templates:`](/docs/configuration/templates/) block, whose `{{vars.<name>}}` placeholders are filled per instance; a plain, non-template rule does not expand `{{vars.<name>}}` in its fields.
 
 ```yaml
 vars:
@@ -426,7 +426,7 @@ baseline: .alint-baseline.json
 
 A `--baseline <path>` flag overrides this key. There is **no silent auto-detect**: a baseline suppresses findings only when it is explicitly opted in (via this key or the flag), never because a baseline file merely exists on disk. Write and refresh the file with `alint baseline`. See [Baseline mode](/docs/concepts/adoption/baseline/) for the full workflow, the fingerprinting semantics, and which output formats are baseline-aware.
 
-### `limits`
+### `limits` (runtime caps)
 
 Optional runtime safety budgets that bound per-rule findings and structured-decode key-path memory.
 

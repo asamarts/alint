@@ -1,0 +1,60 @@
+test_version: 1
+name: conformance reference foreign keys fail on unresolved key and missing field with value template
+tags: [check, constraint, cross_file, version_two, conformance, failing]
+
+given:
+  tree:
+    teams.json: |
+      {
+        "teams": [
+          { "org": "acme", "team": "core" }
+        ]
+      }
+    services.json: |
+      {
+        "services": [
+          { "name": "auth", "org": "acme", "team": "ghost" },
+          { "name": "docs", "org": "acme" }
+        ]
+      }
+  config: |
+    version: 2
+    relations:
+      teams:
+        from: { paths: teams.json }
+        records: { format: json, at: "$.teams[*]" }
+        fields:
+          org: "record: $.org"
+          team: "record: $.team"
+      services:
+        from: { paths: services.json }
+        records: { format: json, at: "$.services[*]" }
+        fields:
+          org: "record: $.org"
+          team: { source: "record: $.team", optional: true }
+    rules:
+      - id: service-owner-exists
+        kind: constraint
+        input: services
+        assert:
+          reference:
+            fields: [org, team]
+            to: { relation: teams, fields: [org, team] }
+        message: "unknown owner {{value}}"
+        level: error
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - rule: service-owner-exists
+        level: error
+        path: services.json
+        message:
+          regex: "ghost"
+      - rule: service-owner-exists
+        level: error
+        path: services.json
+        message:
+          regex: "unknown owner"
