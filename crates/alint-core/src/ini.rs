@@ -66,7 +66,7 @@ pub(crate) fn parse(text: &str) -> Result<Value, String> {
     // Tolerate a leading UTF-8 BOM (some Windows editors add one). Without this
     // the first key parses as `\u{feff}key` -- a silent mis-parse, since
     // `str::trim` does NOT strip U+FEFF (it is not White_Space).
-    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let text = text.trim_start_matches('\u{feff}');
     let mut root = Map::new();
     // The current section name; `None` is the global (pre-section) scope, whose
     // keys live at the top level of `root`.

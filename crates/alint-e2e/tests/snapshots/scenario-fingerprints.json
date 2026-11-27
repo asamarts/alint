@@ -912,6 +912,12 @@
     "fingerprint": "8917447e6cdd58ead48f959d3975d7fd5a526cb1bd70060f82328834da182bce"
   },
   {
+    "scenario": "check/cross_file/key_parity_strip_root_shapes.yml",
+    "rule_id": "locale-parity",
+    "path": "locales/empty.yaml",
+    "fingerprint": "6e52556dba45b079a5706bc236f92e2d8df4093c430d781149770e976c0aae9b"
+  },
+  {
     "scenario": "check/cross_file/key_parity_toml_fires.yml",
     "rule_id": "locales-match-english",
     "path": "locales/fr.toml",
@@ -1644,6 +1650,12 @@
     "fingerprint": "d18c8957b3aefa9f03c48af9f046fa290c4d2c4816b2ddf9e5527c579f0d091d"
   },
   {
+    "scenario": "check/structured/file_is_text_control_dense_binary.yml",
+    "rule_id": "text-only",
+    "path": "control.bin",
+    "fingerprint": "f4d2b165a23e78c20bad43fddfa3a0570d1f7f30da41f39d3a2c748d589efd64"
+  },
+  {
     "scenario": "check/structured/hcl_path_absent_flags_hardcoded_key.yml",
     "rule_id": "no-hardcoded-key",
     "path": "main.tf",
@@ -1744,6 +1756,42 @@
     "rule_id": "csproj-conforms",
     "path": "App.csproj",
     "fingerprint": "dae978921cdca413bd0665b1207139db47fa7c16fa7cf015b4133a91f3f60d4b"
+  },
+  {
+    "scenario": "check/structured/no_duplicate_keys_all_formats_fail.yml",
+    "rule_id": "no-dups",
+    "path": ".env",
+    "fingerprint": "8a23a7315701fd6755ca26d1177f0ab0a663f25328cd337fd8513a9310731d3d"
+  },
+  {
+    "scenario": "check/structured/no_duplicate_keys_all_formats_fail.yml",
+    "rule_id": "no-dups",
+    "path": "app.properties",
+    "fingerprint": "4d9e50d1c60b12bb12ab63ac557bd59d5f1c1c5ace483291bb7c43f715ff65e4"
+  },
+  {
+    "scenario": "check/structured/no_duplicate_keys_all_formats_fail.yml",
+    "rule_id": "no-dups",
+    "path": "config.ini",
+    "fingerprint": "3924d071ac3754587161a38d158f67b7cc8f20fe19a2c9c7e933de92e20b61c0"
+  },
+  {
+    "scenario": "check/structured/no_duplicate_keys_all_formats_fail.yml",
+    "rule_id": "no-dups",
+    "path": "dup.json",
+    "fingerprint": "7a07ec7c6760bb4b0192aa3ce6996b9ad8163e32279bc8587f2a18b758eb6659"
+  },
+  {
+    "scenario": "check/structured/no_duplicate_keys_all_formats_fail.yml",
+    "rule_id": "no-dups",
+    "path": "dup.yaml",
+    "fingerprint": "9e0771ac7d6baa4c16ef42f051d301f2cd2bf70c65af09ba6f657079a7f33ff2"
+  },
+  {
+    "scenario": "check/structured/no_duplicate_keys_all_formats_fail.yml",
+    "rule_id": "no-dups",
+    "path": "main.tf",
+    "fingerprint": "c26694a3dc89198e0142e713e9c0371359a276e991c48e37dae41cc9b856d38e"
   },
   {
     "scenario": "check/structured/no_duplicate_keys_fail.yml",
@@ -1866,6 +1914,24 @@
     "fingerprint": "a2f257d5622baf01fcbb21263a2c2484b6833897e6fbec169966d3edf6ca1037"
   },
   {
+    "scenario": "check/version_two/conformance/count_cardinality_fail.yml",
+    "rule_id": "bounded-per-area",
+    "path": null,
+    "fingerprint": "65f2725cc1a10a285ba4c2a2b081e2bacbab1f29ae9b0692ceae89da91b57af1"
+  },
+  {
+    "scenario": "check/version_two/conformance/count_cardinality_fail.yml",
+    "rule_id": "bounded-per-area",
+    "path": "owners.json",
+    "fingerprint": "c142a2ef164362b788992a0f4ecc1855e3b7d12f0d5b3ff84cbcea01ba02229c"
+  },
+  {
+    "scenario": "check/version_two/conformance/count_cardinality_fail.yml",
+    "rule_id": "no-bob-entries",
+    "path": "owners.json",
+    "fingerprint": "70214918f0f7595cf81eeca5dbfa7ec259959dd517168782f3dd7013e7c2b130"
+  },
+  {
     "scenario": "check/version_two/conformance/dependency_version_berry_fail.yml",
     "rule_id": "one-range-per-dependency",
     "path": "packages/plugin-npm/package.json",
@@ -1966,6 +2032,66 @@
     "rule_id": "locale-key-parity",
     "path": "locales/fr.json",
     "fingerprint": "8167dabc3e73ad8ad05c06ab48d480603fc90c95230c177b1a9670e44432c358"
+  },
+  {
+    "scenario": "check/version_two/conformance/message_value_and_counterpart_placement.yml",
+    "rule_id": "locale-parity",
+    "path": "locales/fr/errors.json",
+    "fingerprint": "2a27ad726213f4e0c8228c062dc57efc54a27fc82725d1958927ffa9dba56632"
+  },
+  {
+    "scenario": "check/version_two/conformance/optional_bound_skip_and_missing.yml",
+    "rule_id": "missing-keeps-both-and-rejects-missing-reference",
+    "path": "packages/b/package.json",
+    "fingerprint": "9fb10e9b54ba3ba69957f421c5e6864e92ee6d1054576a823e3f9fa3c8c57af7"
+  },
+  {
+    "scenario": "check/version_two/conformance/records_transforms_and_mixed_union_fail.yml",
+    "rule_id": "known-services",
+    "path": "config.toml",
+    "fingerprint": "377340dcdadf8f0fc50cb1faf2bcdca091cac562ee89014dad1a0b4ef80fb8a6"
+  },
+  {
+    "scenario": "check/version_two/conformance/reference_foreign_key_fail.yml",
+    "rule_id": "service-owner-exists",
+    "path": "services.json",
+    "fingerprint": "28ab95c6480f950a4034ece49a0efd0ea1608caa2fa831f3dc6ecef6129c0d77"
+  },
+  {
+    "scenario": "check/version_two/conformance/reference_foreign_key_fail.yml",
+    "rule_id": "service-owner-exists",
+    "path": "services.json",
+    "fingerprint": "493d5948e2abb22336ed860934fe2c88f9227611fc6027e7cd9468b78aad180d"
+  },
+  {
+    "scenario": "check/version_two/conformance/satisfies_dialects_fail.yml",
+    "rule_id": "node-satisfies",
+    "path": "pins.json",
+    "fingerprint": "4daa2c969b6b39d0d3617fb19a5e6af2d025c969ccfcac2982a5ed4e641601de"
+  },
+  {
+    "scenario": "check/version_two/conformance/set_multi_field_per_group_and_values_fail.yml",
+    "rule_id": "flags-match-per-group",
+    "path": null,
+    "fingerprint": "86f995762092aa0ff79a61c61ad95df9c0c92455c46570892354a1c8ba99a584"
+  },
+  {
+    "scenario": "check/version_two/conformance/set_multi_field_per_group_and_values_fail.yml",
+    "rule_id": "flags-match-per-group",
+    "path": "actual.json",
+    "fingerprint": "2cf96103f2e3d613bead3da745b7ba5c5fe183c0fa24868180d497f1e1db16f8"
+  },
+  {
+    "scenario": "check/version_two/conformance/set_multi_field_per_group_and_values_fail.yml",
+    "rule_id": "flags-subset-of-inline-values",
+    "path": "actual.json",
+    "fingerprint": "d3380ab2d8914ef08e5edecb1f7321e54d5f1af22b472cb690b3a26d0b7323a8"
+  },
+  {
+    "scenario": "check/version_two/conformance/stub_locale_roots_through_join.yml",
+    "rule_id": "locale-parity-joined",
+    "path": "locales/fr.yml",
+    "fingerprint": "31ba74413f1bb90f9c88a13c2d6128479c2d324ed7b8646286541bc1e37c2546"
   },
   {
     "scenario": "check/version_two/conformance/toolchain_pin_signal_fail.yml",
@@ -2226,6 +2352,12 @@
     "fingerprint": "17c32464a1b2963642468d0603d72b2a56d8af4c40da4c76437b970a35f5d62d"
   },
   {
+    "scenario": "fix/dotenv_multi_bom_set_value.yml",
+    "rule_id": "prod-env",
+    "path": ".env",
+    "fingerprint": "abb3eaccccfd52c0cce242b87ecbe8a3bd97d5d7b7fcfc3c7c7ffc1aa4d19c13"
+  },
+  {
     "scenario": "fix/file_append.yml",
     "rule_id": "spdx-in-readme",
     "path": "README.md",
@@ -2338,6 +2470,12 @@
     "rule_id": "ind",
     "path": "a.py",
     "fingerprint": "a4dea2bc79a71bbe9459fe517f5494427b16ab3851ae82bccbe4d7dd30623383"
+  },
+  {
+    "scenario": "fix/ini_lone_cr_set_value_preserves_sections.yml",
+    "rule_id": "pin-host",
+    "path": "app.ini",
+    "fingerprint": "9a07bf1298f4bbc912eb5b69b573161dd13958eb82bc19d03e0100ec3eb53784"
   },
   {
     "scenario": "fix/insert_header_after_shebang.yml",
@@ -3100,6 +3238,12 @@
     "rule_id": "license-mirror",
     "path": "crates/widget/LICENSE",
     "fingerprint": "2b5cc47c02d70f3c88b7b916cf27dc7189ee7b9779940770212d4fe0401254ee"
+  },
+  {
+    "scenario": "fix/xml_attribute_set_value.yml",
+    "rule_id": "pin-xml-env",
+    "path": "app.xml",
+    "fingerprint": "0b9ef615f8e38b89c2ca4534813f6b5acfc9449b9f157cf20074f7ab77de5b26"
   },
   {
     "scenario": "go/go_flags_malformed_go_mod.yml",

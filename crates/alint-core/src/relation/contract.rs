@@ -90,6 +90,7 @@ impl<A: ContractAdapterTrait> Adapter for ContractAdapter<A> {
                 kind: LimitKind::RowsPerExtractor,
                 limit: max_rows,
                 reached: output.rows.len(),
+                redacted: false,
             }));
         }
         Ok(output)
@@ -328,6 +329,7 @@ fn from_contract_error(error: ContractError) -> AdapterError {
                 kind: LimitKind::RowsPerExtractor,
                 limit,
                 reached,
+                redacted: false,
             })
         }
     }

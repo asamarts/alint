@@ -715,7 +715,7 @@ fn evaluate_for_each_inner<const TRACE: bool>(
                     }
                     let mut violation = Violation::new(format!(
                         "{parent_id}: failed to build nested rule #{i} for {}: {e}",
-                        entry.path.display()
+                        crate::slash(&entry.path)
                     ))
                     .with_path(entry.path.clone())
                     .as_analysis_failure(AnalysisFailureKind::NestedRuleBuild);
@@ -760,7 +760,7 @@ fn evaluate_for_each_inner<const TRACE: bool>(
                         }
                         let mut violation = Violation::new(format!(
                             "{parent_id}: nested rule #{i} scope assertion failed for {}: {error}",
-                            entry.path.display(),
+                            crate::slash(&entry.path),
                         ))
                         .with_path(entry.path.clone())
                         .as_analysis_failure(AnalysisFailureKind::Evaluation);
@@ -809,7 +809,11 @@ fn evaluate_for_each_inner<const TRACE: bool>(
             // Check `as_per_file()` before `nested_spec_single_literal` so
             // non-per-file nested kinds (such as `file_exists`) skip the
             // literal-glob scan and `PathBuf` allocation on every entry (#620).
+            // Kinds enforcing `limits.findings_per_rule` (e.g. `no_duplicate_keys`)
+            // stay on `nested_rule.evaluate` -> `eval_per_file` so the per-rule
+            // findings cap is always enforced.
             if let Some(pf) = nested_rule.as_per_file()
+                && !pf.enforces_findings_per_rule()
                 && let Some(literal) = nested_spec_single_literal(&nested_spec)
                 && pf.path_scope().matches(&literal, ctx.index)
             {
@@ -849,7 +853,7 @@ fn evaluate_for_each_inner<const TRACE: bool>(
                 Err(error) => vec![
                     Violation::new(format!(
                         "{parent_id}: nested rule #{i} error on {}: {error}",
-                        entry.path.display(),
+                        crate::slash(&entry.path),
                     ))
                     .with_path(entry.path.clone())
                     .as_analysis_failure(AnalysisFailureKind::Evaluation),

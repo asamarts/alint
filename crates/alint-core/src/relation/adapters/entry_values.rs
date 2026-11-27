@@ -377,6 +377,7 @@ fn extract_entry_table_non_toml(
             kind: LimitKind::RowsPerExtractor,
             limit,
             reached: limit + 1,
+            redacted: false,
         }),
         EntryRowsError::Parse(message) => AdapterError::Parse(message),
         EntryRowsError::UnsupportedFormat(format) => AdapterError::Parse(format!(

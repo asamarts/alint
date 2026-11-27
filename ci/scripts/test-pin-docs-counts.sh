@@ -57,4 +57,19 @@ if python3 "$PINNER" "$FIXTURE/facts-v2.json" "$FIXTURE/page.md" --check >/dev/n
   exit 1
 fi
 
+# Bundled-rulesets concepts page pins its catalogue count from facts.json too.
+cp "$REPO_ROOT/docs/site/concepts/composition/bundled-rulesets.md" "$FIXTURE/bundled-rulesets.md"
+python3 "$PINNER" "$REPO_ROOT/facts.json" "$FIXTURE/bundled-rulesets.md" --check
+python3 - "$REPO_ROOT/facts.json" "$FIXTURE/facts-24.json" <<'PY'
+import json, sys
+src, dst = sys.argv[1:]
+facts = json.load(open(src, encoding="utf-8"))
+facts["counts"]["bundled_rulesets"] = 24
+json.dump(facts, open(dst, "w", encoding="utf-8"))
+PY
+python3 "$PINNER" "$FIXTURE/facts-24.json" "$FIXTURE/bundled-rulesets.md"
+python3 "$PINNER" "$FIXTURE/facts-24.json" "$FIXTURE/bundled-rulesets.md" --check
+grep -Fq 'alint ships **24 bundled rulesets**' "$FIXTURE/bundled-rulesets.md"
+grep -Fq 'The 24 sets fall into a few families:' "$FIXTURE/bundled-rulesets.md"
+
 echo "[pin-docs-counts] OK — v2/v3 contracts pin and drift fails"

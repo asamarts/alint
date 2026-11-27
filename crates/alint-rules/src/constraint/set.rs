@@ -780,8 +780,8 @@ impl<'r> Run<'r> {
             ) {
                 return None;
             }
-            // Also verify `groups:` literals against target `to.group_by`
-            // column types when input has 0 rows.
+            // Also verify `groups:` literals and 0-row resource/stub groups
+            // against target `to.group_by` column types when input has 0 rows.
             if let Some((&dst_kind, &dst_row)) = kinds.iter().next() {
                 for (lit_idx, tuple) in set.groups.iter().enumerate() {
                     let lit_scalar =
@@ -799,6 +799,28 @@ impl<'r> Run<'r> {
                         );
                         self.fail(Some(dst_cell.at.resource.path().as_path()), message);
                         return None;
+                    }
+                }
+                if group_cols[j].is_empty() {
+                    for group in groups.iter().filter(|g| !g.literal) {
+                        let Some(tuple) = group.value.as_ref() else {
+                            continue;
+                        };
+                        if tuple[j].kind().is_some_and(|k| k != dst_kind) {
+                            let dst_cell = &other_rows.rows[dst_row].cells[dst_group_at[j]];
+                            let src_name = self.name(group_at[j]);
+                            let message = format!(
+                                "`{group_opt}`: `{src_name}` holds {} and `{}` of relation \
+                                 `{written}` holds {} at {}; the comparison would cross types, \
+                                 so the assertion has no verdict",
+                                literal_type(&tuple[j]),
+                                target_group_by[j],
+                                type_of(dst_cell),
+                                self.located(dst_cell),
+                            );
+                            self.fail(Some(dst_cell.at.resource.path().as_path()), message);
+                            return None;
+                        }
                     }
                 }
             }
@@ -1067,13 +1089,18 @@ impl<'r> Run<'r> {
         others: &[usize],
     ) {
         let field_at = compared.field_at;
+        let hide_value = self.value_hidden(compared);
         let places: Vec<_> = others
             .iter()
             .take(MAX_RELATED_LOCATIONS)
-            .map(|&row| (self.spot(row, field_at), "another row of the group with it"))
+            .map(|&row| {
+                (
+                    self.spot_point(row, field_at, hide_value),
+                    "another row of the group with it",
+                )
+            })
             .collect();
         let omitted = others.len() - places.len();
-        let hide_value = self.value_hidden(compared);
         let message = format!(
             "{} holds `{}` {}, which {} lacks",
             self.subject(compared, group),
@@ -1083,7 +1110,7 @@ impl<'r> Run<'r> {
         );
         let related = self.related_at(places, omitted);
         let key = self.set_key(compared, group, value, "extra");
-        let at = self.spot(row, field_at);
+        let at = self.spot_point(row, field_at, hide_value);
         self.report(
             at,
             message,
@@ -1121,7 +1148,7 @@ impl<'r> Run<'r> {
             Related::empty()
         };
         let key = self.set_key(compared, group, value, "shared");
-        let at = self.spot(row, compared.field_at);
+        let at = self.spot_point(row, compared.field_at, hide_value);
         self.report(
             at,
             message,

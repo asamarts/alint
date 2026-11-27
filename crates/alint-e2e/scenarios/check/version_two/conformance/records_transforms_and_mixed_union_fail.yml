@@ -1,0 +1,48 @@
+test_version: 1
+name: conformance records across TOML with mixed-reader union fires with source spans
+tags: [check, constraint, cross_file, version_two, conformance, failing]
+
+given:
+  tree:
+    catalog.json: |
+      { "services": [{ "id": "svc:auth:v1" }] }
+    config.toml: |
+      [[items]]
+      tag = "billing"
+  config: |
+    version: 2
+    relations:
+      combined:
+        union:
+          - from: { paths: config.toml }
+            records: { format: toml, at: "$.items[*]" }
+            fields:
+              name: "record: $.tag"
+          - from: { paths: catalog.json }
+            read: { json: "$.services[*].id" }
+            fields:
+              name: value
+    rules:
+      - id: known-services
+        kind: constraint
+        input: combined
+        assert:
+          set:
+            field: name
+            subset_of: { values: ["svc:auth:v1"] }
+        level: error
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - rule: known-services
+        level: error
+        path: config.toml
+        line: 2
+        column: 7
+        end_line: 2
+        end_column: 16
+        message:
+          regex: '"billing"'

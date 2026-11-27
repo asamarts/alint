@@ -250,6 +250,7 @@ pub(crate) struct PathBudget<'b> {
     run: &'b RunBudget,
     decode_used: Cell<usize>,
     decode_limit: Option<usize>,
+    decode_redacted: bool,
 }
 
 impl<'b> PathBudget<'b> {
@@ -259,6 +260,7 @@ impl<'b> PathBudget<'b> {
             run,
             decode_used: Cell::new(0),
             decode_limit: None,
+            decode_redacted: false,
         }
     }
 
@@ -267,6 +269,7 @@ impl<'b> PathBudget<'b> {
             run,
             decode_used: Cell::new(0),
             decode_limit: Some(limits.get(LimitKind::KeyPathBytesPerDecode)),
+            decode_redacted: limits.is_redacted(LimitKind::KeyPathBytesPerDecode),
         }
     }
 
@@ -280,6 +283,7 @@ impl<'b> PathBudget<'b> {
                     kind: LimitKind::KeyPathBytesPerDecode,
                     limit,
                     reached: next,
+                    redacted: self.decode_redacted,
                 });
             }
             self.run.take(bytes)?;

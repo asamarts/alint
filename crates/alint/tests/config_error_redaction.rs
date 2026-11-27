@@ -1478,3 +1478,105 @@ fn short_environment_values_stay_out_of_baseline_and_fix_config_messages() {
     );
     assert!(!stderr.contains("ab.yml"), "{stderr}");
 }
+
+#[test]
+fn overlapping_env_secrets_and_nested_since_literal_and_xdg_cache_offline_hit() {
+    // 1. Overlapping env secrets (`abcd` and `cdefgh`) are coalesced cleanly so
+    //    no trailing suffix (`efgh`) leaks in config errors (#585).
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        dir.path(),
+        ".alint.yml",
+        "version: 1\nignore:\n  - \"{{env.S1}}\"\n  - \"[{{env.S2}}\"\nrules: []\n",
+    );
+    let out = run(
+        dir.path(),
+        &["check"],
+        &[("S1", "abcd"), ("S2", "abcdefgh")],
+    );
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("abcd") && !stderr.contains("efgh"),
+        "overlapping secret suffix leaked: {stderr}"
+    );
+
+    // 2. Short 2-char env config filename in `alint fix` refusal must neither
+    //    leak the 2-char token in `violation.message` nor clobber `item.status`
+    //    (Audit F18).
+    let short_dir = tempfile::tempdir().unwrap();
+    write(
+        short_dir.path(),
+        "ab.yml",
+        r#"version: 1
+rules:
+  - id: forbid-yml
+    kind: file_absent
+    paths: "a*.yml"
+    level: error
+    fix:
+      file_remove: {}
+"#,
+    );
+    write(
+        short_dir.path(),
+        ".alint.yml",
+        "version: 1\nextends: ['./{{env.X}}.yml']\nrules: []\n",
+    );
+    let out = run(
+        short_dir.path(),
+        &["fix", "--unsafe-fixes", "--format", "json"],
+        &[("X", "ab")],
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let item = &parsed["results"][0]["items"][0];
+    assert!(
+        item["detail"]
+            .as_str()
+            .unwrap()
+            .contains("<redacted> is an alint configuration file"),
+        "detail clobbered: {item}"
+    );
+    assert!(
+        !stdout.contains("ab.yml"),
+        "short env config filename leaked: {stdout}"
+    );
+
+    // 3. Offline remote `extends:` cache lookup respects `XDG_CACHE_HOME` (#611).
+    let cache_root = tempfile::tempdir().unwrap();
+    let xdg_dir = cache_root.path().join("xdg");
+    let ruleset_body = "version: 1\nrules: []\n";
+    let digest = "sha256-7f2c43106364d8112fcc3060e4ab8b20f5d1a17d9cbf3c2540529663004adff8";
+    let xdg_repo = cache_root.path().join("repo");
+    write(
+        &xdg_repo,
+        ".alint.yml",
+        &format!("version: 1\nextends: ['https://example.invalid/r.yml#{digest}']\nrules: []\n"),
+    );
+    // Seed exact cached file at `$XDG_CACHE_HOME/alint/rulesets/<sri>.yml`
+    // (on Linux; macOS uses Library/Caches instead of XDG_CACHE_HOME).
+    let cache_sub = if cfg!(target_os = "macos") {
+        None
+    } else if cfg!(unix) {
+        Some(xdg_dir.join("alint").join("rulesets"))
+    } else {
+        None
+    };
+    if let Some(rulesets_dir) = cache_sub {
+        std::fs::create_dir_all(&rulesets_dir).unwrap();
+        std::fs::write(rulesets_dir.join(format!("{digest}.yml")), ruleset_body).unwrap();
+        let out = crate::hermetic::command(env!("CARGO_BIN_EXE_alint"))
+            .current_dir(&xdg_repo)
+            .args(["validate-config"])
+            .env("XDG_CACHE_HOME", &xdg_dir)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "expected XDG_CACHE_HOME cache lookup to serve seeded ruleset offline: stdout={} stderr={}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr),
+        );
+    }
+}

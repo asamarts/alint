@@ -115,7 +115,14 @@ const MAX_XML_NAMESPACE_WORK: usize = 512 * 1024 * 1024;
 /// the markup that follows. Hidden-close fixtures are probed against the real
 /// parser in the tests.
 pub(crate) fn xml_within_parse_limits(text: &str) -> std::result::Result<(), String> {
-    xml_within_limits(text, MAX_XML_DEPTH, MAX_XML_NAMESPACES_IN_SCOPE)
+    let stripped = text.trim_start_matches('\u{feff}');
+    if stripped.len() > super::MAX_STRUCTURED_BYTES {
+        return Err(format!(
+            "input exceeds the maximum supported size for a structured document ({} bytes)",
+            super::MAX_STRUCTURED_BYTES
+        ));
+    }
+    xml_within_limits(stripped, MAX_XML_DEPTH, MAX_XML_NAMESPACES_IN_SCOPE)
 }
 
 /// [`xml_within_parse_limits`] with explicit depth and in-scope-namespace
@@ -134,8 +141,8 @@ fn xml_within_limits(
     }
     let bytes = text.as_bytes();
     let mut pos = 0usize;
-    if bytes.starts_with(b"\xEF\xBB\xBF") {
-        pos = 3;
+    while bytes[pos..].starts_with(b"\xEF\xBB\xBF") {
+        pos += 3;
     }
     // The XML declaration (`<?xml version=".." ?>`), recognized exactly where
     // roxmltree does (the very start, after an optional BOM): skip to `?>`
@@ -331,7 +338,11 @@ impl<'a> NamespaceScope<'a> {
                 self.max_in_scope
             ));
         }
-        self.work += (inherited + 1) * (inherited + own.len());
+        self.work = self.work.saturating_add(
+            inherited
+                .saturating_add(1)
+                .saturating_mul(inherited.saturating_add(own.len())),
+        );
         if self.work > MAX_XML_NAMESPACE_WORK {
             return Err(
                 "the XML document declares namespaces on too many elements to \

@@ -17,7 +17,7 @@
 
 import { execFile, spawn } from "node:child_process";
 
-import { type ExtensionContext, type LogOutputChannel, Uri, commands, window, workspace } from "vscode";
+import { type Disposable, type ExtensionContext, type LogOutputChannel, Uri, commands, window, workspace } from "vscode";
 import {
   LanguageClient,
   type LanguageClientOptions,
@@ -28,7 +28,19 @@ import {
 import { resolveAlintBinary } from "./binary";
 
 let client: LanguageClient | undefined;
+let configWatcher: Disposable | undefined;
 let channel: LogOutputChannel | undefined;
+let lifecycle: Promise<void> = Promise.resolve();
+let lifecycleGen = 0;
+
+function enqueueLifecycle(op: (gen: number) => Promise<void>): Promise<void> {
+  const gen = ++lifecycleGen;
+  lifecycle = lifecycle.then(
+    () => op(gen),
+    () => op(gen),
+  );
+  return lifecycle;
+}
 
 export async function activate(context: ExtensionContext): Promise<void> {
   channel = window.createOutputChannel("alint", { log: true });
@@ -40,12 +52,15 @@ export async function activate(context: ExtensionContext): Promise<void> {
     // The server reads trust at `initialize`, so a grant restarts it.
     workspace.onDidGrantWorkspaceTrust(() => restart(context)),
   );
-  await start(context);
+  await enqueueLifecycle((gen) => start(context, gen));
 }
 
-async function start(context: ExtensionContext): Promise<void> {
+async function start(context: ExtensionContext, gen: number): Promise<void> {
   const log = channel!;
   const binary = await resolveAlintBinary(context, log);
+  if (gen !== lifecycleGen) {
+    return;
+  }
   if (!binary) {
     log.appendLine("alint binary not found; language server not started.");
     return;
@@ -61,36 +76,55 @@ async function start(context: ExtensionContext): Promise<void> {
     const server = spawn(binary, ["lsp", ...extraArgs], {
       stdio: ["pipe", "pipe", "pipe"],
     });
+    server.on("error", (err: Error) => {
+      log.appendLine(`alint lsp spawn error: ${err.message}`);
+    });
     server.stderr.on("data", (chunk: Buffer) => log.append(chunk.toString()));
     return Promise.resolve({ reader: server.stdout, writer: server.stdin });
   };
+  const watcher = workspace.createFileSystemWatcher("**/.alint.yml");
+  configWatcher = watcher;
   const clientOptions: LanguageClientOptions = {
     // alint is repo-structural, not language-specific — watch every
     // file in the workspace. The server decides which rules apply.
     documentSelector: [{ scheme: "file" }],
     synchronize: {
-      fileEvents: workspace.createFileSystemWatcher("**/.alint.yml"),
+      fileEvents: watcher,
     },
     // An untrusted workspace's config runs no command rule, custom fact,
     // remote `extends:`, `allow_out_of_root:` or environment read until trust is granted.
     initializationOptions: { trusted: workspace.isTrusted },
     outputChannel: log,
   };
-  client = new LanguageClient("alint", "alint", serverOptions, clientOptions);
-  await client.start();
+  const nextClient = new LanguageClient("alint", "alint", serverOptions, clientOptions);
+  client = nextClient;
+  await nextClient.start();
+  if (gen !== lifecycleGen && client === nextClient) {
+    await stopUnlocked();
+    return;
+  }
   log.appendLine(`alint language server started (${binary}).`);
 }
 
-async function stop(): Promise<void> {
+async function stopUnlocked(): Promise<void> {
+  if (configWatcher) {
+    configWatcher.dispose();
+    configWatcher = undefined;
+  }
   if (client) {
-    await client.stop();
+    const current = client;
     client = undefined;
+    await current.stop();
   }
 }
 
 async function restart(context: ExtensionContext): Promise<void> {
-  await stop();
-  await start(context);
+  await enqueueLifecycle(async (gen) => {
+    await stopUnlocked();
+    if (gen === lifecycleGen) {
+      await start(context, gen);
+    }
+  });
 }
 
 async function showRules(context: ExtensionContext): Promise<void> {
@@ -135,5 +169,5 @@ async function openConfig(): Promise<void> {
 }
 
 export async function deactivate(): Promise<void> {
-  await stop();
+  await enqueueLifecycle(() => stopUnlocked());
 }

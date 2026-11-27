@@ -466,6 +466,7 @@ fn per_file_fallback_reports_a_discovered_file_that_vanished() {
         trace: None,
         structured_cache: None,
         findings_per_rule_limit: None,
+        findings_per_rule_redacted: false,
     };
     let rule = MissingReadRule {
         scope: Scope::from_patterns(&["**".to_string()]).unwrap(),
@@ -497,6 +498,7 @@ fn context_is_git_tracked_returns_false_outside_repo() {
         trace: None,
         structured_cache: None,
         findings_per_rule_limit: None,
+        findings_per_rule_redacted: false,
     };
     assert!(!ctx.is_git_tracked(Path::new("anything.rs")));
     assert!(!ctx.dir_has_tracked_files(Path::new("src")));
@@ -522,6 +524,7 @@ fn context_is_git_tracked_consults_set_when_present() {
         trace: None,
         structured_cache: None,
         findings_per_rule_limit: None,
+        findings_per_rule_redacted: false,
     };
     assert!(ctx.is_git_tracked(Path::new("src/main.rs")));
     assert!(!ctx.is_git_tracked(Path::new("README.md")));

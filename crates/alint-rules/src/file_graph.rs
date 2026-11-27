@@ -543,8 +543,8 @@ impl FileGraphRule {
             return Vec::new();
         };
         let abs = ctx.root.join(node);
-        let text = match crate::io::read_capped(&abs) {
-            Ok(b) => String::from_utf8_lossy(&b).into_owned(),
+        let bytes = match crate::io::read_capped(&abs) {
+            Ok(b) => b,
             Err(crate::io::ReadCapError::TooLarge(n)) => {
                 out.push(alint_core::too_large_file_violation(node, n));
                 return Vec::new();
@@ -557,6 +557,29 @@ impl FileGraphRule {
                 out.push(unreadable_file_violation(node, &e));
                 return Vec::new();
             }
+        };
+        let strict_json = matches!(
+            extract,
+            Extract::Structured(s) if s.format == alint_core::Format::Json && s.strict
+        );
+        let text: std::borrow::Cow<'_, str> = if strict_json {
+            match std::str::from_utf8(&bytes) {
+                Ok(s) => std::borrow::Cow::Borrowed(s),
+                Err(e) => {
+                    let mut finding = Violation::new(format!(
+                        "edge extraction failed: strict JSON requires valid UTF-8 ({e})"
+                    ))
+                    .with_path(node.to_path_buf())
+                    .as_analysis_failure(AnalysisFailureKind::ResourceParse);
+                    if extract.redacts_by_default() {
+                        finding.redact_message(&self.id);
+                    }
+                    out.push(finding);
+                    return Vec::new();
+                }
+            }
+        } else {
+            String::from_utf8_lossy(&bytes)
         };
         let refs = match extract_values_with_context(ctx, node, extract, &text) {
             Ok(v) => v,

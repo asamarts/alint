@@ -1862,3 +1862,59 @@ fn json_number_outside_f64_range_fails_parse_loudly() {
         "fact-gated should be skipped because facts.saw_ok is false: {v}"
     );
 }
+
+#[test]
+fn v024_duplicate_vars_line_col_case_insensitive_formats_and_junit_agent_sanitization() {
+    let dir = tempfile::tempdir().unwrap();
+
+    // 1. Duplicate keys in `vars:` report the exact line and column of the
+    //    repeated key (#572).
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        "version: 1\nvars:\n  env: dev\n  other: x\n  env: prod\nrules: []\n",
+    )
+    .unwrap();
+    let dup = run(dir.path(), &["validate-config"]);
+    assert_eq!(dup.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&dup.stderr);
+    assert!(
+        stderr.contains("duplicate") && stderr.contains("line 5"),
+        "expected duplicate vars error at line 5: {stderr}"
+    );
+
+    // 2. Case-insensitive `--format` works across subcommands (`validate-config`,
+    //    `export-agents-md`, `suggest`, `list`, `check`).
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        "version: 1\nrules:\n  - id: r1\n    kind: file_exists\n    paths: missing.txt\n    message: \"bad\\u001b[31m\u{009b}31m\u{202e}\u{200b}\u{E0041}msg\"\n    level: error\n",
+    )
+    .unwrap();
+    for (args, expected_code) in [
+        (&["validate-config", "--format", "JSON"][..], 0),
+        (&["export-agents-md", "--format", "JSON"][..], 0),
+        (&["export-agents-md", "--format", "MARKDOWN"][..], 0),
+        (&["suggest", "--format", "JSON"][..], 0),
+        (&["list", "--format", "JSON"][..], 0),
+        (&["check", "--format", "JSON"][..], 1),
+    ] {
+        let out = run(dir.path(), args);
+        assert_eq!(
+            out.status.code(),
+            Some(expected_code),
+            "args={args:?} stderr={}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    // 3. `--format junit` and `--format agent` sanitize C0/C1/bidi/ZW/astral tags (#600).
+    let junit = String::from_utf8(run(dir.path(), &["check", "--format", "JUNIT"]).stdout).unwrap();
+    let agent = String::from_utf8(run(dir.path(), &["check", "--format", "AGENT"]).stdout).unwrap();
+    for (label, text) in [("junit", &junit), ("agent", &agent)] {
+        for forbidden in ['\u{001b}', '\u{009b}', '\u{202e}', '\u{200b}', '\u{E0041}'] {
+            assert!(
+                !text.contains(forbidden),
+                "{label} leaked forbidden char {forbidden:?}:\n{text}"
+            );
+        }
+    }
+}

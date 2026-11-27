@@ -1,0 +1,23 @@
+test_version: 1
+name: no_duplicate_keys rejects format xml at configuration load
+tags: [check, no_duplicate_keys, structured, config_error]
+
+given:
+  tree:
+    pom.xml: "<project/>"
+  config: |
+    version: 1
+    rules:
+      - id: bad-xml
+        kind: no_duplicate_keys
+        paths: "*.xml"
+        format: xml
+        level: error
+
+when: [check]
+
+expect:
+  - exit: configuration_error
+    configuration_error:
+      message:
+        regex: "xml"

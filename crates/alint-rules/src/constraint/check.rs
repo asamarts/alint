@@ -846,12 +846,13 @@ impl<'p> Checker<'p> {
                 SatisfiesVersion::Field(field.clone())
             }
             (None, Some(raw)) => {
-                let parsed = alint_core::semver_eval::parse_version(raw).map_err(|err| {
-                    self.fail(
-                        "assert.satisfies.version_literal",
-                        format!("invalid semantic version literal: {err}"),
-                    )
-                })?;
+                let parsed = alint_core::semver_eval::parse_version_for_dialect(raw, dialect)
+                    .map_err(|err| {
+                        self.fail(
+                            "assert.satisfies.version_literal",
+                            format!("invalid semantic version literal: {err}"),
+                        )
+                    })?;
                 SatisfiesVersion::Literal {
                     raw: raw.clone(),
                     parsed,

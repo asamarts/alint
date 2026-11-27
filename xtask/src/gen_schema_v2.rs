@@ -1005,8 +1005,28 @@ fn field_defs() -> Vec<(String, Value)> {
     ];
     for kind in RowsKind::ALL {
         let source = format!("#/$defs/{}", kind.source_def());
-        defs.push((
-            kind.field_def(),
+        let field_schema = if matches!(kind, RowsKind::Join) {
+            json!({
+                "oneOf": [
+                    { "$ref": source },
+                    {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["source"],
+                        "properties": {
+                            "source": { "$ref": source },
+                            "sensitive": {
+                                "type": "boolean",
+                                "default": false,
+                                "description": "Keep this field's values out of messages, the \
+                                    JSON report and baselines.",
+                            },
+                        },
+                    },
+                ],
+                "description": "A joined field: its source, or a `{ source, sensitive }` map.",
+            })
+        } else {
             json!({
                 "oneOf": [
                     { "$ref": source },
@@ -1067,8 +1087,9 @@ fn field_defs() -> Vec<(String, Value)> {
                 ],
                 "description": "A field: its source, or a `{ source, sensitive, optional, \
                     on_missing }` map.",
-            }),
-        ));
+            })
+        };
+        defs.push((kind.field_def(), field_schema));
         defs.push((kind.source_def(), kind.sources()));
     }
     defs

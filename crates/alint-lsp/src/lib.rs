@@ -130,6 +130,29 @@ const WORKER_STACK_SIZE: usize = 8 * 1024 * 1024;
 /// command/remote rule or stalled client stdout pipe cannot hang shutdown.
 const EXIT_JOIN_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// Optional hook registered by the CLI binary (`alint lsp`) so any environment
+/// values loaded by LSP sessions are also forwarded to the process-wide stderr
+/// tracing redactor (F17).
+type TracingEnvHook = fn(&[String]);
+
+static TRACING_ENV_HOOK: std::sync::OnceLock<TracingEnvHook> = std::sync::OnceLock::new();
+
+/// Register a callback invoked whenever an LSP session loads a config with
+/// environment-interpolated top-level values so stderr `tracing` output redacts
+/// them alongside CLI sessions.
+#[doc(hidden)]
+pub fn set_tracing_env_hook(hook: fn(&[String])) {
+    let _ = TRACING_ENV_HOOK.set(hook);
+}
+
+pub(crate) fn notify_tracing_env_values(values: &[String]) {
+    if !values.is_empty()
+        && let Some(hook) = TRACING_ENV_HOOK.get()
+    {
+        hook(values);
+    }
+}
+
 /// Server options, set from the `alint lsp` command line.
 ///
 /// Built with [`LspOptions::default`] and the `with_*` setters, so a later
@@ -1621,7 +1644,6 @@ fn publish_config_diagnostics(
         }
 
         let mut diagnostics = broken_diags;
-        let has_broken = !diagnostics.is_empty();
         diagnostics.extend(findings_to_diagnostics(
             &findings,
             state.related_information_supported,
@@ -1631,9 +1653,9 @@ fn publish_config_diagnostics(
         } else {
             state.diagnostics.insert(uri.clone(), findings);
         }
-        // Never stamp an on-disk config parse error with a newer unsaved
-        // buffer's version.
-        let version = if has_broken && edited_uris.contains(&uri) {
+        // Never stamp on-disk config diagnostics (parse errors, pattern hints,
+        // or anchored findings) with a newer unsaved buffer's version.
+        let version = if edited_uris.contains(&uri) {
             None
         } else {
             state.versions.get(&uri).copied()

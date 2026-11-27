@@ -462,6 +462,7 @@ impl DecodeCache {
                 kind: LimitKind::BytesPerRun,
                 limit,
                 reached,
+                redacted: self.limits.is_redacted(LimitKind::BytesPerRun),
             });
         }
         Ok(())
@@ -1072,7 +1073,8 @@ mod tests {
             AdapterError::Limit(crate::relation::LimitExceeded {
                 kind: LimitKind::RowsPerRun,
                 limit: 3,
-                reached: 4
+                reached: 4,
+                redacted: false,
             })
         );
         // The failure is cached for that resource, and the budget stays spent.

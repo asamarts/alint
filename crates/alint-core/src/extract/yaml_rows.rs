@@ -410,6 +410,13 @@ pub(super) fn yaml_strip_root_shape(text: &str) -> super::StripRootShape {
     }
 
     let stripped = text.trim_start_matches('\u{feff}');
+    if stripped.len() > crate::structured_format::MAX_STRUCTURED_BYTES {
+        return StripRootShape::EmptyDocument;
+    }
+    if !crate::yaml_depth::flow_depth_within_limit(stripped) {
+        return StripRootShape::EmptyDocument;
+    }
+    let _budget_guard = crate::yaml_budget::reserve(stripped.len());
     let Ok(mut stream) = crate::yaml::parse_events_stream(stripped) else {
         return StripRootShape::EmptyDocument;
     };
@@ -470,7 +477,10 @@ pub(super) fn yaml_strip_root_shape(text: &str) -> super::StripRootShape {
             };
             match val_ev {
                 Event::MappingStart { .. } => match next_event() {
-                    Some(Ok(Event::MappingEnd { .. })) => StripRootShape::SingleRootEmptyObject,
+                    Some(Ok(Event::MappingEnd { .. })) => match next_event() {
+                        Some(Ok(Event::MappingEnd { .. })) => StripRootShape::SingleRootEmptyObject,
+                        _ => StripRootShape::Object,
+                    },
                     _ => StripRootShape::Object,
                 },
                 Event::SequenceStart { .. } => StripRootShape::SingleRootArray,

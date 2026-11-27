@@ -123,6 +123,11 @@ enum YamlKey {
     NegInt(i128),
     Float(u64),
     String(Arc<str>),
+    /// Unquoted YAML 1.1 merge key (`<<` or `!!merge <<`), kept distinct from
+    /// literal quoted `"<<"` / `!!str <<` so a merge and a literal `"<<"` key
+    /// in the same mapping do not false-positive while two `<<:` merge keys
+    /// still collide.
+    MergeKey,
     Tagged(Arc<str>, Box<Self>),
 }
 
@@ -199,6 +204,7 @@ impl YamlKey {
                 sink.push_str("str:");
                 sink.push_str(s);
             }
+            Self::MergeKey => sink.push_str("merge:<<"),
             Self::Tagged(tag, inner) => {
                 sink.push_str("tag:");
                 sink.push_str(tag);
@@ -310,6 +316,7 @@ fn resolve_yaml_key(
     hasher_state: &RandomState,
 ) -> Result<(SharedYamlKey, Arc<str>), String> {
     let key = match tag {
+        Some(t) if t.is_core() && t.suffix() == "merge" && value == "<<" => YamlKey::MergeKey,
         Some(t) if crate::yaml::is_core_scalar_tag(t) => {
             let scalar =
                 crate::yaml::resolve_core_scalar(value, style, Some(t)).ok_or_else(|| {
@@ -332,6 +339,7 @@ fn resolve_yaml_key(
             );
             YamlKey::Tagged(full_tag, Box::new(payload))
         }
+        None if style == ayaml::ScalarStyle::Plain && value == "<<" => YamlKey::MergeKey,
         None => crate::yaml::resolve_core_scalar(value, style, None).map_or_else(
             || YamlKey::String(Arc::from(value)),
             YamlKey::from_core_scalar,
@@ -340,6 +348,7 @@ fn resolve_yaml_key(
     let display: Arc<str> = match &key {
         YamlKey::Null if value.is_empty() => Arc::from("null"),
         YamlKey::String(s) => Arc::clone(s),
+        YamlKey::MergeKey => Arc::from("<<"),
         YamlKey::Tagged(_, inner) => match inner.as_ref() {
             YamlKey::String(s) => Arc::clone(s),
             _ => Arc::from(value),
@@ -827,18 +836,46 @@ fn scan_ini(text: &str) -> Result<DuplicateScan, String> {
 // HCL
 // ---------------------------------------------------------------------------
 
-fn hcl_static_object_key(key: &hcl::edit::expr::ObjectKey) -> Option<&str> {
+fn hcl_static_object_key(key: &hcl::edit::expr::ObjectKey) -> Option<std::borrow::Cow<'_, str>> {
     match key {
-        hcl::edit::expr::ObjectKey::Ident(ident) => Some(ident.as_str()),
+        hcl::edit::expr::ObjectKey::Ident(ident) => {
+            Some(std::borrow::Cow::Borrowed(ident.as_str()))
+        }
         hcl::edit::expr::ObjectKey::Expression(expr) => hcl_static_key_expr(expr),
     }
 }
 
-fn hcl_static_key_expr(mut expr: &hcl::edit::expr::Expression) -> Option<&str> {
+fn hcl_template_is_literal_only(template: &hcl::edit::template::Template) -> bool {
+    template
+        .into_iter()
+        .all(|elem| matches!(elem, hcl::edit::template::Element::Literal(_)))
+}
+
+fn hcl_static_key_expr(
+    mut expr: &hcl::edit::expr::Expression,
+) -> Option<std::borrow::Cow<'_, str>> {
+    use serde::Deserialize as _;
+
     loop {
         match expr {
-            hcl::edit::expr::Expression::String(s) => return Some(s.as_str()),
+            hcl::edit::expr::Expression::String(s) => {
+                return Some(std::borrow::Cow::Borrowed(s.as_str()));
+            }
             hcl::edit::expr::Expression::Parenthesis(p) => expr = p.inner(),
+            hcl::edit::expr::Expression::StringTemplate(tpl)
+                if hcl_template_is_literal_only(tpl) =>
+            {
+                let expr =
+                    hcl::Expression::from(hcl::edit::expr::Expression::StringTemplate(tpl.clone()));
+                return String::deserialize(expr).ok().map(std::borrow::Cow::Owned);
+            }
+            hcl::edit::expr::Expression::HeredocTemplate(h)
+                if hcl_template_is_literal_only(&h.template) =>
+            {
+                let expr =
+                    hcl::Expression::from(hcl::edit::expr::Expression::HeredocTemplate(h.clone()));
+                return String::deserialize(expr).ok().map(std::borrow::Cow::Owned);
+            }
             _ => return None,
         }
     }
@@ -852,7 +889,8 @@ fn scan_hcl_expr(expr: &hcl::edit::expr::Expression, offset: usize, scan: &mut D
     while let Some(cur) = pending.pop() {
         match cur {
             E::Object(obj) => {
-                let mut seen: HashMap<&str, ByteSpan> = HashMap::with_capacity(obj.len());
+                let mut seen: HashMap<std::borrow::Cow<'_, str>, ByteSpan> =
+                    HashMap::with_capacity(obj.len());
                 let mut children: Vec<&E> = Vec::with_capacity(obj.len() * 2);
                 for (key, value) in obj {
                     if let Some(name) = hcl_static_object_key(key) {
@@ -860,10 +898,10 @@ fn scan_hcl_expr(expr: &hcl::edit::expr::Expression, offset: usize, scan: &mut D
                             || ByteSpan::new(offset, offset),
                             |r| ByteSpan::new(r.start + offset, r.end + offset),
                         );
-                        if let Some(&first) = seen.get(name) {
+                        if let Some(&first) = seen.get(name.as_ref()) {
                             if !scan.capped {
                                 scan.push(DuplicateKey {
-                                    key: Arc::from(name),
+                                    key: Arc::from(name.as_ref()),
                                     canonical_key: None,
                                     section: None,
                                     duplicate: key_span,
@@ -975,8 +1013,15 @@ fn push_hcl_template_exprs<'a>(
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn scan_hcl(text: &str) -> Result<DuplicateScan, String> {
-    Format::Hcl.parse(text)?;
+    use hcl::edit::Span as _;
+
+    if text.len() > MAX_STRUCTURED_BYTES {
+        return Err(format!(
+            "input exceeds the maximum supported size for a structured document ({MAX_STRUCTURED_BYTES} bytes)"
+        ));
+    }
     if text
         .trim_matches(|c: char| c == '\u{feff}' || c.is_whitespace())
         .is_empty()
@@ -989,13 +1034,93 @@ fn scan_hcl(text: &str) -> Result<DuplicateScan, String> {
     let mut scan = DuplicateScan::default();
     let mut bodies: Vec<&hcl::edit::structure::Body> = vec![&body];
     while let Some(cur) = bodies.pop() {
+        let mut seen_attrs: HashMap<&str, ByteSpan> = HashMap::new();
+        let mut seen_block_roots: HashMap<&str, ByteSpan> = HashMap::new();
+        let mut seen_block_paths: HashMap<Vec<&str>, (ByteSpan, bool)> = HashMap::new();
         let mut child_bodies = Vec::new();
         for item in cur {
             match item {
                 hcl::edit::structure::Structure::Attribute(attr) => {
+                    let name = attr.key.as_str();
+                    let key_span = attr.key.span().map_or_else(
+                        || ByteSpan::new(offset, offset),
+                        |r| ByteSpan::new(r.start + offset, r.end + offset),
+                    );
+                    if let Some(&first) = seen_block_roots.get(name)
+                        && !scan.capped
+                    {
+                        scan.push(DuplicateKey {
+                            key: Arc::from(name),
+                            canonical_key: None,
+                            section: None,
+                            duplicate: key_span,
+                            first,
+                        });
+                    }
+                    seen_attrs.entry(name).or_insert(key_span);
                     scan_hcl_expr(&attr.value, offset, &mut scan);
                 }
                 hcl::edit::structure::Structure::Block(block) => {
+                    let ident = block.ident.as_str();
+                    let block_span = block.ident.span().map_or_else(
+                        || ByteSpan::new(offset, offset),
+                        |r| ByteSpan::new(r.start + offset, r.end + offset),
+                    );
+                    let mut shadowed_by_attr = false;
+                    if let Some(&first) = seen_attrs.get(ident) {
+                        shadowed_by_attr = true;
+                        if !scan.capped {
+                            scan.push(DuplicateKey {
+                                key: Arc::from(ident),
+                                canonical_key: None,
+                                section: None,
+                                duplicate: block_span,
+                                first,
+                            });
+                        }
+                    }
+                    seen_block_roots.entry(ident).or_insert(block_span);
+                    if !shadowed_by_attr {
+                        let mut path: Vec<&str> = Vec::with_capacity(1 + block.labels.len());
+                        path.push(ident);
+                        for label in &block.labels {
+                            path.push(label.as_str());
+                        }
+                        let mut prefix_clash: Option<(Vec<&str>, ByteSpan)> = None;
+                        for len in 1..path.len() {
+                            let prefix = &path[..len];
+                            if let Some(&(first, true)) = seen_block_paths.get(prefix) {
+                                prefix_clash = Some((prefix.to_vec(), first));
+                                break;
+                            }
+                            seen_block_paths
+                                .entry(prefix.to_vec())
+                                .or_insert((block_span, false));
+                        }
+                        if let Some((clashing, first)) = prefix_clash {
+                            if !scan.capped {
+                                scan.push(DuplicateKey {
+                                    key: Arc::from(clashing.join(".")),
+                                    canonical_key: None,
+                                    section: None,
+                                    duplicate: block_span,
+                                    first,
+                                });
+                            }
+                        } else if let Some(&(first, false)) = seen_block_paths.get(&path) {
+                            if !scan.capped {
+                                scan.push(DuplicateKey {
+                                    key: Arc::from(path.join(".")),
+                                    canonical_key: None,
+                                    section: None,
+                                    duplicate: block_span,
+                                    first,
+                                });
+                            }
+                        } else {
+                            seen_block_paths.entry(path).or_insert((block_span, true));
+                        }
+                    }
                     child_bodies.push(&block.body);
                 }
             }
@@ -1004,6 +1129,9 @@ fn scan_hcl(text: &str) -> Result<DuplicateScan, String> {
             bodies.push(child);
         }
     }
+    // Validate JSON-spec conversion on the already-parsed CST (catching
+    // non-string object keys, etc.) without reparsing `text` a second time.
+    crate::structured_format::hcl_body_to_value(body, 0)?;
     Ok(scan)
 }
 
@@ -1311,5 +1439,56 @@ abc: 5
         let scan = find_duplicate_keys(Format::Yaml, &yaml, false).unwrap();
         assert_eq!(scan.duplicates.len(), MAX_DUPLICATES_PER_FILE);
         assert!(scan.capped);
+    }
+
+    #[test]
+    fn yaml_merge_key_and_quoted_literal_stay_distinct_while_same_kind_collides() {
+        // Plain `<<: *base` (merge) + quoted `"<<": 1` (literal string key) are
+        // distinct key kinds and must not false-positive.
+        let distinct = "base: &b\n  a: 1\ntarget:\n  <<: *b\n  \"<<\": literal\n";
+        let scan = find_duplicate_keys(Format::Yaml, distinct, false).unwrap();
+        assert_eq!(scan.duplicates, []);
+
+        // Two plain `<<:` merge keys in one mapping still collide.
+        let dup_merge = "a: &a\n  x: 1\nb: &b\n  y: 2\ntarget:\n  <<: *a\n  <<: *b\n";
+        let scan = find_duplicate_keys(Format::Yaml, dup_merge, false).unwrap();
+        assert_eq!(scan.duplicates.len(), 1);
+        assert_eq!(scan.duplicates[0].key.as_ref(), "<<");
+
+        // Two literal quoted/tagged `<<` keys still collide.
+        let dup_lit = "target:\n  \"<<\": 1\n  !!str <<: 2\n";
+        let scan = find_duplicate_keys(Format::Yaml, dup_lit, false).unwrap();
+        assert_eq!(scan.duplicates.len(), 1);
+        assert_eq!(scan.duplicates[0].key.as_ref(), "<<");
+    }
+
+    #[test]
+    fn hcl_catches_attribute_block_prefix_shadowing_and_static_template_keys() {
+        // Attribute + block sharing a name shadows in HCL JSON projection.
+        let attr_block = "foo = 1\nfoo \"bar\" {\n  x = 2\n}\n";
+        let scan = find_duplicate_keys(Format::Hcl, attr_block, false).unwrap();
+        assert_eq!(scan.duplicates.len(), 1);
+        assert_eq!(scan.duplicates[0].key.as_ref(), "foo");
+
+        // Block-label strict prefix clash (`foo {}` vs `foo "bar" {}`) shadows.
+        let prefix = "foo {\n  a = 1\n}\nfoo \"bar\" {\n  b = 2\n}\n";
+        let scan = find_duplicate_keys(Format::Hcl, prefix, false).unwrap();
+        assert_eq!(scan.duplicates.len(), 1);
+        assert_eq!(scan.duplicates[0].key.as_ref(), "foo");
+
+        // Repeated identical blocks (`ingress {}` + `ingress {}`) are valid HCL.
+        let repeated_blocks = "ingress {\n  port = 80\n}\ningress {\n  port = 443\n}\n";
+        let scan = find_duplicate_keys(Format::Hcl, repeated_blocks, false).unwrap();
+        assert_eq!(scan.duplicates, []);
+
+        // Static literal-only heredoc and parenthesized string template object keys.
+        let templates = "m = {\n  \"a\\n\" = 1,\n  (<<EOF\na\nEOF\n  ) = 2\n}\n";
+        let scan = find_duplicate_keys(Format::Hcl, templates, false).unwrap();
+        assert_eq!(scan.duplicates.len(), 1);
+        assert_eq!(scan.duplicates[0].key.as_ref(), "a\n");
+
+        let dup_tpl_mixed = "m = {\n  \"a$${x}\" = 1,\n  (\"a$${x}\") = 2\n}\n";
+        let scan_mixed = find_duplicate_keys(Format::Hcl, dup_tpl_mixed, false).unwrap();
+        assert_eq!(scan_mixed.duplicates.len(), 1);
     }
 }

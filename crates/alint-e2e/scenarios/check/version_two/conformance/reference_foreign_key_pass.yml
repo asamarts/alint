@@ -1,0 +1,51 @@
+test_version: 1
+name: conformance reference foreign keys pass for single, composite, and skip_missing rows
+tags: [check, constraint, cross_file, version_two, conformance, passing]
+
+given:
+  tree:
+    teams.json: |
+      {
+        "teams": [
+          { "org": "acme", "team": "core" },
+          { "org": "acme", "team": "web" }
+        ]
+      }
+    services.json: |
+      {
+        "services": [
+          { "name": "auth", "org": "acme", "team": "core" },
+          { "name": "docs", "org": "acme" }
+        ]
+      }
+  config: |
+    version: 2
+    relations:
+      teams:
+        from: { paths: teams.json }
+        records: { format: json, at: "$.teams[*]" }
+        fields:
+          org: "record: $.org"
+          team: "record: $.team"
+      services:
+        from: { paths: services.json }
+        records: { format: json, at: "$.services[*]" }
+        fields:
+          org: "record: $.org"
+          team: { source: "record: $.team", optional: true }
+    rules:
+      - id: service-owner-exists
+        kind: constraint
+        input: services
+        assert:
+          reference:
+            fields: [org, team]
+            to: { relation: teams, fields: [org, team] }
+            skip_missing: true
+        level: error
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

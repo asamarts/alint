@@ -111,7 +111,7 @@ impl Rule for DirAbsentRule {
                 format!(
                     "directory is forbidden (matches [{}]{tracked}): {}",
                     self.patterns.join(", "),
-                    entry.path.display()
+                    crate::slash(&entry.path)
                 )
             });
             violations.push(Violation::new(msg).with_path(entry.path.clone()));

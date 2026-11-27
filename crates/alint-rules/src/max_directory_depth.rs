@@ -51,7 +51,7 @@ impl Rule for MaxDirectoryDepthRule {
                 let msg = self.message.clone().unwrap_or_else(|| {
                     format!(
                         "{} is at depth {depth}; max is {}",
-                        entry.path.display(),
+                        crate::slash(&entry.path),
                         self.max_depth
                     )
                 });

@@ -885,6 +885,8 @@ pub struct Context<'a> {
     pub(crate) structured_cache: Option<crate::structured_cache::StructuredCacheRef<'a>>,
     /// Per-rule finding cap resolved from top-level `limits.findings_per_rule`.
     pub(crate) findings_per_rule_limit: Option<usize>,
+    /// Whether `limits.findings_per_rule` came from an environment interpolation.
+    pub(crate) findings_per_rule_redacted: bool,
 }
 
 impl<'a> Context<'a> {
@@ -907,6 +909,7 @@ impl<'a> Context<'a> {
             trace: None,
             structured_cache: None,
             findings_per_rule_limit: None,
+            findings_per_rule_redacted: false,
         }
     }
 
@@ -914,6 +917,11 @@ impl<'a> Context<'a> {
     pub(crate) fn findings_per_rule_cap(&self) -> usize {
         self.findings_per_rule_limit
             .unwrap_or_else(|| crate::relation::LimitKind::FindingsPerRule.default_value())
+    }
+
+    #[must_use]
+    pub(crate) fn findings_per_rule_is_redacted(&self) -> bool {
+        self.findings_per_rule_redacted
     }
 
     /// Sets [`Self::registry`].
@@ -1037,6 +1045,7 @@ impl<'a> Context<'a> {
                 file_cache,
             )),
             findings_per_rule_limit: self.findings_per_rule_limit,
+            findings_per_rule_redacted: self.findings_per_rule_redacted,
         }
     }
 }
@@ -1611,18 +1620,26 @@ pub(crate) fn findings_per_rule_truncation_failure(
     emitted: usize,
     suppressed: usize,
     lower_bound: bool,
+    redacted: bool,
 ) -> Violation {
-    let omitted = if lower_bound {
-        format!("at least {suppressed}")
+    let message = if redacted {
+        "relation limit `findings_per_rule` (<redacted>) reached: remaining findings were omitted \
+         to bound run memory and output"
+            .to_string()
     } else {
-        suppressed.to_string()
+        let omitted = if lower_bound {
+            format!("at least {suppressed}")
+        } else {
+            suppressed.to_string()
+        };
+        let noun = if emitted == 1 { "finding" } else { "findings" };
+        format!(
+            "relation limit `findings_per_rule` ({cap}) reached: emitted {emitted} {noun} and \
+             suppressed {omitted} more; remaining findings were omitted to bound run memory and \
+             output"
+        )
     };
-    let noun = if emitted == 1 { "finding" } else { "findings" };
-    Violation::new(format!(
-        "relation limit `findings_per_rule` ({cap}) reached: emitted {emitted} {noun} and \
-         suppressed {omitted} more; remaining findings were omitted to bound run memory and output"
-    ))
-    .as_analysis_failure(AnalysisFailureKind::Evaluation)
+    Violation::new(message).as_analysis_failure(AnalysisFailureKind::Evaluation)
 }
 
 /// Rule-major fallback for [`PerFileRule`] implementors.
@@ -1708,6 +1725,7 @@ pub fn eval_per_file<R: PerFileRule + ?Sized>(
             emitted_policy,
             suppressed,
             lower_bound,
+            ctx.findings_per_rule_is_redacted(),
         ));
     }
     Ok(violations)

@@ -1,0 +1,31 @@
+test_version: 1
+name: hcl strict HCL2 rejects invalid backslash escapes while accepting valid multi-block HCL
+tags: [check, hcl_path_equals, structured, hcl, failing]
+
+given:
+  tree:
+    valid.tf: |
+      resource "aws_s3_bucket" "logs" {
+        bucket = "acme-logs"
+      }
+    bad_escape.tf: |
+      x = "\b"
+  config: |
+    version: 1
+    rules:
+      - id: hcl-bucket
+        kind: hcl_path_equals
+        paths: ["valid.tf", "bad_escape.tf"]
+        path: "$.resource.aws_s3_bucket.logs.bucket"
+        equals: "acme-logs"
+        level: error
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations: []
+    analysis_failures:
+      - rule: hcl-bucket
+        kind: resource_parse
+        path: bad_escape.tf

@@ -50,6 +50,14 @@ relations:
     fields: { manifest: path, dependency: entry.key, range: entry.value }
     where:
       dependency: { not_in: ["@types/node", { relation: names, field: name }] }
+  releases:
+    from: { paths: "releases.json" }
+    records: { format: json, at: "$.releases[*]" }
+    fields:
+      package: "record: $.package"
+      version: "record: $.version"
+      min_version: "record: $.min_version"
+      range: "record: $.range"
 
 rules:
   - id: names-unique
@@ -157,3 +165,42 @@ rules:
       unique: { key: [name] }
     level: error
     when: "true"
+
+  - id: release-packages-exist
+    kind: constraint
+    input: releases
+    assert:
+      reference:
+        fields: [package]
+        to: { relation: names, fields: [name] }
+    level: error
+
+  - id: at-least-one-release-per-package
+    kind: constraint
+    input: releases
+    assert:
+      count:
+        group_by: [package]
+        min: 1
+    level: warning
+
+  - id: release-version-at-least-min
+    kind: constraint
+    input: releases
+    assert:
+      compare:
+        field: version
+        op: ge
+        to: { field: min_version }
+        order: semver
+    level: error
+
+  - id: release-version-satisfies-range
+    kind: constraint
+    input: releases
+    assert:
+      satisfies:
+        version: version
+        range: range
+        dialect: node
+    level: error

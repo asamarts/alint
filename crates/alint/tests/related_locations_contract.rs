@@ -574,3 +574,82 @@ mod language_server {
         assert_eq!(sorted(findings), sorted(expected));
     }
 }
+
+#[test]
+fn v024_no_duplicate_keys_and_phase3_constraints_emit_expected_related_locations() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join("dup.yaml"), "alpha: 1\nalpha: 2\n").unwrap();
+    std::fs::write(
+        root.join("items.json"),
+        r#"{"items":[{"g":"a","lo":10,"hi":5},{"g":"a","lo":10,"hi":5}]}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join(".alint.yml"),
+        r#"version: 2
+relations:
+  items:
+    from: { paths: items.json }
+    records: { format: json, at: "$.items[*]" }
+    fields:
+      g: "record: $.g"
+      lo: "record: $.lo"
+      hi: "record: $.hi"
+rules:
+  - id: dup-yaml
+    kind: no_duplicate_keys
+    paths: dup.yaml
+    level: error
+  - id: count-max-one
+    kind: constraint
+    input: items
+    assert: { count: { group_by: [g], max: 1 } }
+    level: error
+  - id: cmp-lo-hi
+    kind: constraint
+    input: items
+    assert: { compare: { field: lo, op: lt, to: { field: hi }, order: numeric } }
+    level: error
+"#,
+    )
+    .unwrap();
+
+    let json_out = crate::hermetic::command(env!("CARGO_BIN_EXE_alint"))
+        .args(["check", "--format", "json"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert_eq!(json_out.status.code(), Some(1));
+    let parsed: Value = serde_json::from_slice(&json_out.stdout).unwrap();
+    let results = parsed["results"].as_array().unwrap();
+    for id in ["dup-yaml", "count-max-one", "cmp-lo-hi"] {
+        let rule = results.iter().find(|r| r["id"] == id).unwrap();
+        let rel = rule["violations"][0]["related_locations"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{id} missing related_locations: {rule}"));
+        assert!(
+            !rel.is_empty(),
+            "{id} expected non-empty related_locations: {rule}"
+        );
+    }
+
+    let sarif_out = crate::hermetic::command(env!("CARGO_BIN_EXE_alint"))
+        .args(["check", "--format", "sarif"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert_eq!(sarif_out.status.code(), Some(1));
+    let sarif: Value = serde_json::from_slice(&sarif_out.stdout).unwrap();
+    let sarif_results = sarif["runs"][0]["results"].as_array().unwrap();
+    for id in ["dup-yaml", "count-max-one", "cmp-lo-hi"] {
+        let entry = sarif_results.iter().find(|r| r["ruleId"] == id).unwrap();
+        let rel = entry["relatedLocations"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{id} missing SARIF relatedLocations: {entry}"));
+        assert!(
+            !rel.is_empty(),
+            "{id} expected SARIF relatedLocations: {entry}"
+        );
+    }
+}

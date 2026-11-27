@@ -1045,3 +1045,94 @@ fn configured_findings_per_rule_preserves_exact_boundary_and_triggers_one_past()
         r.analysis_failures[0].message
     );
 }
+
+#[test]
+fn zero_row_resource_group_still_fails_loud_on_cross_type_target_group_by() {
+    let config = r#"version: 2
+relations:
+  empty_locales:
+    from: { paths: "locales/*.json" }
+    entries: { format: json, at: "$" }
+    fields: { locale: stem, key: entry.key }
+  numeric_targets:
+    from: { paths: "targets.json" }
+    records: { format: json, at: "$.items[*]" }
+    fields: { group_id: "record: $.group_id", key: "record: $.key" }
+rules:
+  - id: cross-type-zero-row
+    kind: constraint
+    input: empty_locales
+    assert:
+      set:
+        field: key
+        group_by: locale
+        subset_of: { relation: numeric_targets, field: key, group_by: group_id }
+    level: error
+"#;
+    let files = [
+        ("locales/en.json", "{}\n"),
+        (
+            "targets.json",
+            r#"{"items":[{"group_id":1,"key":"hello"}]}"#,
+        ),
+    ];
+    let (results, _) = super::constraint_families::run_under(config, &files, None, false);
+    let r = result(&results, "cross-type-zero-row");
+    assert_eq!(r.violations.len(), 0, "{:?}", r.violations);
+    assert_eq!(r.analysis_failures.len(), 1, "{:?}", r.analysis_failures);
+    assert!(
+        r.analysis_failures[0].message.contains("cross types"),
+        "{}",
+        r.analysis_failures[0].message
+    );
+}
+
+#[test]
+fn dsl_parse_validates_limits_and_rejects_null_and_empty_extended_limits() {
+    // Direct `alint_dsl::parse()` enforces `limits:` bounds.
+    let err = crate::parse("version: 1\nlimits:\n  findings_per_rule: 0\nrules: []\n")
+        .expect_err("zero findings_per_rule must fail in alint_dsl::parse");
+    assert!(err.to_string().contains("findings_per_rule"), "{err}");
+
+    // Explicit `null` on limit fields is rejected (matching JSON Schema).
+    let err_null = crate::parse("version: 1\nlimits:\n  findings_per_rule: null\nrules: []\n")
+        .expect_err("explicit null findings_per_rule must fail");
+    assert!(err_null.to_string().contains("invalid type"), "{err_null}");
+
+    // Empty `limits: {}` is refused in `extends:` and nested configs.
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("base.yml"),
+        "version: 1\nlimits: {}\nrules: []\n",
+    )
+    .unwrap();
+    std::fs::write(
+        tmp.path().join(".alint.yml"),
+        "version: 1\nextends: ['./base.yml']\nrules: []\n",
+    )
+    .unwrap();
+    let err_ext = crate::load_with(
+        &tmp.path().join(".alint.yml"),
+        &crate::LoadOptions::default(),
+    )
+    .expect_err("limits: {} in extends must be refused");
+    assert!(err_ext.to_string().contains("`limits:`"), "{err_ext}");
+
+    std::fs::write(
+        tmp.path().join(".alint.yml"),
+        "version: 1\nnested_configs: true\nrules: []\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(tmp.path().join("pkg")).unwrap();
+    std::fs::write(
+        tmp.path().join("pkg/.alint.yml"),
+        "version: 1\nlimits: {}\nrules: []\n",
+    )
+    .unwrap();
+    let err_nested = crate::load_with(
+        &tmp.path().join(".alint.yml"),
+        &crate::LoadOptions::default(),
+    )
+    .expect_err("limits: {} in nested config must be refused");
+    assert!(err_nested.to_string().contains("`limits:`"), "{err_nested}");
+}

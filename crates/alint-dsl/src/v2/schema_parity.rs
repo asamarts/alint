@@ -256,7 +256,12 @@ fn every_object_has_the_keys_the_decode_reads() {
     assert_eq!(split["additionalProperties"], false);
     for rows in ROW_SOURCES {
         let field = def(&format!("v2_field_{rows}"))["oneOf"][1].clone();
-        assert_eq!(keys(&field), set(FIELD_KEYS), "`$defs/v2_field_{rows}`");
+        let expected: BTreeSet<&str> = if *rows == "join" {
+            set(&["source", "sensitive"])
+        } else {
+            set(FIELD_KEYS)
+        };
+        assert_eq!(keys(&field), expected, "`$defs/v2_field_{rows}`");
     }
     // One branch of a relation per row source.
     let branches: BTreeSet<&str> = def("v2_relation")["oneOf"]

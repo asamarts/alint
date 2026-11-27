@@ -202,7 +202,7 @@ In the repo: [CHANGELOG.md](CHANGELOG.md) for the per-version history, [docs/ben
 ```bash
 git clone https://github.com/asamarts/alint
 cd alint
-cargo test --workspace     # Rust tests plus 687 declarative end-to-end policy tests
+cargo test --workspace     # Rust tests plus 717 declarative end-to-end policy tests
 cargo run -- check         # dogfood: alint lints its own repo
 cargo bench -p alint-bench # criterion micro-benches
 ```

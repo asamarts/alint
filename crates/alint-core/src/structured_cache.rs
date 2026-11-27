@@ -178,12 +178,20 @@ impl std::fmt::Debug for StructuredCache {
 struct InFlightGuard<'a> {
     cache: &'a StructuredCache,
     key: Option<CacheKey>,
+    slot: Arc<OnceLock<ParseOutcome>>,
 }
 
 impl Drop for InFlightGuard<'_> {
     fn drop(&mut self) {
         if let Some(key) = self.key.take() {
-            self.cache.state.lock().in_flight.remove(&key);
+            let mut state = self.cache.state.lock();
+            if state
+                .in_flight
+                .get(&key)
+                .is_some_and(|cur| Arc::ptr_eq(cur, &self.slot))
+            {
+                state.in_flight.remove(&key);
+            }
         }
     }
 }
@@ -269,6 +277,12 @@ impl StructuredCache {
             return format.parse_shared_with_strict_json(text, strict_json);
         }
         let key = CacheKey::new(path, format, strict_json, text);
+        // If this thread already holds an in-flight YAML reservation or a live
+        // alias-expanded `RetainedLease`, waiting on another thread's
+        // `in_flight` `OnceLock` can deadlock when that owner is itself blocked
+        // on `yaml_budget` waiting for this thread's lease to drop.
+        let bypass_in_flight =
+            format == Format::Yaml && crate::yaml_budget::current_thread_holds_budget();
         let (slot, is_owner) = {
             let mut state = self.state.lock();
             if let Some(outcome) = state.touch(&key) {
@@ -281,6 +295,13 @@ impl StructuredCache {
                     return Ok(SharedValue::from_inner(inner));
                 }
                 state.weak_leased.remove(&key);
+            }
+            if bypass_in_flight {
+                drop(state);
+                self.parses.fetch_add(1, Ordering::Relaxed);
+                let outcome = format.parse_shared_with_strict_json(text, strict_json);
+                self.publish_outcome(key, None, &outcome);
+                return outcome;
             }
             if let Some(existing) = state.in_flight.get(&key) {
                 (Arc::clone(existing), false)
@@ -303,7 +324,7 @@ impl StructuredCache {
             if parsed_here {
                 // Non-owner won the `OnceLock` race (or took over after an
                 // owner panic); publish so subsequent lookups reuse the tree.
-                self.publish_outcome(key, &outcome);
+                self.publish_outcome(key, Some(&slot), &outcome);
             } else {
                 self.hits.fetch_add(1, Ordering::Relaxed);
             }
@@ -313,6 +334,7 @@ impl StructuredCache {
         let mut guard = InFlightGuard {
             cache: self,
             key: Some(key.clone()),
+            slot: Arc::clone(&slot),
         };
 
         let mut parsed_here = false;
@@ -327,13 +349,18 @@ impl StructuredCache {
         if parsed_here {
             // Publish into LRU or weak-leased table and clear in-flight slot
             // under one lock so waiting readers transition smoothly.
-            self.publish_outcome(key, &outcome);
+            self.publish_outcome(key, Some(&slot), &outcome);
             guard.key = None;
         }
         outcome
     }
 
-    fn publish_outcome(&self, key: CacheKey, outcome: &ParseOutcome) {
+    fn publish_outcome(
+        &self,
+        key: CacheKey,
+        slot: Option<&Arc<OnceLock<ParseOutcome>>>,
+        outcome: &ParseOutcome,
+    ) {
         // Estimate tree size BEFORE acquiring the global cache mutex so walking
         // a large JSON tree never stalls other rayon workers.
         let non_leased_bytes = match outcome {
@@ -343,7 +370,14 @@ impl StructuredCache {
         };
 
         let mut state = self.state.lock();
-        state.in_flight.remove(&key);
+        if let Some(expected_slot) = slot
+            && state
+                .in_flight
+                .get(&key)
+                .is_some_and(|cur| Arc::ptr_eq(cur, expected_slot))
+        {
+            state.in_flight.remove(&key);
+        }
         match (outcome, non_leased_bytes) {
             (Ok(shared), None) => {
                 // Never strongly pin an alias-leased tree in the idle LRU:
@@ -766,5 +800,35 @@ mod tests {
                 .is_err(),
             "file cache strict must not reuse tolerant entry"
         );
+    }
+
+    #[test]
+    fn yaml_retained_lease_never_deadlocks_against_in_flight_singleflight() {
+        // Regression for audit deadlock: a worker already holding a YAML
+        // `RetainedLease` calling `get_or_parse` on another YAML file must
+        // bypass `state.in_flight` wait instead of blocking on another worker
+        // that is waiting on `yaml_budget::reserve`.
+        let cache = Arc::new(StructuredCache::new(64 * 1024));
+        let path_a = Path::new("a.yaml");
+        let path_b = Path::new("b.yaml");
+        let doc_a = "base: &a [1, 2, 3, 4]\nx: [*a, *a, *a, *a, *a, *a]\n";
+        let doc_b = "base: &b [5, 6, 7, 8]\ny: [*b, *b, *b, *b, *b, *b]\n";
+
+        let lease_a = cache
+            .get_or_parse(path_a, Format::Yaml, doc_a)
+            .expect("first alias YAML parses");
+        let cache2 = Arc::clone(&cache);
+        let handle = std::thread::spawn(move || {
+            let v = cache2
+                .get_or_parse(path_b, Format::Yaml, doc_b)
+                .expect("second alias YAML parses without deadlock");
+            assert!(v["y"].is_array());
+        });
+        let v_main = cache
+            .get_or_parse(path_b, Format::Yaml, doc_b)
+            .expect("main thread holding lease parses without deadlock");
+        assert!(v_main["y"].is_array());
+        drop(lease_a);
+        handle.join().expect("worker thread completes");
     }
 }

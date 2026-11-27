@@ -1,0 +1,51 @@
+test_version: 1
+name: key_parity with strip_root rejects null, array, and scalar roots loudly while accepting empty object
+tags: [check, key_parity, cross_file, failing]
+
+given:
+  tree:
+    locales/en.yaml: |
+      en:
+        greeting: Hello
+    locales/empty.yaml: |
+      empty: {}
+    locales/null_root.yaml: |
+      null_root:
+    locales/array_root.yaml: |
+      array_root: []
+    locales/scalar_doc.yaml: |
+      "just a string"
+  config: |
+    version: 1
+    rules:
+      - id: locale-parity
+        kind: key_parity
+        reference: locales/en.yaml
+        peers: "locales/*.yaml"
+        strip_root: true
+        level: error
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - rule: locale-parity
+        level: error
+        path: locales/empty.yaml
+        message:
+          regex: "greeting"
+    analysis_failures:
+      - rule: locale-parity
+        kind: evaluation
+        path: locales/array_root.yaml
+        message:
+          regex: "array"
+      - rule: locale-parity
+        kind: evaluation
+        path: locales/null_root.yaml
+        message:
+          regex: "null"
+      - rule: locale-parity
+        kind: evaluation
+        path: locales/scalar_doc.yaml

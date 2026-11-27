@@ -1,0 +1,30 @@
+test_version: 1
+name: message value placeholder is refused at load time on non-set non-reference constraints
+tags: [check, constraint, version_two, config_error]
+
+given:
+  tree:
+    data.json: '{"a": "x"}'
+  config: |
+    version: 2
+    relations:
+      r:
+        from: { paths: data.json }
+        entries: { format: json, at: "$" }
+        fields: { k: entry.key, v: entry.value }
+    rules:
+      - id: bad-value-placeholder
+        kind: constraint
+        input: r
+        assert:
+          unique: { key: [v] }
+        message: "duplicate {{value}}"
+        level: error
+
+when: [check]
+
+expect:
+  - exit: configuration_error
+    configuration_error:
+      message:
+        regex: "\\{\\{value\\}\\}"

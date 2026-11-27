@@ -659,8 +659,10 @@ rules:
 ```
 
 A group is the rows that share a `group_by:` value, so `groups:` (with `equal_to:` only) names
-the locales that must exist: one whose files hold no keys lacks every English key, in findings
-with no path. A file that holds only its root (`fr:`, `fr: {}` or `fr: []`) holds no keys.
+the locales that must exist: a required group whose files hold no keys lacks every English key, in
+findings with no path. When grouped by `entry.root` under `strip-root`, a file that holds only its
+root (`fr:`, `fr: {}` or `fr: []`) still forms a zero-row group anchored at that stub file, so its
+missing keys report at the stub file itself.
 `plurals: cldr` compares `inbox: { one, other }` with a locale's `inbox: { one, few, many,
 other }` as one key, `inbox`, and `items_one`, `items_other` as `items`. Grouped by a path
 token instead (`fields: { locale: stem, ... }`), every file is a group, and an empty one lacks

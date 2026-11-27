@@ -93,7 +93,7 @@ impl<'r> Run<'r> {
                     key.value(val, hide);
                 }
                 let at = if self.cell(row, missing_pos).span.is_some() {
-                    self.spot(row, missing_pos)
+                    self.spot_point(row, missing_pos, hide_cols[missing_idx])
                 } else {
                     self.row_spot(row)
                 };
@@ -126,9 +126,12 @@ impl<'r> Run<'r> {
                 }
                 let at = src_at
                     .iter()
-                    .copied()
-                    .find(|&pos| self.cell(row, pos).span.is_some())
-                    .map_or_else(|| self.row_spot(row), |pos| self.spot(row, pos));
+                    .enumerate()
+                    .find(|(_, pos)| self.cell(row, **pos).span.is_some())
+                    .map_or_else(
+                        || self.row_spot(row),
+                        |(idx, &pos)| self.spot_point(row, pos, hide_cols[idx]),
+                    );
                 let placeholder =
                     format_reference_placeholder(&tuple, &hide_cols, self.rule.hide_literals);
                 self.report_with_value(

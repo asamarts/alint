@@ -1,0 +1,8 @@
+version: 1
+# Two distinct duplicate keys in the same YAML file must carry distinct
+# baseline keys/fingerprints so baselining one duplicate never masks a second.
+rules:
+  - id: no-dup-keys
+    kind: no_duplicate_keys
+    paths: "**/*.yaml"
+    level: error

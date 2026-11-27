@@ -1,0 +1,53 @@
+test_version: 1
+name: conformance satisfies passes across node, cargo, and pep440-basic dialects
+tags: [check, constraint, cross_file, version_two, conformance, passing]
+
+given:
+  tree:
+    pins.json: |
+      {
+        "node_ver": "20.11.0",
+        "node_range": ">=18.0.0 <22.0.0",
+        "rust_ver": "1.88.0",
+        "rust_range": "^1.85",
+        "py_ver": "3.12.4",
+        "py_range": ">=3.10,<3.14"
+      }
+  config: |
+    version: 2
+    relations:
+      pins:
+        from: { paths: pins.json }
+        records: { format: json, at: "$" }
+        fields:
+          node_ver: "record: $.node_ver"
+          node_range: "record: $.node_range"
+          rust_ver: "record: $.rust_ver"
+          rust_range: "record: $.rust_range"
+          py_ver: "record: $.py_ver"
+          py_range: "record: $.py_range"
+    rules:
+      - id: node-satisfies
+        kind: constraint
+        input: pins
+        assert:
+          satisfies: { version: node_ver, range: node_range, dialect: node }
+        level: error
+      - id: cargo-satisfies
+        kind: constraint
+        input: pins
+        assert:
+          satisfies: { version: rust_ver, range: rust_range, dialect: cargo }
+        level: error
+      - id: pep440-satisfies
+        kind: constraint
+        input: pins
+        assert:
+          satisfies: { version: py_ver, range: py_range, dialect: pep440-basic }
+        level: error
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

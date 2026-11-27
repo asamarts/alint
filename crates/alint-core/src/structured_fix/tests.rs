@@ -2172,3 +2172,40 @@ fn hcl_span_resolution_declines_shadowed_nodes_and_unwraps_parenthesized_objects
         .expect("parenthesized object resolves");
     assert_eq!(&parens[span], "\"core\"");
 }
+
+#[test]
+fn ini_and_xml_multi_bom_and_lone_cr_ini_fixes_preserve_document() {
+    // Audit HIGH regression: lone-CR (`\r`) INI files previously dropped `\r`
+    // boundaries and truncated subsequent sections (`[server]`) during set/remove.
+    let cr_ini = "[app]\rhost = old\r[server]\rport = 80\r";
+    let span = resolve_value_span(Format::Ini, cr_ini.as_bytes(), &[key("app"), key("host")])
+        .expect("lone-CR INI value span resolves");
+    assert_eq!(&cr_ini[span.clone()], "old");
+    let mut updated = cr_ini.to_string();
+    updated.replace_range(span, "new");
+    assert_eq!(updated, "[app]\rhost = new\r[server]\rport = 80\r");
+
+    let rm_span = resolve_removal_span(Format::Ini, cr_ini.as_bytes(), &[key("app"), key("host")])
+        .expect("lone-CR INI removal span resolves");
+    let mut removed = cr_ini.to_string();
+    removed.replace_range(rm_span, "");
+    assert_eq!(removed, "[app]\r[server]\rport = 80\r");
+
+    // Stacked multi-BOM INI and XML files resolve value and removal spans at
+    // exact byte offsets past all leading BOMs.
+    let bom_ini = "\u{feff}\u{feff}[app]\nhost = old\n";
+    let ini_span =
+        resolve_value_span(Format::Ini, bom_ini.as_bytes(), &[key("app"), key("host")]).unwrap();
+    assert_eq!(&bom_ini[ini_span], "old");
+
+    let bom_xml = "\u{feff}\u{feff}<cfg><host>old</host></cfg>\n";
+    let xml_span =
+        resolve_value_span(Format::Xml, bom_xml.as_bytes(), &[key("cfg"), key("host")]).unwrap();
+    assert_eq!(&bom_xml[xml_span], "old");
+
+    // Tolerant JSON fix helpers reject over-deep JSON (exceeding serde_json's
+    // 128-level depth guard) instead of panicking or walking unbounded nesting.
+    let deep = format!("{}{}", "[".repeat(200), "]".repeat(200));
+    assert!(resolve_value_span(Format::Json, deep.as_bytes(), &[key("a")]).is_none());
+    assert!(document_remove(Format::Json, deep.as_bytes(), &[vec![key("a")]]).is_none());
+}

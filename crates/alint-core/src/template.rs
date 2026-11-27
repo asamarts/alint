@@ -467,14 +467,28 @@ pub fn literal_glob_path(pattern: &str) -> Option<String> {
     if pattern.starts_with('!') {
         return None;
     }
-    if !pattern
+    // `render_path_glob` escapes a leading literal `!` as `{!}` so globset does
+    // not treat it as an exclusion pattern; recognize `{!}` as a literal `!`
+    // prefix here so O(1) lookup fast paths and gitignored-peer reads stay intact.
+    let (leading_bang, rest) = match pattern.strip_prefix("{!}") {
+        Some(rest) => (true, rest),
+        None => (false, pattern),
+    };
+    if !rest
         .bytes()
         .any(|b| matches!(b, b'\\' | b'[' | b'*' | b'?' | b']' | b'{' | b'}'))
     {
-        return Some(pattern.to_owned());
+        return if leading_bang {
+            Some(format!("!{rest}"))
+        } else {
+            Some(rest.to_owned())
+        };
     }
     let mut out = String::with_capacity(pattern.len());
-    let mut chars = pattern.chars().peekable();
+    if leading_bang {
+        out.push('!');
+    }
+    let mut chars = rest.chars().peekable();
     while let Some(c) = chars.next() {
         match c {
             '\\' if !cfg!(windows) => out.push(chars.next()?),
@@ -913,12 +927,14 @@ pub fn render_path_jsonpath(template: &str, t: &PathTokens) -> String {
 }
 
 /// Escape `value` for a `key_parity.ignore_keys` bracketed `['...']` segment
-/// (where `\` escapes `'` and `\`).
+/// (where `\` escapes `'`, `\`, and `*`). Escaping `*` keeps path names like
+/// `*` or `**` literal instead of injecting a glob wildcard into the pattern.
 fn push_key_pattern_bracket_escaped(value: &str, out: &mut String) {
     for ch in value.chars() {
         match ch {
             '\\' => out.push_str("\\\\"),
             '\'' => out.push_str("\\'"),
+            '*' => out.push_str("\\*"),
             c => out.push(c),
         }
     }
@@ -926,12 +942,15 @@ fn push_key_pattern_bracket_escaped(value: &str, out: &mut String) {
 
 /// [`render_path`] for a `key_parity` `ignore_keys` key-path pattern.
 ///
-/// - Inside `['...']` segments, substituted values escape `\` and `'` so a
-///   path containing quotes or backslashes cannot close or break the segment.
+/// - Inside `['...']` segments, substituted values escape `\`, `'`, and `*` so
+///   a path containing quotes, backslashes, or asterisks cannot close the
+///   segment or inject wildcards.
 /// - Bare segments containing a token are bracket-quoted (`['...']`) whenever
-///   the rendered value is empty, equals `**`, or contains `.`, `[`, `]`, `'`,
-///   or `\`, so path punctuation stays inside one segment instead of splitting
-///   into extra segments or raising a syntax error.
+///   any substituted value contains `.`, `[`, `]`, `'`, `\`, or `*`, or the
+///   rendered segment is empty or equals `**`, so path punctuation stays inside
+///   one segment while literal template wildcards (such as `{basename}_*`)
+///   remain wildcards.
+#[allow(clippy::too_many_lines)]
 pub fn render_path_key_pattern(template: &str, t: &PathTokens) -> String {
     let mut out = String::with_capacity(template.len());
     let mut rest = template;
@@ -1009,8 +1028,30 @@ pub fn render_path_key_pattern(template: &str, t: &PathTokens) -> String {
             out.push_str(seg);
             continue;
         }
-        let rendered = render_path(seg, t);
-        let needs_bracket = rendered.is_empty()
+        let mut token_needs_bracket = false;
+        let mut rendered = String::new();
+        let mut s = seg;
+        while !s.is_empty() {
+            if let Some((tok, val)) = match_path_token(s, t) {
+                s = &s[tok.len()..];
+                if val.is_empty() && (rendered.is_empty() || rendered.ends_with('/')) {
+                    if let Some(after_slash) = s.strip_prefix('/') {
+                        s = after_slash;
+                    }
+                } else {
+                    if val.contains(['.', '[', ']', '\'', '\\', '*']) {
+                        token_needs_bracket = true;
+                    }
+                    rendered.push_str(val);
+                }
+            } else {
+                let ch = s.chars().next().unwrap();
+                rendered.push(ch);
+                s = &s[ch.len_utf8()..];
+            }
+        }
+        let needs_bracket = token_needs_bracket
+            || rendered.is_empty()
             || rendered == "**"
             || rendered.contains(['.', '[', ']', '\'', '\\']);
         if needs_bracket {
@@ -1018,7 +1059,30 @@ pub fn render_path_key_pattern(template: &str, t: &PathTokens) -> String {
                 out.pop();
             }
             out.push_str("['");
-            push_key_pattern_bracket_escaped(&rendered, &mut out);
+            let mut s = seg;
+            let mut at_start = true;
+            while !s.is_empty() {
+                if let Some((tok, val)) = match_path_token(s, t) {
+                    s = &s[tok.len()..];
+                    if val.is_empty() && (at_start || out.ends_with('/')) {
+                        if let Some(after_slash) = s.strip_prefix('/') {
+                            s = after_slash;
+                        }
+                    } else {
+                        push_key_pattern_bracket_escaped(val, &mut out);
+                        at_start = false;
+                    }
+                } else {
+                    let ch = s.chars().next().unwrap();
+                    match ch {
+                        '\\' => out.push_str("\\\\"),
+                        '\'' => out.push_str("\\'"),
+                        c => out.push(c),
+                    }
+                    s = &s[ch.len_utf8()..];
+                    at_start = false;
+                }
+            }
             out.push_str("']");
         } else {
             out.push_str(&rendered);
@@ -2183,7 +2247,13 @@ mod tests {
             return None;
         }
         let mut out = String::with_capacity(pattern.len());
-        let mut chars = pattern.chars().peekable();
+        let rest = if let Some(after) = pattern.strip_prefix("{!}") {
+            out.push('!');
+            after
+        } else {
+            pattern
+        };
+        let mut chars = rest.chars().peekable();
         while let Some(c) = chars.next() {
             match c {
                 '\\' if !cfg!(windows) => out.push(chars.next()?),
@@ -2905,7 +2975,21 @@ mod tests {
         let star_star = PathTokens::from_path(Path::new("locales/**"));
         assert_eq!(
             render_path_key_pattern("nav.{basename}", &star_star),
-            "nav['**']"
+            r"nav['\*\*']"
+        );
+        let single_star = PathTokens::from_path(Path::new("locales/*"));
+        assert_eq!(
+            render_path_key_pattern("nav.{basename}", &single_star),
+            r"nav['\*']"
+        );
+        // Author-written wildcards beside a token remain wildcards.
+        assert_eq!(
+            render_path_key_pattern("nav.{basename}_*", &dotted),
+            "nav['a.b_*']"
+        );
+        assert_eq!(
+            render_path_key_pattern("nav.{basename}_*", &single_star),
+            r"nav['\*_*']"
         );
 
         // Wired through `render_nested_options` for `key_parity.ignore_keys`.
@@ -3075,5 +3159,16 @@ mod tests {
         let tokens = PathTokens::from_path(Path::new("packages/x{stem}/en.json"));
         assert_eq!(tokens.path, "packages/x{stem}/en.json");
         assert_eq!(tokens.dir, "packages/x{stem}");
+    }
+
+    #[test]
+    fn literal_glob_path_unescapes_leading_bang_and_brackets() {
+        let bang = PathTokens::from_path(Path::new("!important/[1].json"));
+        let glob = render_path_glob("{path}", &bang);
+        assert_eq!(glob, "{!}important/[[]1[]].json");
+        assert_eq!(
+            literal_glob_path(&glob).as_deref(),
+            Some("!important/[1].json")
+        );
     }
 }

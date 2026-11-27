@@ -108,7 +108,7 @@
         },
         "agent_instruction": {
           "type": "string",
-          "description": "Templated remediation phrasing optimised for an LLM to act on. Composed from severity, message, location, fix availability, and policy URL."
+          "description": "Templated remediation phrasing optimised for an LLM to act on. Composed from severity, sanitized message, sanitized location, fix availability, and sanitized policy URL (stripped of terminal controls, bidi overrides/isolates, zero-width characters, and astral tag characters)."
         },
         "fix_available": {
           "type": "boolean",
@@ -147,7 +147,10 @@
         },
         "line": { "type": "integer", "minimum": 1 },
         "column": { "type": "integer", "minimum": 1 },
-        "human_message": { "type": "string" }
+        "human_message": {
+          "type": "string",
+          "description": "The analysis failure message sanitized of terminal controls, bidi overrides/isolates, zero-width characters, and astral tag characters, suitable for human review and LLM consumption."
+        }
       }
     },
     "proposed_edit": {

@@ -382,6 +382,24 @@ pub(crate) fn reaches_git_directory_walked(
 /// component of it is a symlink, asked from the root down with one `lstat`
 /// each until one does not exist (nothing below it does either). A path with
 /// a component other than a name (`..`, an absolute one) gets no answer.
+/// Whether `metadata` describes a symlink or (on Windows) an NTFS reparse
+/// point such as a directory junction (`FILE_ATTRIBUTE_REPARSE_POINT`).
+///
+/// Treating Windows directory junctions identically to symlinks ensures they
+/// cannot bypass root confinement, `.git` denial, or symlink-loop checks.
+#[cfg(windows)]
+pub(crate) fn metadata_is_symlink_or_reparse(metadata: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt as _;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
+    metadata.file_type().is_symlink()
+        || (metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+}
+
+#[cfg(not(windows))]
+pub(crate) fn metadata_is_symlink_or_reparse(metadata: &std::fs::Metadata) -> bool {
+    metadata.file_type().is_symlink()
+}
+
 pub(crate) fn follows_no_symlink(
     root: &Path,
     path: &Path,
@@ -401,7 +419,7 @@ pub(crate) fn follows_no_symlink(
     for component in path.components() {
         at.push(component);
         match std::fs::symlink_metadata(&at) {
-            Ok(metadata) if !metadata.file_type().is_symlink() => {}
+            Ok(metadata) if !metadata_is_symlink_or_reparse(&metadata) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return true,
             _ => return false,
         }

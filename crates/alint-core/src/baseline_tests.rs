@@ -1437,3 +1437,52 @@ fn preferred_paths_preserve_same_file_multiplicity_and_respect_count_cap() {
     assert_eq!(out_excess.suppressed_total, 2);
     assert_eq!(out_excess.live.results[0].violations.len(), 2);
 }
+
+#[test]
+fn pre_022_hidden_path_hint_does_not_false_fire_on_unrelated_fixed_rule() {
+    // Baseline from v0.21 has an unmatched hidden-path entry for `fixed_rule`,
+    // while live violations are ONLY for `other_rule` (also hidden-path): the
+    // hint must NOT fire because `fixed_rule` has no live hidden-path findings.
+    let base = Baseline {
+        alint_version: Some("0.21.0".into()),
+        entries: vec![BaselineEntry {
+            rule_id: "fixed_rule".into(),
+            path: Some("<redacted>".into()),
+            fingerprint: "old-fp".into(),
+            count: 1,
+            message: None,
+            paths: Vec::new(),
+        }],
+    };
+    let live_other = Report {
+        results: vec![RuleResult::new(
+            std::sync::Arc::from("other_rule"),
+            Level::Error,
+            None,
+            vec![hidden("secret.env")],
+            false,
+        )],
+    };
+    let out = apply(&live_other, &base, |r, v| fingerprint(r, v, None));
+    assert!(
+        !base.has_unmatched_pre_022_hidden_path_entries(&out),
+        "hint must not fire when unmatched pre-0.22 entry belongs to a different fixed rule"
+    );
+
+    // When `fixed_rule` DOES have a live hidden-path violation whose fingerprint
+    // changed, the hint fires as expected.
+    let live_same = Report {
+        results: vec![RuleResult::new(
+            std::sync::Arc::from("fixed_rule"),
+            Level::Error,
+            None,
+            vec![hidden("secret.env")],
+            false,
+        )],
+    };
+    let out_same = apply(&live_same, &base, |r, v| fingerprint(r, v, None));
+    assert!(
+        base.has_unmatched_pre_022_hidden_path_entries(&out_same),
+        "hint must fire when the same rule has both an unmatched pre-0.22 entry and a live hidden violation"
+    );
+}

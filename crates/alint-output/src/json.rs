@@ -15,7 +15,7 @@ use crate::BaselineMarks;
 /// through `to_string_lossy` (invalid bytes → U+FFFD) instead, matching
 /// every other renderer (SARIF, GitLab, `JUnit`, GitHub, human).
 fn lossy_path(path: Option<&Path>) -> Option<Cow<'_, str>> {
-    path.map(Path::to_string_lossy)
+    path.map(crate::slash_path_cow)
 }
 
 /// A finding's related locations, as SARIF's `relatedLocations` and the
@@ -69,7 +69,7 @@ fn related(v: &Violation) -> JsonRelated<'_> {
 fn related_location(location: &RelatedLocation) -> JsonRelatedLocation<'_> {
     let range = location.range.as_ref();
     JsonRelatedLocation {
-        path: location.path.to_string_lossy(),
+        path: crate::slash_path_cow(&location.path),
         label: &location.label,
         line: range.map(alint_core::SourceRange::start_line),
         column: range.map(alint_core::SourceRange::start_column),

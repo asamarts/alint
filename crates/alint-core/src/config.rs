@@ -196,19 +196,32 @@ pub struct Config {
 /// ([`crate::relation::LimitKind::hard_cap`]); zero or values above the hard
 /// cap are rejected at config load. Top-level-only (refused from `extends:`
 /// and nested configs).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct ConfigLimits {
     /// Maximum findings a relation-backed or duplicate-key rule (`constraint`,
     /// `key_parity`, `no_duplicate_keys`) emits before stopping and adding one
     /// non-baselinable analysis failure (default: 10,000; hard cap: 1,000,000).
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_present")]
     pub findings_per_rule: Option<usize>,
     /// Maximum bytes of materialized key-path pointers built for a single
     /// decode (default: 32 MiB; hard cap: 16 GiB).
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_present")]
     pub key_path_bytes_per_decode: Option<usize>,
+    #[serde(skip)]
+    declared: bool,
+    #[serde(skip)]
+    findings_per_rule_from_env: bool,
+    #[serde(skip)]
+    key_path_bytes_per_decode_from_env: bool,
+}
+
+impl PartialEq for ConfigLimits {
+    fn eq(&self, other: &Self) -> bool {
+        self.findings_per_rule == other.findings_per_rule
+            && self.key_path_bytes_per_decode == other.key_path_bytes_per_decode
+    }
 }
 
 impl ConfigLimits {
@@ -218,6 +231,9 @@ impl ConfigLimits {
         Self {
             findings_per_rule: None,
             key_path_bytes_per_decode: None,
+            declared: false,
+            findings_per_rule_from_env: false,
+            key_path_bytes_per_decode_from_env: false,
         }
     }
 
@@ -241,14 +257,45 @@ impl ConfigLimits {
         self.findings_per_rule.is_none() && self.key_path_bytes_per_decode.is_none()
     }
 
+    /// True when a `limits:` block was explicitly written (including `limits: {}`)
+    /// or any limit field is set.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn is_declared(&self) -> bool {
+        self.declared || !self.is_empty()
+    }
+
+    /// Record that a `limits:` mapping was explicitly present in the source YAML.
+    #[doc(hidden)]
+    pub const fn mark_declared(&mut self) {
+        self.declared = true;
+    }
+
+    /// Record that `limits.findings_per_rule` was interpolated from `{{env.*}}`.
+    #[doc(hidden)]
+    pub const fn mark_findings_per_rule_from_env(&mut self) {
+        self.findings_per_rule_from_env = true;
+    }
+
+    /// Record that `limits.key_path_bytes_per_decode` was interpolated from `{{env.*}}`.
+    #[doc(hidden)]
+    pub const fn mark_key_path_bytes_per_decode_from_env(&mut self) {
+        self.key_path_bytes_per_decode_from_env = true;
+    }
+
     /// Merge field-by-field from a later top-level source (e.g. `.alint.d/`
     /// drop-in): any `Some` in `later` overrides the earlier value.
     pub fn merge_from(&mut self, later: &Self) {
+        if later.declared {
+            self.declared = true;
+        }
         if later.findings_per_rule.is_some() {
             self.findings_per_rule = later.findings_per_rule;
+            self.findings_per_rule_from_env = later.findings_per_rule_from_env;
         }
         if later.key_path_bytes_per_decode.is_some() {
             self.key_path_bytes_per_decode = later.key_path_bytes_per_decode;
+            self.key_path_bytes_per_decode_from_env = later.key_path_bytes_per_decode_from_env;
         }
     }
 
@@ -259,10 +306,18 @@ impl ConfigLimits {
     ) -> std::result::Result<crate::relation::Limits, crate::relation::LimitConfigError> {
         let mut limits = crate::relation::Limits::default();
         if let Some(value) = self.findings_per_rule {
-            limits = limits.with(crate::relation::LimitKind::FindingsPerRule, value)?;
+            limits = limits.with_redacted(
+                crate::relation::LimitKind::FindingsPerRule,
+                value,
+                self.findings_per_rule_from_env,
+            )?;
         }
         if let Some(value) = self.key_path_bytes_per_decode {
-            limits = limits.with(crate::relation::LimitKind::KeyPathBytesPerDecode, value)?;
+            limits = limits.with_redacted(
+                crate::relation::LimitKind::KeyPathBytesPerDecode,
+                value,
+                self.key_path_bytes_per_decode_from_env,
+            )?;
         }
         Ok(limits)
     }

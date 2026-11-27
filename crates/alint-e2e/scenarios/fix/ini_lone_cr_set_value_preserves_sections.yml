@@ -1,0 +1,38 @@
+test_version: 1
+name: set_value on lone-CR INI rewrites target key while preserving following sections
+tags: [fix, ini_path_equals, set_value, ini]
+
+given:
+  tree:
+    app.ini: "[app]\rhost = old\r[server]\rport = 8080\r"
+  config: |
+    version: 1
+    rules:
+      - id: pin-host
+        kind: ini_path_equals
+        paths: "app.ini"
+        path: "$.app.host"
+        equals: "prod.internal"
+        level: error
+        fix:
+          set_value: {}
+      - id: keep-server-port
+        kind: ini_path_equals
+        paths: "app.ini"
+        path: "$.server.port"
+        equals: "8080"
+        level: error
+
+when: [check, fix, check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: pin-host, level: error, path: app.ini}
+  - exit: success
+    applied: [pin-host]
+  - exit: success
+    violations: []
+
+expect_tree:
+  app.ini: "[app]\rhost = prod.internal\r[server]\rport = 8080\r"

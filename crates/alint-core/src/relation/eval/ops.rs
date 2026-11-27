@@ -199,9 +199,11 @@ impl Evaluator<'_> {
         let relation = &named.relation;
         // Under `strip-root`, a top-level key whose value is null, `{}` or
         // `[]` (a stub locale file, `fr:`) holds no keys: its row goes before
-        // `strip-root` runs, while surviving single-root stubs keep their
-        // `entry.root` / path-token values for `set` `group_by: entry.root` (#598).
-        let mut stubs = take_stub_roots(&mut rows, relation);
+        // `strip-root` runs, while surviving single-root stubs (including any
+        // already propagated through a `join:`) keep their `entry.root` /
+        // path-token / unique-side values for `set` `group_by: entry.root` (#598).
+        let mut stubs = std::mem::take(&mut rows.stub_rows);
+        stubs.extend(take_stub_roots(&mut rows, relation));
         let retain_stubs = !stubs.is_empty()
             && relation.fields.iter().any(|(field, _)| {
                 field_all_origins_match(self.plan, id, field, |src| *src == FieldSource::EntryRoot)
@@ -244,24 +246,16 @@ impl Evaluator<'_> {
             rows.stub_rows = stubs;
             return Some(rows);
         }
-        // Filter surviving stub rows through `where:` clauses touching only
-        // `entry.root`, path-token, or `bound:` fields so excluded stub locales
-        // never form spurious groups (#598), while still failing loud on type
+        // Filter surviving stub rows through `where:` clauses touching fields
+        // defined on stubs (`entry.root`, path tokens, `bound:`, or fields
+        // copied from a join's unique side) so excluded stub locales never
+        // form spurious groups (#598), while still failing loud on type
         // mismatches.
         let mut reported = HashSet::new();
         if !stubs.is_empty() {
             let stub_tests: Vec<&Test<'_>> = tests
                 .iter()
-                .filter(|test| {
-                    field_all_origins_match(self.plan, id, test.field, |src| {
-                        matches!(
-                            src,
-                            FieldSource::EntryRoot
-                                | FieldSource::Path(_)
-                                | FieldSource::Bound { .. }
-                        )
-                    })
-                })
+                .filter(|test| field_defined_on_stubs(self.plan, id, test.field))
                 .collect();
             if !stub_tests.is_empty() {
                 stubs = filter_rows(site, stubs, &stub_tests, &mut reported, failures);
@@ -297,13 +291,7 @@ impl Evaluator<'_> {
         for (field, transforms) in &relation.transforms {
             let position = rows.field(field)?;
             let field_sensitive = rows.fields[position].sensitive;
-            let applies_to_stubs = retain_stubs
-                && field_all_origins_match(self.plan, id, field, |src| {
-                    matches!(
-                        src,
-                        FieldSource::EntryRoot | FieldSource::Path(_) | FieldSource::Bound { .. }
-                    )
-                });
+            let applies_to_stubs = retain_stubs && field_defined_on_stubs(self.plan, id, field);
             for transform in transforms {
                 match string_transform(transform) {
                     Some(transform) => {
@@ -461,6 +449,7 @@ impl Evaluator<'_> {
     /// A `join:` relation's rows: for each row of the side that is not
     /// unique, in its order, the row of the unique side whose `on:` fields
     /// equal its own, when there is one.
+    #[allow(clippy::too_many_lines)]
     pub(super) fn join(
         &self,
         site: &Site,
@@ -572,6 +561,51 @@ impl Evaluator<'_> {
                     })
                     .collect(),
                 at: Arc::clone(&row.at),
+            });
+        }
+        // Propagate surviving single-root stub rows from the probe side when
+        // their join keys match a build-side row (#598), keeping `stub_root_groups`
+        // consistent through joins.
+        for stub in &probe.stub_rows {
+            let Some(found) = key_of(&keys, stub, false).and_then(|key| table.get(&key)) else {
+                continue;
+            };
+            let matched = &unique.rows[*found];
+            if let Err(limit) = self.limits.check(
+                LimitKind::JoinOutputs,
+                out.rows.len() + out.stub_rows.len() + 1,
+            ) {
+                failures.push(site.failure(
+                    AnalysisFailureKind::Evaluation,
+                    None,
+                    format!(
+                        "{limit}, so the relation is not evaluated rather than cut short; \
+                         narrow its sides"
+                    ),
+                ));
+                return None;
+            }
+            if let Err(limit) = self.take_cells(fields.len().max(1)) {
+                failures.push_limit(site.failure(
+                    AnalysisFailureKind::Evaluation,
+                    None,
+                    super::limit_reached(&limit),
+                ));
+                return None;
+            }
+            let (left_row, right_row) = match join.unique {
+                JoinSide::Left => (matched, stub),
+                JoinSide::Right => (stub, matched),
+            };
+            out.stub_rows.push(FieldRow {
+                cells: fields
+                    .iter()
+                    .map(|(_, side, position)| match side {
+                        JoinSide::Left => left_row.cells[*position].clone(),
+                        JoinSide::Right => right_row.cells[*position].clone(),
+                    })
+                    .collect(),
+                at: Arc::clone(&stub.at),
             });
         }
         Some(out)
@@ -1140,6 +1174,52 @@ impl Test<'_> {
             detail,
         )
     }
+}
+
+/// Whether `name` carries a real, non-stub value on surviving stub rows (#598):
+/// `entry.root`, path tokens, `bound:`, or any field copied from the `unique:`
+/// side of a `join:` (which came from a real matched build-side row).
+fn field_defined_on_stubs(
+    plan: &crate::relation::plan::Plan,
+    mut id: RelationId,
+    name: &str,
+) -> bool {
+    let mut current = name;
+    for _ in 0..=plan.relations.len() {
+        let relation = &plan.relation(id).relation;
+        if relation.uses_part_fields() {
+            let sources = relation.field_sources(current);
+            return !sources.is_empty()
+                && sources.iter().all(|f| {
+                    matches!(
+                        f.source,
+                        FieldSource::EntryRoot | FieldSource::Path(_) | FieldSource::Bound { .. }
+                    )
+                });
+        }
+        let Some(field) = relation.field(current) else {
+            return false;
+        };
+        match (&field.source, &relation.rows) {
+            (FieldSource::Side(side, copied), Rows::Join(join)) => {
+                if *side == join.unique {
+                    return true;
+                }
+                id = match side {
+                    JoinSide::Left => join.left.id,
+                    JoinSide::Right => join.right.id,
+                };
+                current = copied.as_str();
+            }
+            (source, _) => {
+                return matches!(
+                    source,
+                    FieldSource::EntryRoot | FieldSource::Path(_) | FieldSource::Bound { .. }
+                );
+            }
+        }
+    }
+    false
 }
 
 /// Whether every underlying non-join [`FieldSource`] of field `name` in

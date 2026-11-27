@@ -2,11 +2,11 @@ test_version: 1
 name: hcl over-deep nesting is rejected with one parse analysis failure, not a crash
 tags: [check, hcl_path_absent, structured, hcl, failing]
 
-# SAFETY: hcl-rs stack-overflows (SIGABRT, whole-process abort) on deeply-nested
-# input. The `hcl_depth_within_limit` guard (MAX_HCL_DEPTH=256) must reject an
-# over-deep file as ONE parse analysis failure through the real binary -- if the
-# guard or the large-stack parse thread regressed, `alint check` would crash here
-# instead of emitting the failure. The value is a 300-deep nested tuple.
+# SAFETY: hcl-edit 0.10 enforces a native MAX_NESTING_DEPTH=64 bound directly on
+# normal worker stacks (and structured_format/hcl.rs bounds block+label nesting
+# and object-key work). An over-deep file must be rejected as ONE parse analysis
+# failure through the real binary without crashing. The value is a 300-deep
+# nested tuple.
 
 given:
   tree:

@@ -94,6 +94,17 @@ pub fn reserve(input_len: usize) -> Option<Reservation> {
     GLOBAL.reserve(input_len)
 }
 
+/// Whether the calling thread currently holds an in-flight YAML reservation or
+/// a live alias-expanded [`RetainedLease`] handle. Used by `StructuredCache` to
+/// avoid waiting on another thread's `in_flight` slot while holding a lease.
+pub(crate) fn current_thread_holds_budget() -> bool {
+    #[cfg(test)]
+    if let Some(budget) = TEST_BUDGET.with(Cell::get) {
+        return budget.current_thread_holds();
+    }
+    GLOBAL.current_thread_holds()
+}
+
 /// What a parse of `input_len` bytes of YAML costs when it copies what the
 /// aliases name into its value: the input's length, or the alias guard's
 /// estimate of the expanded tree (`expanded`, see
@@ -340,6 +351,15 @@ impl Budget {
             }),
             freed: Condvar::new(),
         }
+    }
+
+    fn current_thread_holds(&self) -> bool {
+        if HELD.with(Cell::get) {
+            return true;
+        }
+        let current_thread = std::thread::current().id();
+        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.holders_of(current_thread) > 0
     }
 
     fn reserve(&'static self, input_len: usize) -> Option<Reservation> {

@@ -25,6 +25,7 @@ relations:
     fields:
       name: "record: $.name"
       ver: "record: $.ver"
+      py_ver: "record: $.py_ver"
       node_range: "record: $.node_range"
       cargo_range: "record: $.cargo_range"
       py_range: "record: $.py_range"
@@ -60,7 +61,7 @@ rules:
     input: pins
     assert:
       satisfies:
-        version: ver
+        version: py_ver
         range: py_range
         dialect: pep440-basic
     level: error
@@ -72,6 +73,7 @@ rules:
     {
       "name": "ok",
       "ver": "20.11.0+build.1",
+      "py_ver": "20.11.0",
       "node_range": ">=18.12.0 <22",
       "cargo_range": "^1.2, <2.0",
       "py_range": ">=20.0, !=20.10.*, <21"
@@ -79,6 +81,7 @@ rules:
     {
       "name": "partial-ok",
       "ver": "v22",
+      "py_ver": "v22",
       "node_range": "22.x",
       "cargo_range": ">=1.0, <=1.5",
       "py_range": "~=22.0"
@@ -86,6 +89,7 @@ rules:
     {
       "name": "bad",
       "ver": "19.5.0",
+      "py_ver": "19.5.0",
       "node_range": "^18.0.0 || >=20.0.0",
       "cargo_range": "^2.0",
       "py_range": ">=20.0, <22.0"

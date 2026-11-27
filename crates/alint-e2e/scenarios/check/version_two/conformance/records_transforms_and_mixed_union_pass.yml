@@ -1,0 +1,71 @@
+test_version: 1
+name: conformance records across JSON, YAML, TOML with transforms and mixed-reader union pass
+tags: [check, constraint, cross_file, version_two, conformance, passing]
+
+given:
+  tree:
+    catalog.json: |
+      { "services": [{ "id": "svc:auth:v1" }] }
+    deploy.yaml: |
+      services:
+        - name: svc-auth-live
+    config.toml: |
+      [[items]]
+      tag = "auth"
+  config: |
+    version: 2
+    relations:
+      from-json:
+        from: { paths: catalog.json }
+        records: { format: json, at: "$.services[*]" }
+        fields:
+          name: "record: $.id"
+        transform:
+          name:
+            - { split: { on: ":", part: 1 } }
+      from-yaml:
+        from: { paths: deploy.yaml }
+        records: { format: yaml, at: "$.services[*]" }
+        fields:
+          name: "record: $.name"
+        transform:
+          name:
+            - { strip_prefix: "svc-" }
+            - { strip_suffix: "-live" }
+      combined:
+        union:
+          - from: { paths: config.toml }
+            records: { format: toml, at: "$.items[*]" }
+            fields:
+              label: "record: $.tag"
+          - from: { paths: catalog.json }
+            read: { json: "$.services[*].id" }
+            fields:
+              label: value
+        transform:
+          label:
+            - { prefix: "[" }
+            - { suffix: "]" }
+    rules:
+      - id: json-matches-yaml
+        kind: constraint
+        input: from-json
+        assert:
+          set:
+            field: name
+            equal_to: { relation: from-yaml, field: name }
+        level: error
+      - id: combined-wrapped
+        kind: constraint
+        input: combined
+        assert:
+          set:
+            field: label
+            equal_to: { values: ["[auth]", "[svc:auth:v1]"] }
+        level: error
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

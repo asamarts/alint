@@ -138,6 +138,10 @@ const REFUSALS: &[(&str, Refusal)] = &[
         "check/version_two/an_unknown_name_is_refused.yml",
         Refusal::Loader,
     ),
+    (
+        "check/version_two/message_value_placeholder_refused_on_non_set_reference.yml",
+        Refusal::Loader,
+    ),
     // A version 1 config with `selectors:`: the version 1 schema refuses it.
     (
         "check/version_two/selectors_need_version_two.yml",

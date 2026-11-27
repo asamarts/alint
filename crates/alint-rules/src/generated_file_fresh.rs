@@ -453,7 +453,7 @@ impl GeneratedFileFreshRule {
         let msg = self
             .message
             .clone()
-            .unwrap_or_else(|| format!("{}: {desc}", file.display()));
+            .unwrap_or_else(|| format!("{}: {desc}", crate::slash(file)));
         Violation::new(msg).with_path(file.to_path_buf())
     }
 

@@ -1,0 +1,44 @@
+test_version: 1
+name: conformance message value placeholder and counterpart file placement for nested locale directories
+tags: [check, constraint, cross_file, version_two, conformance, failing]
+
+given:
+  tree:
+    locales/en/errors.json: |
+      { "not_found": "Not found" }
+    locales/en/common.json: |
+      { "ok": "OK" }
+    locales/fr/common.json: |
+      { "ok": "D'accord" }
+    locales/fr/errors.json: "{}\n"
+  config: |
+    version: 2
+    relations:
+      locale-keys:
+        from: { paths: "locales/*/*.json" }
+        entries: { format: json, at: "$", leaves: true }
+        fields: { locale: parent_name, key: entry.path }
+    rules:
+      - id: locale-parity
+        kind: constraint
+        input: locale-keys
+        assert:
+          set:
+            field: key
+            group_by: locale
+            equal_to: { group: en }
+        message: "missing translation key {{value}}"
+        level: error
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - rule: locale-parity
+        level: error
+        path: locales/fr/errors.json
+        message:
+          exact: "missing translation key not_found"
+        related:
+          - {label: "the reference group's row with it", path: locales/en/errors.json, line: 1, column: 3, end_line: 1, end_column: 14}

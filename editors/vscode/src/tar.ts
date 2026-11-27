@@ -364,12 +364,13 @@ export function extractSingleFileFromTarGz(
   if (pax !== undefined || gnuLongName !== undefined) {
     throw new Error("tar archive contains dangling extended header at EOF");
   }
-  if (sawZeroBlock) {
-    // Reject trailing non-zero bytes/entries smuggled after a zero block.
-    for (let i = offset; i < tarBuf.length; i++) {
-      if (tarBuf[i] !== 0) {
-        throw new Error("tar archive contains trailing data after end-of-archive");
-      }
+  if (!sawZeroBlock) {
+    throw new Error("tar archive truncated before end-of-archive zero block");
+  }
+  // Reject trailing non-zero bytes/entries smuggled after a zero block.
+  for (let i = offset; i < tarBuf.length; i++) {
+    if (tarBuf[i] !== 0) {
+      throw new Error("tar archive contains trailing data after end-of-archive");
     }
   }
   if (matched === undefined) {

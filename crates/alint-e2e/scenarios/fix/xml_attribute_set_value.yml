@@ -1,0 +1,38 @@
+test_version: 1
+name: set_value on XML attribute rewrites the attribute span cleanly and converges
+tags: [fix, xml_path_equals, set_value, xml]
+
+given:
+  tree:
+    app.xml: |
+      <config version="1.0" env="dev">
+        <name>demo</name>
+      </config>
+  config: |
+    version: 1
+    rules:
+      - id: pin-xml-env
+        kind: xml_path_equals
+        paths: "app.xml"
+        path: "$['config']['@env']"
+        equals: "prod"
+        level: error
+        fix:
+          set_value: {}
+
+when: [check, fix, check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: pin-xml-env, level: error, path: app.xml}
+  - exit: success
+    applied: [pin-xml-env]
+  - exit: success
+    violations: []
+
+expect_tree:
+  app.xml: |
+    <config version="1.0" env="prod">
+      <name>demo</name>
+    </config>

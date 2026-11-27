@@ -1790,7 +1790,7 @@ pub fn reject_baseline_in(baseline: &Option<std::path::PathBuf>, source: &str) -
 /// ruleset cannot raise `findings_per_rule` or `key_path_bytes_per_decode` to
 /// exhaust the consumer's memory or output budget.
 pub fn reject_limits_in(limits: &alint_core::ConfigLimits, source: &str) -> Result<()> {
-    if !limits.is_empty() {
+    if limits.is_declared() {
         return Err(Error::Other(format!(
             "`limits:` is only allowed in the user's top-level config; \
              declaring it in an extended config ({source}) is refused because it would \

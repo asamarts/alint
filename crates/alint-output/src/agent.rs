@@ -26,7 +26,6 @@
 use std::borrow::Cow;
 use std::fmt::Write as _;
 use std::io::Write;
-use std::path::Path;
 
 use alint_core::{Level, ProposedEdit, Report};
 use serde::Serialize;
@@ -165,7 +164,7 @@ pub fn write_agent(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
                 if v.is_fixable {
                     fixable_violations += 1;
                 }
-                let file = v.report_path().map(Path::to_string_lossy);
+                let file = v.report_path().map(crate::slash_path_cow);
                 let line = v.report_line();
                 let column = v.report_column();
                 let human_message =
@@ -203,7 +202,7 @@ pub fn write_agent(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
                 .map(|failure| AgentAnalysisFailure {
                     rule_id: r.rule_id.as_ref(),
                     kind: failure.kind.as_str(),
-                    file: failure.report_path().map(Path::to_string_lossy),
+                    file: failure.report_path().map(crate::slash_path_cow),
                     line: failure.report_line(),
                     column: failure.report_column(),
                     human_message: crate::sanitize::sanitize_terminal_multiline(

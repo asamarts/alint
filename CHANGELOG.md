@@ -176,6 +176,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   warning to `v0.25 at the earliest`, and recorded the 20-repository v0.24 corpus stratum re-score
   in `docs/design/general-linter.md` section 12.4 and `docs/design/v0.23/corpus-stratum-log.md`
   (ADR-0050 D11, ADR-0048 decision 3a).
+- Library additions (`alint-core`, `alint-output`): added `ConfigLimits`, `Config::with_limits`,
+  `Engine::with_limits`, `FileIndex::walk_warnings`, `WalkOptions::with_git_root_boundary`,
+  `Context::parse_structured`, `Format::parse_shared`, `Format::parse_with_strict_json`,
+  `Format::parse_shared_with_strict_json`, `SharedValue`, `StructuredCache`,
+  `EnvironmentRedactor`, `baseline::Baseline::has_unmatched_pre_022_hidden_path_entries`, and
+  `alint_output::sanitize::sanitize_terminal_multiline`.
 
 ### Changed
 
@@ -285,6 +291,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Interned `PROVENANCE_MARKER` source strings in `alint-dsl` into the load's `FieldSourceNames`
   table (resolved by `Provenance::read`), matching `FIELD_SOURCES_MARKER` so marker memory no
   longer scales with the length of extended source paths or URLs (#581).
+- Hardened parsers, walker, engine, LSP, output, and editors in the pre-release v0.24 audit:
+  fixed lone-CR INI structured-fix offset truncation, multi-BOM XML/INI fix parity, strict JSON
+  UTF-8 validation in `file_graph` / `registry_paths_resolve` / cross-file fixers, tolerant JSON
+  size/depth guards in `structured_fix::json`, YAML `RetainedLease` + `StructuredCache` deadlock
+  bypass and `Arc::ptr_eq` in-flight slot cleanup, YAML `!!str <<` merge-key literal handling and
+  quoted `"<<"` duplicate-key separation, single-parse HCL duplicate-key attribute/block/template
+  shadowing, PEP 440 local/post/dev rejection and SemVer hyphen prerelease floors, walker alternate
+  `.git` spelling denial and Windows NTFS reparse-point confinement, relative `gitdir`/`commondir`
+  and submodule `info/exclude` resolution, `fix --changed` `requires_full_index` parity, nested
+  `no_duplicate_keys` `findings_per_rule` capping, nested `unique_by` default `{basename}` key,
+  nested `key_parity.ignore_keys` `*` escaping and flat-format dotted segments, doubly-nested
+  dependency preparation, `limits: {}` and env-interpolated `limits:` structural redaction,
+  `alint lsp` tracing env redaction and nested/v2 config error spans, C1/bidi sanitization in
+  Markdown URLs and diffs, Unix backslash preservation in `slash()`, case-insensitive `--format`
+  across all subcommands, and serialized VS Code / JetBrains LSP lifecycle restarts.
 
 ## [0.23.0] - 2026-11-22
 

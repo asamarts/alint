@@ -31,6 +31,7 @@ mod constraint_cli;
 mod constraint_environment_filter_cli;
 mod constraint_explain_cli;
 mod constraint_messages_cli;
+mod constraint_v024_cli;
 mod evidence_redaction;
 mod expect_matches;
 mod explain_trace;

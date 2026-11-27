@@ -203,8 +203,8 @@ impl Rule for RegistryPathsResolveRule {
                 continue;
             };
             let abs = ctx.root.join(&registry_rel);
-            let text = match crate::io::read_capped(&abs) {
-                Ok(b) => String::from_utf8_lossy(&b).into_owned(),
+            let bytes = match crate::io::read_capped(&abs) {
+                Ok(b) => b,
                 Err(crate::io::ReadCapError::TooLarge(n)) => {
                     violations.push(alint_core::too_large_file_violation(&registry_rel, n));
                     continue;
@@ -218,6 +218,44 @@ impl Rule for RegistryPathsResolveRule {
                     continue;
                 }
             };
+            let strict_extract = matches!(
+                &self.extract,
+                Extract::Structured(s) if s.format == alint_core::Format::Json && s.strict
+            );
+            let strict_exclude = matches!(
+                self.exclude_extract.as_ref(),
+                Some(Extract::Structured(s)) if s.format == alint_core::Format::Json && s.strict
+            );
+            let text: std::borrow::Cow<'_, str> = if strict_extract || strict_exclude {
+                match std::str::from_utf8(&bytes) {
+                    Ok(s) => std::borrow::Cow::Borrowed(s),
+                    Err(e) => {
+                        let field = if strict_extract {
+                            "`extract`"
+                        } else {
+                            "`exclude_query`"
+                        };
+                        let mut finding = Violation::new(format!(
+                            "registry file {} could not be parsed for {field}: strict JSON requires valid UTF-8 ({e})",
+                            crate::slash(&registry_rel)
+                        ))
+                        .with_path(registry_rel.clone())
+                        .as_analysis_failure(AnalysisFailureKind::ResourceParse);
+                        if self.extract.redacts_by_default()
+                            || self
+                                .exclude_extract
+                                .as_ref()
+                                .is_some_and(Extract::redacts_by_default)
+                        {
+                            finding.redact_message(&self.id);
+                        }
+                        violations.push(finding);
+                        continue;
+                    }
+                }
+            } else {
+                String::from_utf8_lossy(&bytes)
+            };
 
             let (entries, skipped, non_strings) =
                 match self.extract_entries(ctx, &registry_rel, &text) {
@@ -225,7 +263,7 @@ impl Rule for RegistryPathsResolveRule {
                     Err(e) => {
                         let mut finding = Violation::new(format!(
                             "registry file {} could not be parsed for `extract`: {e}",
-                            registry_rel.display()
+                            crate::slash(&registry_rel)
                         ))
                         .with_path(registry_rel.clone())
                         .as_analysis_failure(AnalysisFailureKind::ResourceParse);
@@ -255,7 +293,7 @@ impl Rule for RegistryPathsResolveRule {
                 Err(e) => {
                     let mut finding = Violation::new(format!(
                         "registry file {} could not be parsed for `exclude_query`: {e}",
-                        registry_rel.display()
+                        crate::slash(&registry_rel)
                     ))
                     .with_path(registry_rel.clone())
                     .as_analysis_failure(AnalysisFailureKind::ResourceParse);
@@ -442,9 +480,9 @@ impl RegistryPathsResolveRule {
             if !is_covered {
                 let mut finding = Violation::new(format!(
                     "{} is under `{}` but no entry in {} references it",
-                    candidate.display(),
+                    crate::slash(&candidate),
                     orph.space,
-                    registry_rel.display(),
+                    crate::slash(registry_rel),
                 ))
                 .with_path(candidate);
                 self.redact_extracted(
@@ -564,7 +602,7 @@ impl RegistryPathsResolveRule {
                 out.push(
                     Violation::new(format!(
                         "registry source {} escapes the repo root",
-                        rel.display()
+                        crate::slash(&rel)
                     ))
                     .with_path(rel),
                 );
@@ -585,7 +623,7 @@ impl RegistryPathsResolveRule {
             let mut finding = Violation::new(format!(
                 "registry {}: skipped non-literal entry {entry:?} \
                  (cannot statically resolve an interpolated/computed path)",
-                registry.display()
+                crate::slash(registry)
             ))
             .with_path(registry.to_path_buf())
             .as_note();

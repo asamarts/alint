@@ -1,0 +1,47 @@
+test_version: 1
+name: conformance count cardinality passes for min, max, exact, distinct, and required groups
+tags: [check, constraint, cross_file, version_two, conformance, passing]
+
+given:
+  tree:
+    owners.json: |
+      {
+        "entries": [
+          { "area": "api", "owner": "alice" },
+          { "area": "api", "owner": "alice" },
+          { "area": "web", "owner": "bob" }
+        ]
+      }
+  config: |
+    version: 2
+    relations:
+      owners:
+        from: { paths: owners.json }
+        records: { format: json, at: "$.entries[*]" }
+        fields:
+          area: "record: $.area"
+          owner: "record: $.owner"
+    rules:
+      - id: one-distinct-owner-per-area
+        kind: constraint
+        input: owners
+        assert:
+          count:
+            group_by: [area]
+            field: owner
+            distinct: true
+            exact: 1
+            groups: [api, web]
+        level: error
+      - id: total-rows-bounded
+        kind: constraint
+        input: owners
+        assert:
+          count: { min: 2, max: 5 }
+        level: error
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

@@ -474,7 +474,7 @@ pub(crate) struct RawConfig {
     /// `limits:` — top-level runtime limits (`findings_per_rule`,
     /// `key_path_bytes_per_decode`). Top-level-only (refused from `extends:`
     /// and nested configs) so an untrusted ruleset cannot raise limits.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_explicit_limits")]
     limits: alint_core::ConfigLimits,
     /// `allow_out_of_root:` — the top-level escape hatch for path
     /// confinement. Parsed here (the YAML-facing form); the loader
@@ -575,6 +575,19 @@ pub(crate) struct RawConfig {
 }
 
 const DEFAULT_FIX_SIZE_LIMIT: Option<u64> = Some(1 << 20);
+
+/// Deserialize a present `limits:` mapping and mark it as explicitly declared
+/// so an empty `limits: {}` in `extends:` or a nested config is refused.
+fn deserialize_explicit_limits<'de, D>(
+    deserializer: D,
+) -> std::result::Result<alint_core::ConfigLimits, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let mut limits = alint_core::ConfigLimits::deserialize(deserializer)?;
+    limits.mark_declared();
+    Ok(limits)
+}
 
 /// Deserialize a present key (including an explicit `null`) as `Some(value)`,
 /// leaving a missing key to `#[serde(default)]`'s `None`.
@@ -1782,6 +1795,10 @@ fn validate(config: &Config, surface: v2::Surface) -> Result<()> {
             return Err(Error::rule_config(&rule.id, "duplicate rule id in config"));
         }
     }
+    config
+        .limits
+        .to_relation_limits()
+        .map_err(|error| Error::Other(error.to_string()))?;
     Ok(())
 }
 

@@ -16,6 +16,7 @@ mod config;
 mod config_build;
 pub mod did_you_mean;
 mod dotenv;
+#[doc(hidden)]
 pub mod duplicate_keys;
 mod engine;
 mod error;
@@ -44,6 +45,7 @@ mod report;
 mod rule;
 mod scope;
 mod scope_filter;
+#[doc(hidden)]
 pub mod semver_eval;
 mod structured_cache;
 pub mod structured_fix;
@@ -242,6 +244,18 @@ pub use when::{WhenEnv, WhenError, WhenExpr};
 ///
 /// ```compile_fail
 /// let _ = alint_core::Config { nested_configs: true, ..alint_core::Config::new(1, Vec::new()) };
+/// ```
+///
+/// ```
+/// let mut limits = alint_core::ConfigLimits::new();
+/// limits.findings_per_rule = Some(100);
+/// ```
+///
+/// ```compile_fail
+/// let _ = alint_core::ConfigLimits {
+///     findings_per_rule: Some(100),
+///     ..alint_core::ConfigLimits::new()
+/// };
 /// ```
 ///
 /// ```

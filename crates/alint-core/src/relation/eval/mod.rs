@@ -64,7 +64,7 @@ pub use read::path_token;
 #[cfg(test)]
 pub(crate) use spans::fingerprint;
 pub(crate) use spans::fingerprint_text;
-pub use spans::{BytesSpan, ReadSpan, find_spans, read_span_walks};
+pub use spans::{BytesSpan, ReadSpan, find_spans, find_spans_with_limits, read_span_walks};
 
 use super::cache::{DecodeCache, ReadCache};
 use super::limits::{LimitExceeded, LimitKind, Limits};

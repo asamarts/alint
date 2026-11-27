@@ -194,6 +194,7 @@ impl Cache {
             std::process::id()
         ));
         if let Err(source) = std::fs::write(&tmp_path, bytes) {
+            let _ = std::fs::remove_file(&tmp_path);
             return Err(CacheError::Io {
                 path: tmp_path,
                 source,

@@ -252,6 +252,16 @@ pub fn find_spans<'s>(
     bytes: &[u8],
     spans: impl IntoIterator<Item = &'s Span>,
 ) -> (Vec<Option<ByteSpan>>, usize) {
+    find_spans_with_limits(bytes, spans, &Limits::default())
+}
+
+/// [`find_spans`] honoring the caller's configured relation `limits` (such as
+/// `limits.key_path_bytes_per_decode`) when verifying entry spans.
+pub fn find_spans_with_limits<'s>(
+    bytes: &[u8],
+    spans: impl IntoIterator<Item = &'s Span>,
+    limits: &Limits,
+) -> (Vec<Option<ByteSpan>>, usize) {
     let mut found = Vec::new();
     let mut readers: Vec<Asked<'_>> = Vec::new();
     // The entries' spans, with their places in `found`.
@@ -285,7 +295,7 @@ pub fn find_spans<'s>(
         return (found, 0);
     };
     let mut held = 0;
-    for (index, span, walked) in still_held(text, &entries) {
+    for (index, span, walked) in still_held(text, &entries, limits) {
         found[index] = span;
         held = held.max(walked);
     }
@@ -322,6 +332,7 @@ struct Asked<'s> {
 fn still_held(
     text: &str,
     entries: &[(usize, &BytesSpan)],
+    limits: &Limits,
 ) -> Vec<(usize, Option<ByteSpan>, usize)> {
     let mut placed = Vec::with_capacity(entries.len());
     let mut pending: Vec<(usize, &BytesSpan)> = entries.to_vec();
@@ -374,13 +385,13 @@ fn still_held(
         let need_arrays = format == Format::Toml
             && these
                 .iter()
-                .any(|(_, span)| span.holds == Holds::RecordValue);
+                .any(|(_, span)| matches!(span.holds, Holds::RecordValue | Holds::Value));
         let table = (format != Format::Json)
             .then(|| {
                 if need_arrays {
-                    entry_table_with_arrays(format, text, &Limits::default()).ok()
+                    entry_table_with_arrays(format, text, limits).ok()
                 } else {
-                    entry_table(format, text, &Limits::default()).ok()
+                    entry_table(format, text, limits).ok()
                 }
             })
             .flatten();
@@ -732,5 +743,42 @@ mod tests {
                 assert_eq!(found(now, at, &span), *held, "{span:?} {now:?}");
             }
         }
+    }
+
+    #[test]
+    fn find_spans_with_limits_verifies_toml_array_value_and_honors_custom_limits() {
+        let toml = "[[items]]\nname = \"alpha\"\n";
+        let start = toml.find("\"alpha\"").unwrap();
+        let end = start + "\"alpha\"".len();
+        // Both `Holds::Value` (from `bound:` inside a TOML array) and
+        // `Holds::RecordValue` must descend TOML arrays when verifying spans.
+        let val_span = Span::Bytes(BytesSpan::value(
+            ByteSpan::new(start, end),
+            Format::Toml,
+            false,
+            &text("alpha"),
+        ));
+        let (found, _) = find_spans_with_limits(toml.as_bytes(), [&val_span], &Limits::default());
+        assert_eq!(found, vec![Some(ByteSpan::new(start, end))]);
+
+        // Tight custom `RowsPerExtractor` limit prevents verifying past the limit
+        // (proving `still_held` honors the passed `limits` rather than hardcoded defaults).
+        let many_toml = "a = \"1\"\nb = \"2\"\nc = \"3\"\n";
+        let c_start = many_toml.find("\"3\"").unwrap();
+        let c_end = c_start + 3;
+        let c_span = Span::Bytes(BytesSpan::value(
+            ByteSpan::new(c_start, c_end),
+            Format::Toml,
+            false,
+            &text("3"),
+        ));
+        let tight = Limits::default()
+            .with(crate::relation::LimitKind::RowsPerExtractor, 1)
+            .unwrap();
+        let (found_tight, _) = find_spans_with_limits(many_toml.as_bytes(), [&c_span], &tight);
+        assert_eq!(found_tight, vec![None]);
+        let (found_default, _) =
+            find_spans_with_limits(many_toml.as_bytes(), [&c_span], &Limits::default());
+        assert_eq!(found_default, vec![Some(ByteSpan::new(c_start, c_end))]);
     }
 }

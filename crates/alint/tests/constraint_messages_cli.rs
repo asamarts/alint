@@ -341,3 +341,78 @@ fn show_notes_names_a_note_file_once_and_escaped() {
         "{stderr}"
     );
 }
+
+#[test]
+fn value_placeholder_truncates_escapes_single_pass_and_redacts_sensitive() {
+    let dir = tempfile::tempdir().unwrap();
+    let long_val = format!("{}{}", "a".repeat(80), "{{row.k}}");
+    write(
+        dir.path(),
+        "en.json",
+        &format!(
+            "{{\"{long_val}\": \"1\", \"evil\\n\\u001b[31m\u{202e}\": \"2\", \"sec\": \"3\"}}"
+        ),
+    );
+    write(dir.path(), "fr.json", "{}\n");
+    write(
+        dir.path(),
+        ".alint.yml",
+        r#"version: 2
+relations:
+  plain_keys:
+    from: { paths: "*.json" }
+    entries: { format: json, at: "$" }
+    fields: { locale: stem, k: entry.key }
+  secret_keys:
+    from: { paths: "*.json" }
+    entries: { format: json, at: "$" }
+    fields:
+      locale: stem
+      k: { source: entry.key, sensitive: true }
+rules:
+  - id: plain-msg
+    kind: constraint
+    input: plain_keys
+    assert:
+      set: { field: k, group_by: locale, equal_to: { group: en } }
+    message: "missing {{ value }} (not re-expanded)"
+    level: error
+  - id: secret-msg
+    kind: constraint
+    input: secret_keys
+    assert:
+      set: { field: k, group_by: locale, equal_to: { group: en } }
+    message: "missing {{value}}"
+    level: error
+"#,
+    );
+
+    let parsed = json(dir.path(), "json");
+    let plain_msgs: Vec<&str> = violations(&parsed, "plain-msg")
+        .iter()
+        .map(|v| v["message"].as_str().unwrap())
+        .collect();
+    // 1. Long value is truncated at 64 chars with `...` and never re-expands `{{row.k}}`.
+    assert!(
+        plain_msgs.iter().any(|m| m.contains(&"a".repeat(64))
+            && m.contains("...")
+            && !m.contains("a".repeat(65).as_str())),
+        "expected 64-char truncation: {plain_msgs:?}"
+    );
+    // 2. Control and bidi chars are escaped in `{{value}}`.
+    assert!(
+        plain_msgs
+            .iter()
+            .any(|m| m.contains("evil\\n\\u{1b}[31m\\u{202e}")),
+        "expected escaped invisible chars: {plain_msgs:?}"
+    );
+    // 3. Sensitive field redacts `{{value}}` to `<redacted>`.
+    let secret_msgs: Vec<&str> = violations(&parsed, "secret-msg")
+        .iter()
+        .map(|v| v["message"].as_str().unwrap())
+        .collect();
+    assert_ne!(secret_msgs.len(), 0, "expected at least one finding");
+    for m in &secret_msgs {
+        assert_eq!(*m, "missing <redacted>", "{secret_msgs:?}");
+    }
+}

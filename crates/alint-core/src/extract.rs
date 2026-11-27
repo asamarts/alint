@@ -192,7 +192,7 @@ pub struct ExtractSpec {
     /// (rejecting comments, trailing commas, leading UTF-8 BOM, and empty
     /// files). Rejected with any non-`json` extractor.
     #[serde(default, deserialize_with = "present")]
-    #[schemars(with = "bool", transform = no_default)]
+    #[schemars(with = "bool", transform = no_default, extend("x-since" = "0.24"))]
     strict: Option<bool>,
 }
 

@@ -87,7 +87,24 @@ impl<'de> serde::de::Visitor<'de> for YamlKey<'_> {
             (v.as_ptr() as usize)
                 .checked_sub(src.as_ptr() as usize)
                 .filter(|&off| off + v.len() <= src.len())
-                .is_some_and(|off| off == 0 || !matches!(src[off - 1], b'"' | b'\''))
+                .is_some_and(|off| {
+                    if off > 0 && matches!(src[off - 1], b'"' | b'\'') {
+                        return false;
+                    }
+                    // An explicit tag like `!!str <<` or `! <<` keeps `<<`
+                    // as a literal string key rather than a YAML 1.1 merge key.
+                    let before = &src[..off];
+                    let line_start = before
+                        .iter()
+                        .rposition(|&b| b == b'\n' || b == b'\r')
+                        .map_or(0, |i| i + 1);
+                    let prefix = before[line_start..].trim_ascii();
+                    let has_tag = prefix
+                        .rsplit(|b| matches!(b, b' ' | b'\t' | b'{' | b','))
+                        .next()
+                        .is_some_and(|tok| tok.starts_with(b"!"));
+                    !has_tag
+                })
         };
         Ok(Key {
             text: v.to_owned(),

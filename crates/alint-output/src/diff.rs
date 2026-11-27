@@ -173,9 +173,20 @@ fn git_mode(st_mode: u32) -> u32 {
 /// paths. `ESC` (0x1b) and `BEL` (0x07) -- the screen-clear / banner-forge /
 /// OSC-injection vectors -- are the ones that matter.
 fn has_terminal_control(bytes: &[u8]) -> bool {
-    bytes
+    if bytes
         .iter()
         .any(|&c| (c < 0x20 && c != b'\t' && c != b'\n' && c != b'\r') || c == 0x7f)
+    {
+        return true;
+    }
+    // Also treat UTF-8 C1 controls (U+0080..=U+009F, e.g. 8-bit CSI U+009B)
+    // and display-deceptive Unicode characters (bidi overrides/isolates,
+    // zero-width, astral tags) as unsafe to echo verbatim to a terminal.
+    std::str::from_utf8(bytes).is_ok_and(|text| {
+        text.chars().any(|c| {
+            (0x80..=0x9f).contains(&(c as u32)) || alint_core::invisible::is_deceptive_on_display(c)
+        })
+    })
 }
 
 /// `a/<path>`, git-C-quoted if the path needs it (the `---` / `diff --git` side).
@@ -199,7 +210,10 @@ fn b(path: &str) -> String {
 fn git_quote_path(s: &str) -> String {
     let needs_quote = s
         .bytes()
-        .any(|byte| byte < 0x20 || byte == b'"' || byte == b'\\' || byte == 0x7f);
+        .any(|byte| byte < 0x20 || byte == b'"' || byte == b'\\' || byte == 0x7f)
+        || s.chars().any(|c| {
+            (0x80..=0x9f).contains(&(c as u32)) || alint_core::invisible::is_deceptive_on_display(c)
+        });
     if !needs_quote {
         return s.to_string();
     }
@@ -553,5 +567,30 @@ mod tests {
             !out.contains('\x1b'),
             "binary summary leaked raw ESC in path: {out:?}"
         );
+    }
+
+    #[test]
+    fn diff_blocks_c1_and_invisible_bidi_controls_in_content_and_paths() {
+        // C1 CSI (`\u{009b}`) and bidi override (`\u{202e}`) in content must
+        // force binary summary rather than echoing raw escape sequences.
+        let c1_content = render(&[fix(
+            "a.txt",
+            "hello\n",
+            "hello\u{009b}31mworld\u{202e}\n",
+            StagedKind::Modify,
+        )]);
+        assert!(!c1_content.contains('\u{009b}'), "{c1_content:?}");
+        assert!(!c1_content.contains('\u{202e}'), "{c1_content:?}");
+        assert!(c1_content.to_lowercase().contains("binary"), "{c1_content}");
+
+        // C1 / bidi in filenames must be octal-escaped by git_quote_path.
+        let bidi_path = render(&[fix(
+            "src/\u{202e}evil\u{009b}.txt",
+            "a\n",
+            "b\n",
+            StagedKind::Modify,
+        )]);
+        assert!(!bidi_path.contains('\u{202e}'), "{bidi_path:?}");
+        assert!(!bidi_path.contains('\u{009b}'), "{bidi_path:?}");
     }
 }

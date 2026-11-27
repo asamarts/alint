@@ -334,16 +334,21 @@ impl WalkCtx {
         is_dir: bool,
         chain: Option<&IgnoreNode>,
     ) -> bool {
-        match &self.overrides {
-            Some(overrides) => match overrides.matched(abs, is_dir) {
+        // Always refuse `.git` and every alternate Git-directory spelling
+        // (`.GIT`, `.git.`, `.git `, Windows short names `GIT~1`..`GIT~4`,
+        // HFS+ invisible-char spellings) before consulting overrides or
+        // `.gitignore`, matching `pathsafe::names_git_directory`.
+        if abs
+            .file_name()
+            .is_some_and(|name| crate::pathsafe::names_git_directory(&name.to_string_lossy()))
+        {
+            return true;
+        }
+        if let Some(overrides) = &self.overrides {
+            match overrides.matched(abs, is_dir) {
                 Match::Ignore(_) => return true,
                 Match::Whitelist(_) => return false,
                 Match::None => {}
-            },
-            None => {
-                if abs.file_name() == Some(OsStr::new(".git")) {
-                    return true;
-                }
             }
         }
         if !self.respect_gitignore {
@@ -594,7 +599,13 @@ pub(super) fn walk_subtrees_from(
                 .then(|| ctx.canonical_walk_root.as_ref().map(|r| r.join(&next_rel)))
                 .flatten();
 
-            if ft.is_symlink() {
+            let is_symlink = ft.is_symlink()
+                || (cfg!(windows)
+                    && ft.is_dir()
+                    && std::fs::symlink_metadata(&next_abs)
+                        .is_ok_and(|m| crate::pathsafe::metadata_is_symlink_or_reparse(&m)));
+
+            if is_symlink {
                 let target = match next_abs.canonicalize() {
                     Ok(target) => target,
                     Err(err)
@@ -951,7 +962,13 @@ fn inspect_children(
             break;
         }
         let ft = child.file_type;
-        let is_symlink = ft.is_symlink();
+        let is_symlink = ft.is_symlink()
+            || (cfg!(windows)
+                && ft.is_dir()
+                && child
+                    .entry
+                    .metadata()
+                    .is_ok_and(|m| crate::pathsafe::metadata_is_symlink_or_reparse(&m)));
         let is_dir = !is_symlink && ft.is_dir();
         let is_file = !is_symlink && ft.is_file();
         if !is_symlink && !is_dir && !is_file {
@@ -1400,22 +1417,31 @@ fn read_inside_worktree_exclude(dir: &Path, dot_git_bytes: &[u8]) -> Result<Opti
     let Some(git_dir_str) = first.strip_prefix("gitdir: ") else {
         return Ok(None);
     };
-    let git_dir = PathBuf::from(git_dir_str);
+    let raw_git_dir = PathBuf::from(git_dir_str);
+    let git_dir = if raw_git_dir.is_relative() {
+        dir.join(raw_git_dir)
+    } else {
+        raw_git_dir
+    };
     let commondir_path = git_dir.join("commondir");
-    let commondir_bytes = match ignore_files::read_by_path(commondir_path) {
-        IgnoreFileRead::Bytes(bytes) => bytes,
-        IgnoreFileRead::Absent => return Ok(None),
+    let exclude_dir = match ignore_files::read_by_path(commondir_path) {
+        IgnoreFileRead::Bytes(bytes) => {
+            let Some(common) = ignore_files::first_line_from_bytes(&bytes) else {
+                return Ok(None);
+            };
+            let raw_common = PathBuf::from(common);
+            if raw_common.is_relative() {
+                git_dir.join(raw_common)
+            } else {
+                raw_common
+            }
+        }
+        // Submodules use a `.git` file with no `commondir`, placing excludes at
+        // `<git_dir>/info/exclude`.
+        IgnoreFileRead::Absent => git_dir,
         IgnoreFileRead::Refused(refused) => return Err(refused.into_error()),
     };
-    let Some(common) = ignore_files::first_line_from_bytes(&commondir_bytes) else {
-        return Ok(None);
-    };
-    let common_dir = if common.starts_with('.') {
-        git_dir.join(common)
-    } else {
-        PathBuf::from(common)
-    };
-    read_inside_exclude_file(dir, &common_dir.join("info/exclude"))
+    read_inside_exclude_file(dir, &exclude_dir.join("info/exclude"))
 }
 
 fn read_inside_exclude_file(dir: &Path, path: &Path) -> Result<Option<Gitignore>> {
@@ -1482,7 +1508,6 @@ fn load_parent_ignores(
             }
             Ok(_) => {
                 record_parent_warning(IgnoreRefusal::non_regular(dot_git), warnings);
-                repo_match = Some((idx, None));
                 break;
             }
             Err(err)
@@ -1492,7 +1517,6 @@ fn load_parent_ignores(
                 ) => {}
             Err(err) => {
                 record_parent_warning(IgnoreRefusal::io(dot_git, err), warnings);
-                repo_match = Some((idx, None));
                 break;
             }
         }
@@ -1558,15 +1582,29 @@ fn read_parent_git_exclude(
     if dot_git_meta.is_file() {
         let dot_git_bytes = read_parent_file(dot_git, warnings)?;
         let first = ignore_files::first_line_from_bytes(&dot_git_bytes)?;
-        let git_dir = PathBuf::from(first.strip_prefix("gitdir: ")?);
-        let commondir_bytes = read_parent_file(git_dir.join("commondir"), warnings)?;
-        let common = ignore_files::first_line_from_bytes(&commondir_bytes)?;
-        let common_dir = if common.starts_with('.') {
-            git_dir.join(common)
+        let raw_git_dir = PathBuf::from(first.strip_prefix("gitdir: ")?);
+        let git_dir = if raw_git_dir.is_relative() {
+            dir.join(raw_git_dir)
         } else {
-            PathBuf::from(common)
+            raw_git_dir
         };
-        let exclude_path = common_dir.join("info/exclude");
+        let exclude_dir = match ignore_files::read_by_path(git_dir.join("commondir")) {
+            IgnoreFileRead::Bytes(bytes) => {
+                let common = ignore_files::first_line_from_bytes(&bytes)?;
+                let raw_common = PathBuf::from(common);
+                if raw_common.is_relative() {
+                    git_dir.join(raw_common)
+                } else {
+                    raw_common
+                }
+            }
+            IgnoreFileRead::Absent => git_dir,
+            IgnoreFileRead::Refused(refused) => {
+                record_parent_warning(refused, warnings);
+                return None;
+            }
+        };
+        let exclude_path = exclude_dir.join("info/exclude");
         let content = read_parent_file(exclude_path.clone(), warnings)?;
         return gitignore_from(dir, &exclude_path, &content);
     }
@@ -1574,7 +1612,10 @@ fn read_parent_git_exclude(
 }
 
 fn record_parent_warning(refused: IgnoreRefusal, warnings: &mut Vec<String>) {
-    tracing::warn!(
+    // Emit at `debug` level here so CLI callers printing `warnings` via
+    // `report_walk_warnings` do not double-emit on stderr and `alint lsp`
+    // routes warnings exclusively through its redacted `window/logMessage`.
+    tracing::debug!(
         path = %refused.path().display(),
         reason = %refused.reason(),
         "skipping ignore file above root"

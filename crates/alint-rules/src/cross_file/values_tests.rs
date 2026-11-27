@@ -585,6 +585,7 @@ fn the_value_limit_and_the_run_budget_are_worded_apart() {
             kind,
             limit,
             reached: limit + 1,
+            redacted: false,
         }))
     };
     assert_eq!(

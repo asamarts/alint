@@ -194,6 +194,8 @@ jobs:
           # on main cannot make the published release look larger than it is.
           python3 ci/scripts/pin-docs-counts.py facts.json \
             docs/site/concepts/start-here/kinds-families-categories.md
+          python3 ci/scripts/pin-docs-counts.py facts.json \
+            docs/site/concepts/composition/bundled-rulesets.md
 
       - name: Generate docs-bundle/
         # This runs the RELEASE TAG's docs-export, so it must NOT pass a flag the

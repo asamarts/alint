@@ -111,6 +111,7 @@ impl Adapter for ExtractAdapter {
                             kind: LimitKind::RowsPerExtractor,
                             limit,
                             reached,
+                            redacted: false,
                         })
                     }
                 })?;
@@ -578,7 +579,8 @@ mod tests {
             AdapterError::Limit(LimitExceeded {
                 kind: LimitKind::RowsPerExtractor,
                 limit: 1,
-                reached: 2
+                reached: 2,
+                redacted: false,
             })
         ));
     }

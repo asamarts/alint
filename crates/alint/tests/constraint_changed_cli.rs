@@ -709,3 +709,52 @@ fn a_trigger_scopes_empty_manifest_warns_of_nothing() {
         );
     }
 }
+
+#[test]
+fn reference_target_relation_change_triggers_constraint_under_changed() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write(
+        root,
+        ".alint.yml",
+        r#"version: 2
+relations:
+  teams:
+    from: { paths: teams.json }
+    records: { format: json, at: "$.teams[*]" }
+    fields: { name: "record: $.name" }
+  services:
+    from: { paths: services.json }
+    records: { format: json, at: "$.services[*]" }
+    fields: { team: "record: $.team" }
+rules:
+  - id: service-team-ref
+    kind: constraint
+    input: services
+    assert:
+      reference:
+        fields: [team]
+        to: { relation: teams, fields: [name] }
+    level: error
+"#,
+    );
+    write(root, "teams.json", r#"{"teams":[{"name":"core"}]}"#);
+    write(root, "services.json", r#"{"services":[{"team":"core"}]}"#);
+    write(root, "README.md", "docs\n");
+    git(root, &["init", "-q"]);
+    git(root, &["config", "commit.gpgsign", "false"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    // Unrelated edit skips the constraint rule.
+    write(root, "README.md", "updated docs\n");
+    assert_eq!(check(root, &["--changed"]), (Some(0), vec![]));
+
+    // Removing `"core"` from `teams.json` (target relation of `reference`) triggers it!
+    write(root, "teams.json", r#"{"teams":[{"name":"platform"}]}"#);
+    let (code, rules) = check(root, &["--changed"]);
+    assert_eq!(code, Some(1));
+    assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0].0, "service-team-ref");
+    assert_eq!(rules[0].1.len(), 1);
+}

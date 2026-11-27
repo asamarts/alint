@@ -81,6 +81,11 @@ impl Engine {
             .get(crate::relation::LimitKind::FindingsPerRule)
     }
 
+    fn findings_per_rule_redacted(&self) -> bool {
+        self.relation_limits
+            .is_redacted(crate::relation::LimitKind::FindingsPerRule)
+    }
+
     /// Configure top-level runtime limits (`limits:` in `.alint.yml`).
     pub fn with_limits(mut self, limits: &crate::ConfigLimits) -> Result<Self> {
         self.relation_limits = limits
@@ -319,6 +324,7 @@ impl Engine {
             trace: None,
             structured_cache: None,
             findings_per_rule_limit: Some(self.findings_per_rule_limit()),
+            findings_per_rule_redacted: self.findings_per_rule_redacted(),
         };
         let target = Self::normalized_write_target(root, path);
         self.entries.iter().any(|entry| {
@@ -705,6 +711,7 @@ impl Engine {
         );
 
         let findings_per_rule_limit = Some(self.findings_per_rule_limit());
+        let findings_per_rule_redacted = self.findings_per_rule_redacted();
         let full_ctx = Context {
             root,
             index,
@@ -719,6 +726,7 @@ impl Engine {
             trace: trace.map(|trace| trace as &dyn TraceSink),
             structured_cache,
             findings_per_rule_limit,
+            findings_per_rule_redacted,
         };
         let filtered_ctx = filtered_index.as_ref().map(|fi| Context {
             root,
@@ -734,6 +742,7 @@ impl Engine {
             trace: trace.map(|trace| trace as &dyn TraceSink),
             structured_cache,
             findings_per_rule_limit,
+            findings_per_rule_redacted,
         });
         let git_file_only_ctx = git_tracked_indexes
             .as_ref()
@@ -752,6 +761,7 @@ impl Engine {
                 trace: trace.map(|trace| trace as &dyn TraceSink),
                 structured_cache,
                 findings_per_rule_limit,
+                findings_per_rule_redacted,
             });
         let git_dir_aware_ctx = git_tracked_indexes
             .as_ref()
@@ -770,6 +780,7 @@ impl Engine {
                 trace: trace.map(|trace| trace as &dyn TraceSink),
                 structured_cache,
                 findings_per_rule_limit,
+                findings_per_rule_redacted,
             });
 
         // Resolve active `scope_filter.changed_since:` diffs + manifest path
@@ -1267,6 +1278,7 @@ impl Engine {
             trace: None,
             structured_cache: None,
             findings_per_rule_limit: Some(self.findings_per_rule_limit()),
+            findings_per_rule_redacted: self.findings_per_rule_redacted(),
         };
 
         let manifest_gates = self.manifest_gates_by_entry(index, &when_env)?;
@@ -1308,7 +1320,11 @@ impl Engine {
                         }
                         if suppressed > 0 {
                             dest.push(crate::rule::findings_per_rule_truncation_failure(
-                                cap, emitted, suppressed, false,
+                                cap,
+                                emitted,
+                                suppressed,
+                                false,
+                                eval_ctx.findings_per_rule_is_redacted(),
                             ));
                         }
                     } else {

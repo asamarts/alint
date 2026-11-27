@@ -195,7 +195,7 @@ struct Options {
     /// (rejecting comments, trailing commas, leading UTF-8 BOM, and empty
     /// files; ADR-0050 D7). Rejected at build time for non-JSON formats.
     #[serde(default, deserialize_with = "present")]
-    #[schemars(with = "bool", transform = no_default)]
+    #[schemars(with = "bool", transform = no_default, extend("x-since" = "0.24"))]
     strict: Option<bool>,
 }
 
@@ -744,7 +744,10 @@ impl Rule for KeyParityRule {
                 &mut findings,
             );
         }
-        if let Some(failure) = budget.truncation_failure(reference_path) {
+        if let Some(failure) = budget.truncation_failure(
+            reference_path,
+            limits.is_redacted(LimitKind::FindingsPerRule),
+        ) {
             findings.push(failure);
         }
         Ok(findings)
@@ -1096,29 +1099,33 @@ impl FindingBudget {
         self.lower_bound |= lower_bound;
     }
 
-    fn truncation_failure(&self, reference_path: &Path) -> Option<Violation> {
+    fn truncation_failure(&self, reference_path: &Path, redacted: bool) -> Option<Violation> {
         if self.suppressed == 0 {
             return None;
         }
-        let omitted = if self.lower_bound {
-            format!("at least {}", self.suppressed)
+        let message = if redacted {
+            "relation limit `findings_per_rule` (<redacted>) reached: remaining findings were \
+             omitted to bound run memory and output"
+                .to_string()
         } else {
-            self.suppressed.to_string()
-        };
-        let noun = if self.emitted == 1 {
-            "finding"
-        } else {
-            "findings"
-        };
-        Some(evaluation_failure(
-            reference_path,
-            &format!(
+            let omitted = if self.lower_bound {
+                format!("at least {}", self.suppressed)
+            } else {
+                self.suppressed.to_string()
+            };
+            let noun = if self.emitted == 1 {
+                "finding"
+            } else {
+                "findings"
+            };
+            format!(
                 "relation limit `findings_per_rule` ({}) reached: emitted {} {noun} and \
                  suppressed {omitted} more; remaining findings were omitted to bound run memory \
                  and output",
                 self.cap, self.emitted
-            ),
-        ))
+            )
+        };
+        Some(evaluation_failure(reference_path, &message))
     }
 }
 
@@ -1335,42 +1342,59 @@ fn base_keys(file: &KeyFile, strip_root: bool) -> Keys<'_> {
     file.keys(usize::from(strip_root))
 }
 
-/// Match a single-name key against a glob: `*` stops at a `.`, `**` crosses
-/// it, and every other character is literal. The matcher is iterative so a
-/// long config pattern cannot overflow the stack, and compares UTF-8 bytes for
-/// the reason [`wildcard_match`] gives.
-fn key_glob_match(pattern: &str, text: &str) -> bool {
-    let (pattern, text) = (pattern.as_bytes(), text.as_bytes());
-    // The literal text around the wildcards settles most patterns.
-    let (Some(first), Some(last)) = (
-        pattern.iter().position(|b| *b == b'*'),
-        pattern.iter().rposition(|b| *b == b'*'),
-    ) else {
-        return pattern == text;
-    };
-    let (prefix, suffix) = (&pattern[..first], &pattern[last + 1..]);
-    if text.len() < prefix.len() + suffix.len()
-        || !text.starts_with(prefix)
-        || !text.ends_with(suffix)
-    {
-        return false;
+/// One parsed atom in a key-name glob.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GlobAtom {
+    /// A literal character (including `\*` escaped inside `['...']`).
+    Lit(char),
+    /// Unescaped `*`: any run of characters in a tree segment, or any run
+    /// without `.` in a single-name key.
+    Star,
+    /// Unescaped `**` inside a single-name key: any run of characters across `.`.
+    DoubleStar,
+}
+
+fn parse_bare_glob(pattern: &str) -> Vec<GlobAtom> {
+    let mut out = Vec::with_capacity(pattern.len());
+    let mut chars = pattern.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '*' {
+            if chars.next_if_eq(&'*').is_some() {
+                out.push(GlobAtom::DoubleStar);
+            } else {
+                out.push(GlobAtom::Star);
+            }
+        } else {
+            out.push(GlobAtom::Lit(c));
+        }
     }
-    // `next[j]` / `next2[j]`: the pattern after this part, or after this
-    // part and the one after it, matches `text[j..]`.
+    out
+}
+
+/// Match a single-name key against a parsed glob: `*` stops at a `.`, `**`
+/// crosses it, and every [`GlobAtom::Lit`] matches literally (including `\*`).
+/// Iterative so a long config pattern cannot overflow the stack.
+fn key_glob_match(pattern: &[GlobAtom], text: &str) -> bool {
+    let text: Vec<char> = text.chars().collect();
+    if pattern.iter().all(|atom| matches!(atom, GlobAtom::Lit(_))) {
+        return pattern.len() == text.len()
+            && pattern
+                .iter()
+                .zip(&text)
+                .all(|(atom, ch)| *atom == GlobAtom::Lit(*ch));
+    }
     let n = text.len();
     let mut next = vec![false; n + 1];
     next[n] = true;
-    let mut next2 = vec![false; n + 1];
     let mut current = vec![false; n + 1];
-    for i in (0..pattern.len()).rev() {
+    for atom in pattern.iter().rev() {
         for j in (0..=n).rev() {
-            current[j] = match pattern[i] {
-                b'*' if pattern.get(i + 1) == Some(&b'*') => next2[j] || (j < n && current[j + 1]),
-                b'*' => next[j] || (j < n && text[j] != b'.' && current[j + 1]),
-                literal => j < n && text[j] == literal && next[j + 1],
+            current[j] = match *atom {
+                GlobAtom::DoubleStar => next[j] || (j < n && current[j + 1]),
+                GlobAtom::Star => next[j] || (j < n && text[j] != '.' && current[j + 1]),
+                GlobAtom::Lit(lit) => j < n && text[j] == lit && next[j + 1],
             };
         }
-        std::mem::swap(&mut next2, &mut next);
         std::mem::swap(&mut next, &mut current);
     }
     next[0]
@@ -1402,7 +1426,7 @@ fn display_key(model: KeyModel, key: &[Segment]) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum KeyPattern {
     /// A glob over a single-name key ([`key_glob_match`]).
-    Name(String),
+    Name(Vec<GlobAtom>),
     /// A key path, one entry per segment.
     Path(Vec<PatternSegment>),
 }
@@ -1412,25 +1436,43 @@ enum PatternSegment {
     /// `**`: any number of segments; at the end of a longer pattern, at
     /// least one (`nav.**` matches below `nav`, not `nav` itself).
     Any,
-    /// One segment whose name matches this glob, where `*` is any run of
-    /// characters.
-    Name(String),
+    /// One segment whose name matches this glob, where unescaped `*` is any run
+    /// of characters and `\*` inside `['...']` is literal `*`.
+    Name(Vec<GlobAtom>),
 }
 
 impl KeyPattern {
-    fn parse(pattern: &str, model: KeyModel) -> std::result::Result<Self, String> {
+    fn parse(pattern: &str, model: KeyModel, rendered: bool) -> std::result::Result<Self, String> {
         if !model.single_name() {
             return parse_path_pattern(pattern).map(Self::Path);
         }
         // A name findings show in bracket form (`['']`, `['[x']`) is written
-        // that way here too.
-        if pattern.starts_with("['") {
-            return match parse_path_pattern(pattern)?.as_slice() {
-                [PatternSegment::Name(name)] => Ok(Self::Name(name.clone())),
-                _ => Err("a bracketed name must be one `['...']`".to_string()),
-            };
+        // that way here too. When a nested rule rendered path tokens via
+        // `render_path_key_pattern` (e.g. `['v1.0'].TOKEN` or `app['v1.0'].TOKEN`
+        // for a dotted directory name in a flat format), rejoin the segments
+        // with literal `.` so the rendered single-name glob still parses and
+        // matches cleanly.
+        if pattern.starts_with("['") || (rendered && pattern.contains("['")) {
+            let segments = parse_path_pattern(pattern)?;
+            if !rendered {
+                return match segments.as_slice() {
+                    [PatternSegment::Name(atoms)] => Ok(Self::Name(atoms.clone())),
+                    _ => Err("a bracketed name must be one `['...']`".to_string()),
+                };
+            }
+            let mut joined = Vec::new();
+            for (idx, seg) in segments.into_iter().enumerate() {
+                if idx > 0 {
+                    joined.push(GlobAtom::Lit('.'));
+                }
+                match seg {
+                    PatternSegment::Any => joined.push(GlobAtom::DoubleStar),
+                    PatternSegment::Name(atoms) => joined.extend(atoms),
+                }
+            }
+            return Ok(Self::Name(joined));
         }
-        Ok(Self::Name(pattern.to_string()))
+        Ok(Self::Name(parse_bare_glob(pattern)))
     }
 
     fn matches(&self, key: &[Segment]) -> bool {
@@ -1444,29 +1486,37 @@ impl KeyPattern {
 
 /// Parse a key-path pattern in the notation findings use: names joined by
 /// `.`, and `['name']` for a segment with a dot, bracket, quote, or nothing in
-/// it (`\` escapes a quote or backslash). An index `[n]` is refused: array
-/// elements are values, so no key contains one.
+/// it (`\` escapes a quote, backslash, or `*`). An index `[n]` is refused:
+/// array elements are values, so no key contains one.
 fn parse_path_pattern(pattern: &str) -> std::result::Result<Vec<PatternSegment>, String> {
     let mut segments = Vec::new();
     let mut chars = pattern.chars().peekable();
     loop {
         if chars.next_if_eq(&'[').is_some() {
             if chars.next_if_eq(&'\'').is_some() {
-                let mut name = String::new();
+                let mut atoms = Vec::new();
                 loop {
                     match chars.next() {
                         Some('\\') => {
-                            name.push(chars.next().ok_or("a `\\` escape ends the pattern")?);
+                            let escaped = chars.next().ok_or("a `\\` escape ends the pattern")?;
+                            atoms.push(GlobAtom::Lit(escaped));
                         }
                         Some('\'') => break,
-                        Some(c) => name.push(c),
+                        Some('*') => {
+                            if chars.next_if_eq(&'*').is_some() {
+                                atoms.push(GlobAtom::DoubleStar);
+                            } else {
+                                atoms.push(GlobAtom::Star);
+                            }
+                        }
+                        Some(c) => atoms.push(GlobAtom::Lit(c)),
                         None => return Err("a `['` name is not closed".to_string()),
                     }
                 }
                 if chars.next() != Some(']') {
                     return Err("a `['name'` must be followed by `]`".to_string());
                 }
-                segments.push(PatternSegment::Name(name));
+                segments.push(PatternSegment::Name(atoms));
             } else if chars.next_if(char::is_ascii_digit).is_some() {
                 return Err(
                     "an index `[n]` never matches: array elements are values, not keys".to_string(),
@@ -1485,7 +1535,7 @@ fn parse_path_pattern(pattern: &str) -> std::result::Result<Vec<PatternSegment>,
             segments.push(if name == "**" {
                 PatternSegment::Any
             } else {
-                PatternSegment::Name(name)
+                PatternSegment::Name(parse_bare_glob(&name))
             });
         }
         match chars.peek() {
@@ -1534,30 +1584,36 @@ fn path_pattern_match(pattern: &[PatternSegment], key: &[Segment]) -> bool {
     next[0]
 }
 
-/// Match one segment name against a glob where `*` is any run of characters.
-/// It compares UTF-8 bytes: a run that stopped inside a character could only
-/// be followed by a continuation byte, which no pattern character starts
-/// with, so byte and character matching agree.
-fn wildcard_match(pattern: &str, text: &str) -> bool {
-    let (pattern, text) = (pattern.as_bytes(), text.as_bytes());
+/// Match one segment name against a parsed glob where unescaped `*` / `**` is
+/// any run of characters and [`GlobAtom::Lit`] matches literally (including `\*`).
+fn wildcard_match(pattern: &[GlobAtom], text: &str) -> bool {
+    let text: Vec<char> = text.chars().collect();
     let (mut p, mut t) = (0, 0);
     let mut star: Option<(usize, usize)> = None;
     while t < text.len() {
-        if pattern.get(p) == Some(&b'*') {
-            star = Some((p, t));
-            p += 1;
-        } else if pattern.get(p) == Some(&text[t]) {
-            p += 1;
-            t += 1;
-        } else if let Some((star_p, star_t)) = star {
-            p = star_p + 1;
-            t = star_t + 1;
-            star = Some((star_p, star_t + 1));
-        } else {
-            return false;
+        match pattern.get(p) {
+            Some(GlobAtom::Star | GlobAtom::DoubleStar) => {
+                star = Some((p, t));
+                p += 1;
+            }
+            Some(GlobAtom::Lit(lit)) if *lit == text[t] => {
+                p += 1;
+                t += 1;
+            }
+            _ => {
+                if let Some((star_p, star_t)) = star {
+                    p = star_p + 1;
+                    t = star_t + 1;
+                    star = Some((star_p, star_t + 1));
+                } else {
+                    return false;
+                }
+            }
         }
     }
-    pattern[p..].iter().all(|c| *c == b'*')
+    pattern[p..]
+        .iter()
+        .all(|atom| matches!(atom, GlobAtom::Star | GlobAtom::DoubleStar))
 }
 
 pub static META: alint_core::KindMeta = alint_core::KindMeta {
@@ -1791,7 +1847,7 @@ fn ignore_patterns(
         .map(|pattern| {
             let mut first_error = None;
             for &model in models {
-                match KeyPattern::parse(pattern, model) {
+                match KeyPattern::parse(pattern, model, spec.rendered) {
                     Ok(parsed) => return Ok(parsed),
                     Err(error) => {
                         first_error.get_or_insert(error);
