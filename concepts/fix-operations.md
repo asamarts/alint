@@ -3,11 +3,11 @@ title: 'Fix operations'
 description: 'Configure alint''s automatic fix operations, applicability tiers, and execution safeguards.'
 ---
 
-Every `fix:` block uses one of these ops. See [ARCHITECTURE.md](design/ARCHITECTURE.md#fix-operations) for the full cross-reference of which op pairs with which rule kind.
+Every `fix:` block uses one of these ops (each op also accepts an optional `applicability: safe | unsafe` override). See [ARCHITECTURE.md](https://github.com/asamarts/alint/blob/main/docs/design/ARCHITECTURE.md#fix-operations) for the full cross-reference of which op pairs with which rule kind.
 
 **Path-only** (ignore `fix_size_limit`):
 
-- `file_create: {content, path?, create_parents?}`
+- `file_create: {content?, content_from?, path?, create_parents?}`
 - `file_remove: {}`
 - `file_rename: {}` (target derived from rule config)
 - `dir_create: {}`
@@ -18,8 +18,8 @@ Every `fix:` block uses one of these ops. See [ARCHITECTURE.md](design/ARCHITECT
 
 **Content-editing** (skipped on files over `fix_size_limit`; default 1 MiB, `null` disables the cap):
 
-- `file_prepend: {content}`
-- `file_append: {content}`
+- `file_prepend: {content?, content_from?}`
+- `file_append: {content?, content_from?}`
 - `file_trim_trailing_whitespace: {}`
 - `file_append_final_newline: {}`
 - `file_normalize_line_endings: {}` (target read from parent rule)
@@ -27,7 +27,7 @@ Every `fix:` block uses one of these ops. See [ARCHITECTURE.md](design/ARCHITECT
 - `file_strip_zero_width: {}`
 - `file_strip_bom: {}`
 - `file_collapse_blank_lines: {}` (max read from parent rule)
-- `replace: {replacement}` (pattern from parent rule) — located, one splice per match
+- `replace: {replacement, pattern?}` (pattern from parent rule, or required `pattern` for the 8 `*_path_matches` kinds) — located, one splice per match
 - `set_value: {}` (value from the rule's `equals:`) — for the `*_path_equals` kinds
 - `remove_value: {}` (target from parent rule) — for the `*_path_absent` kinds
 - `sync_from: {}` (source + relation from parent rule) — for `cross_file`

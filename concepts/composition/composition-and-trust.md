@@ -39,7 +39,7 @@ A config rarely stands alone. `extends:` pulls in other configs and merges their
 <rect class="card" x="30" y="122" width="400" height="214" rx="10"/>
 <text class="ui mut" x="44" y="144">extends (fetched or bundled)</text>
 <text class="tag mut" x="44" y="162">alint://bundled/oss-baseline@v1, https pinned by #sha256</text>
-<rect class="chip" x="44" y="172" width="210" height="26" rx="6"/><rect x="44" y="172" width="5" height="26" rx="2" fill="#22c55e"/><text class="tag tx" x="62" y="189">readme-exists: error</text><text class="tag" x="272" y="189" fill="#22c55e">merges by id</text>
+<rect class="chip" x="44" y="172" width="210" height="26" rx="6"/><rect x="44" y="172" width="5" height="26" rx="2" fill="#22c55e"/><text class="tag tx" x="62" y="189">oss-readme-exists: error</text><text class="tag" x="272" y="189" fill="#22c55e">merges by id</text>
 <rect class="chip" x="44" y="208" width="210" height="26" rx="6"/><rect x="44" y="208" width="5" height="26" rx="2" fill="#ef4444"/><text class="tag tx" x="62" y="225">kind: command</text><text class="tag pulse" x="272" y="225" fill="#ef4444">rejected at load</text>
 <rect class="chip" x="44" y="244" width="210" height="26" rx="6"/><rect x="44" y="244" width="5" height="26" rx="2" fill="#ef4444"/><text class="tag tx" x="62" y="261">allow_out_of_root</text><text class="tag pulse" x="272" y="261" fill="#ef4444">rejected at load</text>
 <text class="tag mut" x="44" y="302">bundled resolves offline; fetched bodies match their hash</text>
@@ -48,7 +48,7 @@ A config rarely stands alone. `extends:` pulls in other configs and merges their
 
 ## How extends merges
 
-Each `extends:` entry names another config, and they resolve **left to right**: a later entry overrides an earlier one, and your own file overrides everything it extends. Merging is **by rule `id`, field by field**, so an entry that re-declares `readme-exists` with only `level: error` changes just that field and inherits `kind`, `paths`, and `message` from below. An entry can be a local file, an `https://` URL, or a bundled ruleset resolved offline from the binary (`alint://bundled/...`); `only:` / `except:` filters (mutually exclusive on one entry) narrow which rules an entry contributes.
+Each `extends:` entry names another config, and they resolve **left to right**: a later entry overrides an earlier one, and your own file overrides everything it extends. Merging is **by rule `id`, field by field**, so an entry that re-declares `oss-readme-exists` with only `level: error` changes just that field and inherits `kind`, `paths`, and `message` from below. An entry can be a local file, an `https://` URL, or a bundled ruleset resolved offline from the binary (`alint://bundled/...`); `only:` / `except:` filters (mutually exclusive on one entry) narrow which rules an entry contributes.
 
 Fetched and bundled configs are **leaf nodes**: they cannot declare `extends:` of their own. A fetched body has no principled base for resolving relative paths, and bundled rulesets are deliberately flat catalogs; you nest `extends:` locally instead.
 

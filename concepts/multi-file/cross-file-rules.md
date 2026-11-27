@@ -75,10 +75,12 @@ Edges resolve **as paths**, which is the point: a `from_content` regex captures 
 
 ## cross_file
 
-`cross_file` asserts a **relation** between one file's extracted value and one or more targets. Six
+`cross_file` asserts a **relation** between one file's extracted value and one or more targets. Seven
 relations: the value relations `equals`, `subset`, `superset`, and `set_equals`; `identical`, a
-whole-file byte match; and `resolves`, which requires each extracted path to be in the walked tree,
-so a path that is missing, or that an ignore file or `ignore:` excludes, does not resolve. It pulls
+whole-file byte match; `resolves`, which requires each extracted path to be in the walked tree,
+so a path that is missing, or that an ignore file or `ignore:` excludes, does not resolve; and
+`registered`, which checks that every matching filesystem entry appears in a registry file (with an
+optional `create_and_register` fix). It pulls
 values through the shared `extract:` extractor and an optional `normalize`, so `normalize:
 semver-minor` reconciles `4.36-dev`, `4.36.0`, and `>=4.36` to the same `4.36` band, letting the
 `engines.node` in every `package.json` be checked against the root without version-string noise.

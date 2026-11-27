@@ -55,7 +55,7 @@ Add the sets you want to `extends:`, then tune them in your own config. A rule y
 
 ## In practice
 
-Extend the OSS baseline and the Rust set, and downgrade one inherited rule to a warning while a repo catches up:
+Extend the OSS baseline and the Rust set, and elevate one inherited rule to an error for this repository:
 
 ```yaml
 version: 1
@@ -63,8 +63,8 @@ extends:
   - alint://bundled/oss-baseline@v1
   - alint://bundled/rust@v1
 rules:
-  - id: readme-exists
-    level: warning
+  - id: oss-readme-exists
+    level: error
 ```
 
 `alint list` shows the union of the inherited rules with your override applied; `alint check` runs the Rust rules only if the tree actually has Rust.

@@ -42,9 +42,9 @@ alint reads one declarative config, makes a single parallel pass over your repos
 <text class="ui ac" x="34" y="186">repository index</text><text class="ui mut" x="426" y="186" text-anchor="end">walked once, sorted &#183; 6 files</text>
 <path class="flow" d="M 230 198 V 214"/>
 <text class="ui mut" x="20" y="228">facts once &#183; when filters &#8594; 3 of 4 rules active</text>
-<rect class="card" x="20" y="236" width="84" height="24" rx="12" style="stroke:var(--ac)"/><text class="mono tx" x="31" y="252" font-size="12">no_bidi</text>
-<rect class="card" x="112" y="236" width="126" height="24" rx="12" style="stroke:var(--ac)"/><text class="mono tx" x="124" y="252" font-size="12">filename_case</text>
-<rect class="card" x="246" y="236" width="64" height="24" rx="12" style="stroke:#7c3aed"/><text class="mono" x="257" y="252" font-size="12" fill="#7c3aed">pair</text>
+<rect class="card" x="20" y="236" width="134" height="24" rx="12" style="stroke:var(--ac)"/><text class="mono tx" x="31" y="252" font-size="12">no_bidi_controls</text>
+<rect class="card" x="160" y="236" width="126" height="24" rx="12" style="stroke:var(--ac)"/><text class="mono tx" x="172" y="252" font-size="12">filename_case</text>
+<rect class="card" x="292" y="236" width="64" height="24" rx="12" style="stroke:#7c3aed"/><text class="mono" x="303" y="252" font-size="12" fill="#7c3aed">pair</text>
 <path class="flow" d="M 230 264 V 278"/>
 <rect class="repo" x="20" y="280" width="420" height="344" rx="14"/>
 <text class="ui ac" x="34" y="303">scan</text><text class="ui mut" x="70" y="303">read each file once</text>
@@ -66,7 +66,7 @@ alint reads one declarative config, makes a single parallel pass over your repos
 <rect x="34" y="672" width="258" height="14" rx="7" fill="#22c55e"/><rect x="296" y="672" width="130" height="14" rx="7" fill="#ef4444"/>
 <text class="ui" x="34" y="704" fill="#22c55e">4 passed</text><text class="ui" x="426" y="704" fill="#ef4444" text-anchor="end">2 failed</text>
 <circle cx="44" cy="720" r="8" fill="#ef4444"/><path d="M40.5 716.5 l7 7 M47.5 716.5 l-7 7" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/>
-<text class="mono tx" x="60" y="724" font-size="12">no_bidi</text>
+<text class="mono tx" x="60" y="724" font-size="12">no_bidi_controls</text>
 <text class="mono mut" x="60" y="741" font-size="11">src/main.rs:12</text>
 <circle cx="44" cy="760" r="8" fill="#ef4444"/><path d="M40.5 756.5 l7 7 M47.5 756.5 l-7 7" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/>
 <text class="mono tx" x="60" y="764" font-size="12">filename_case</text>
@@ -100,7 +100,7 @@ Each rule's `when:` expression is evaluated against the facts. A rule whose cond
 
 Rules split into two classes, and both run over that single index:
 
-- **Per-file rules** run file-major. alint reads each matched file's bytes **at most once**, no matter how many rules apply to it, and hands that one read to every matching rule (`no_bidi`, `filename_case`, and the rest). This read-coalescing is why adding more per-file rules barely changes a run's cost.
+- **Per-file content rules** run file-major. alint reads each matched file's bytes **at most once**, no matter how many content rules apply to it, and hands that one read to every matching content rule (`no_bidi_controls`, `no_trailing_whitespace`, `file_content_forbidden`, and the rest). This read-coalescing is why adding more content rules barely changes a run's cost. Path-only rules such as `filename_case` run directly over the walked index without reading file bytes.
 - **Cross-file rules** run rule-major: each one scans the whole index itself to assert a relationship no single file can (every crate has a README, no two manifests disagree, a reference graph is acyclic).
 
 Both classes run in parallel across cores; their violations are merged and re-sorted so the output stays deterministic.

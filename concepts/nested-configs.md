@@ -45,7 +45,7 @@ At load time, alint walks the tree (respecting `.gitignore` + `ignore:`), picks 
 ## Restrictions (MVP)
 
 - Only the root config sets `nested_configs: true`. Nested configs can't spawn further nesting.
-- Nested configs can only declare `version:` and `rules:` — `extends:`, `facts:`, `vars:`, `ignore:`, `respect_gitignore:`, `fix_size_limit:`, and `allow_out_of_root:` are root-only.
+- Nested configs can only declare `version:`, optional `requires:`, and `rules:` — `extends:`, `facts:`, `vars:`, `ignore:`, `respect_gitignore:`, `fix_size_limit:`, `nested_configs:`, `allow_out_of_root:`, `baseline:`, `trusted_extends:`, `templates:`, and `limits:` are root-only and rejected at load time.
 - Every rule in a nested config must have a path-like scope field (`paths`, `select`, or `primary`). Rules without any (e.g. `no_submodules`, which is hardcoded to repo root) can't be nested.
 - The regex `select:` of `for_each_match` and `ordered_block` is a line selector, not a path, so it is not prefixed; their `paths:` is.
 - Kinds whose selectors can't be confined to a subdirectory are rejected in nested configs, including inside a `require:` block and when the kind comes from a root template through `extends_template:`: `cross_file` (and `cross_file_value_equals`), `registry_paths_resolve`, `file_graph`, `pair_hash`, `pair_changed_together`, `changeset_requires_path`, `git_no_denied_paths`, and the `git_commit_*` kinds. Declare them in the root config.
