@@ -156,4 +156,47 @@ mod tests {
             Some(Path::new("pkg/sub/deep/file.rs"))
         );
     }
+
+    #[test]
+    fn build_rejects_missing_paths_zero_depth_fix_and_unknown_option() {
+        let no_paths = spec_yaml("id: t\nkind: max_directory_depth\nmax_depth: 2\nlevel: error\n");
+        assert!(build(&no_paths).unwrap_err().to_string().contains("paths"));
+
+        let zero = spec_yaml(
+            "id: t\nkind: max_directory_depth\npaths: \"**\"\nmax_depth: 0\nlevel: error\n",
+        );
+        assert!(build(&zero).unwrap_err().to_string().contains("> 0"));
+
+        let with_fix = spec_yaml(
+            "id: t\nkind: max_directory_depth\npaths: \"**\"\nmax_depth: 2\nlevel: error\nfix:\n  file_remove: {}\n",
+        );
+        assert!(
+            build(&with_fix)
+                .unwrap_err()
+                .to_string()
+                .contains("no fix op")
+        );
+
+        let unknown = spec_yaml(
+            "id: t\nkind: max_directory_depth\npaths: \"**\"\nmax_depth: 2\nextra_opt: 1\nlevel: error\n",
+        );
+        assert!(
+            build(&unknown)
+                .unwrap_err()
+                .to_string()
+                .contains("invalid options")
+        );
+    }
+
+    #[test]
+    fn evaluate_uses_custom_message_when_configured() {
+        let spec = spec_yaml(
+            "id: t\nkind: max_directory_depth\npaths: \"**\"\nmax_depth: 1\nmessage: \"flatten tree\"\nlevel: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let idx = index(&["ok.rs", "deep/bad.rs"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &idx)).unwrap();
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].message, "flatten tree");
+    }
 }

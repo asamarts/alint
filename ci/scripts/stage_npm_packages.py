@@ -29,43 +29,18 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
-import struct
 import sys
 from pathlib import Path
 
-from build_wheels import extract_payload, find_tarball, verify_sha256
+from build_wheels import binary_platform, extract_payload, find_tarball, verify_sha256
 
 REPO = Path(__file__).resolve().parents[2]
 NPM_DIR = REPO / "npm"
 SHIM_PACKAGE = "@asamarts/alint"
+SHIM_LICENSES = ("LICENSE-APACHE", "LICENSE-MIT", "NOTICE")
 
 # Fields every package shares with the shim's package.json.
 SHARED_FIELDS = ("homepage", "bugs", "license", "repository")
-
-# Executable header checks, so a binary can't ship in the wrong package.
-ELF_MACHINE = {"x64": 0x3E, "arm64": 0xB7}  # e_machine: EM_X86_64, EM_AARCH64
-MACHO_CPU = {"x64": 0x01000007, "arm64": 0x0100000C}  # CPU_TYPE_X86_64, CPU_TYPE_ARM64
-PE_MACHINE = {"x64": 0x8664, "arm64": 0xAA64}  # IMAGE_FILE_MACHINE_AMD64, _ARM64
-
-
-def binary_platform(data: bytes) -> tuple[str, str] | None:
-    """Return the ``(os, cpu)`` an executable is built for, in npm's terms."""
-    if data[:4] == b"\x7fELF" and len(data) >= 20:
-        machine = struct.unpack_from("<H", data, 18)[0]
-        cpu = next((c for c, m in ELF_MACHINE.items() if m == machine), None)
-        return ("linux", cpu) if cpu else None
-    if data[:4] == b"\xcf\xfa\xed\xfe" and len(data) >= 8:  # 64-bit little-endian Mach-O
-        cputype = struct.unpack_from("<I", data, 4)[0]
-        cpu = next((c for c, t in MACHO_CPU.items() if t == cputype), None)
-        return ("darwin", cpu) if cpu else None
-    if data[:2] == b"MZ" and len(data) >= 0x40:
-        pe = struct.unpack_from("<I", data, 0x3C)[0]
-        if data[pe : pe + 4] != b"PE\0\0" or len(data) < pe + 6:
-            return None
-        machine = struct.unpack_from("<H", data, pe + 4)[0]
-        cpu = next((c for c, m in PE_MACHINE.items() if m == machine), None)
-        return ("win32", cpu) if cpu else None
-    return None
 
 
 def package_dir_name(name: str) -> str:
@@ -83,12 +58,10 @@ def platform_readme(pkg: dict) -> str:
     )
 
 
-def stage_platform(pkg: dict, version: str, shim: dict, tarball_dir: Path, out: Path) -> Path:
-    tarball = find_tarball(tarball_dir, pkg["target"])
-    if not tarball.with_name(tarball.name + ".sha256").exists():
-        raise RuntimeError(f"{tarball.name}: no .sha256 sidecar to verify against")
+def stage_platform(pkg: dict, tag: str, version: str, shim: dict, tarball_dir: Path, out: Path) -> Path:
+    tarball = find_tarball(tarball_dir, tag, pkg["target"])
     verify_sha256(tarball)
-    binary, licenses = extract_payload(tarball, pkg["os"] == "win32")
+    binary, licenses = extract_payload(tarball, tag, pkg["target"], pkg["os"] == "win32")
     if binary_platform(binary) != (pkg["os"], pkg["cpu"]):
         raise RuntimeError(
             f"{tarball.name}: the binary is built for {binary_platform(binary)}, "
@@ -136,8 +109,19 @@ def stage_shim(packages: list[dict], version: str, shim: dict, out: Path) -> Pat
     for rel in shim["files"]:
         (dest / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(NPM_DIR / rel, dest / rel)
+    # Ship Apache-2.0 / MIT license texts and NOTICE inside the shim tarball
+    # too (Apache-2.0 §4) so every published npm package carries its notices.
+    files = list(shim["files"])
+    for leaf in SHIM_LICENSES:
+        src = REPO / leaf
+        if not src.is_file():
+            raise RuntimeError(f"missing root license file: {src}")
+        shutil.copy2(src, dest / leaf)
+        if leaf not in files:
+            files.append(leaf)
     manifest = dict(shim)
     manifest["version"] = version
+    manifest["files"] = files
     manifest["optionalDependencies"] = {name: version for name in expected}
     (dest / "package.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(f"  [npm] {SHIM_PACKAGE}@{version}  (shim; {len(expected)} optional platform packages)")
@@ -160,7 +144,7 @@ def main() -> int:
     print(f"==> stage_npm_packages: alint {version} (tag {args.tag}) from {args.tarball_dir}")
     args.out.mkdir(parents=True, exist_ok=False)
     for pkg in packages:
-        stage_platform(pkg, version, shim, args.tarball_dir, args.out)
+        stage_platform(pkg, args.tag, version, shim, args.tarball_dir, args.out)
     stage_shim(packages, version, shim, args.out)
     print(f"==> stage_npm_packages: {len(packages) + 1} package(s) in {args.out}")
     return 0

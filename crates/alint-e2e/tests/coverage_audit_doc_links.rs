@@ -240,3 +240,94 @@ fn regexish_scheme(url: &str) -> bool {
         false
     }
 }
+
+fn github_heading_slug(heading: &str) -> String {
+    let mut slug = String::new();
+    for ch in heading.trim().chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            slug.push(ch.to_ascii_lowercase());
+        } else if ch == ' ' || ch == '-' {
+            slug.push('-');
+        }
+    }
+    slug
+}
+
+#[test]
+fn docs_development_readme_lists_every_top_level_markdown_file() {
+    let root = repo_root();
+    let dev_dir = root.join("docs/development");
+    let index = std::fs::read_to_string(dev_dir.join("README.md"))
+        .expect("read docs/development/README.md");
+    let mut missing = Vec::new();
+    for entry in std::fs::read_dir(&dev_dir)
+        .expect("read docs/development")
+        .flatten()
+    {
+        let path = entry.path();
+        if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("md") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        if name == "README.md" {
+            continue;
+        }
+        let listed = index.contains(name)
+            || (name.starts_with("case-study-revalidation-batch-")
+                && index.contains("case-study-revalidation-batch-{1..6}.md"))
+            || (name.starts_with("marketing-extraction-batch-")
+                && index.contains("marketing-extraction-batch-{1..6}.md"));
+        if !listed {
+            missing.push(name.to_string());
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "docs/development/README.md omits file(s): {missing:?}",
+    );
+}
+
+#[test]
+fn github_readme_fragment_links_resolve_to_real_headings() {
+    let root = repo_root();
+    let readme = std::fs::read_to_string(root.join("README.md")).expect("read README.md");
+    let mut slugs = std::collections::BTreeSet::new();
+    let mut in_fence = false;
+    for line in readme.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if !in_fence && trimmed.starts_with('#') {
+            let title = trimmed.trim_start_matches('#').trim();
+            slugs.insert(github_heading_slug(title));
+        }
+    }
+    let mut broken = Vec::new();
+    for rel in [
+        "npm/README.md",
+        "wit/README.md",
+        "GOVERNANCE.md",
+        "CONTRIBUTING.md",
+        "RELEASING.md",
+        "SECURITY.md",
+    ] {
+        let path = root.join(rel);
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        for url in links(&strip_code(&text)) {
+            if let Some(frag) = url.strip_prefix("https://github.com/asamarts/alint#")
+                && !slugs.contains(frag)
+            {
+                broken.push(format!("{rel}: broken README anchor `#{frag}` in `{url}`"));
+            }
+        }
+    }
+    assert!(
+        broken.is_empty(),
+        "broken GitHub README anchor link(s):\n  - {}",
+        broken.join("\n  - "),
+    );
+}

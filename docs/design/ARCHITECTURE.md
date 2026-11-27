@@ -438,7 +438,7 @@ iteration order is an optimization; all declared gates must admit the target.
 
 Cross-file rules (`pair`, `for_each_dir`, `file_exists`, ...) reject `scope_filter:` at build time and direct authors to `for_each_dir + when_iter:`. Per-file rules, both `PerFileRule` and the remaining rule-major ones, honour the filter through the shared `Scope::matches` call (see the v0.9.10 structural fix below).
 
-Used by the seven bundled ecosystem rulesets (`rust@v1`, `node@v1`, `python@v1`, `go@v1`, `java@v1`, `dotnet@v1`, `php@v1`) so their per-file content rules narrow to files inside their ecosystem's package subtree in polyglot monorepos. Full design: [the v0.9 scope-filter pass](https://github.com/asamarts/alint/blob/main/docs/design/v0.9/scope-filter.md).
+Used by five of the bundled ecosystem rulesets (`rust@v1`, `node@v1`, `python@v1`, `go@v1`, `java@v1`) so their per-file content rules narrow to files inside their ecosystem's package subtree in polyglot monorepos (`dotnet@v1` and `php@v1` currently rely on tree-level `when:` gates). Full design: [the v0.9 scope-filter pass](https://github.com/asamarts/alint/blob/main/docs/design/v0.9/scope-filter.md).
 
 **Structural fix in v0.9.10**: `Scope` owns its `Option<ScopeFilter>` and `Scope::matches(&Path, &FileIndex)` consults both predicates in one call. The signature change is compile-enforced (every per-rule path check must thread the index), so the silent-drop bug class that produced sweeps in v0.9.7 and v0.9.9 is structurally closed. No rule has a separate `scope_filter` field to forget about. Full design: [the v0.9 scope-owns-scope-filter pass](https://github.com/asamarts/alint/blob/main/docs/design/v0.9/scope-owns-scope-filter.md).
 
@@ -601,8 +601,7 @@ alint/
 **Possible future extraction/extension points (see
 [ROADMAP.md](https://github.com/asamarts/alint/blob/main/docs/design/ROADMAP.md)):**
 
-- `crates/alint-plugin/`: a WASM plugin host remains unscheduled backlog; the tier-1 `command`
-  plugin already lives in `alint-rules`.
+- `crates/alint-plugin/`: host runtime for the three-host plugin model (native, process, WASM; planned per [ADR-0019](https://github.com/asamarts/alint/blob/main/docs/adr/0019-general-linter-program-and-plugin-architecture.md) and [ADR-0048](https://github.com/asamarts/alint/blob/main/docs/adr/0048-wit-contract-and-plugin-hosts.md)). The tier-1 `command` plugin already lives in `alint-rules`, and the draft WIT contract lives in `wit/alint-plugin/v0.1/plugin.wit`.
 - `crates/alint-facts/`: currently subsumed by `alint-core::facts`; promotion to its own crate is deferred until the language and license detectors (`detect: linguist`, `detect: askalono`) land.
 
 ### Publishing intent (crates.io)
@@ -615,7 +614,7 @@ The public crate surface is kept narrow so the semver-stable API remains maintai
 | `alint-core` | public | Embeddable engine for custom drivers: scripts, custom CI gates, third-party hosts. Semver-stable from 1.0. |
 | `alint-testkit` | public | Versioned policy-test documents, validating hermetic runner, and fixture utilities for third-party rulesets. |
 | `alint-dsl`, `alint-rules`, `alint-output`, `alint-lsp` | published, but documented as internal | Cargo requires the binary and testkit workspace dependencies to be resolvable from crates.io. Publication does not make these semver-stable public APIs. |
-| `alint-bench`, `alint-e2e`, `xtask` | `publish = false` | Repository-only benchmarking, integration testing, and maintenance tooling. |
+| `alint-bench`, `alint-e2e`, `alint-witforge-consumer`, `xtask` | `publish = false` | Repository-only benchmarking, integration testing, WIT contract consumer check, and maintenance tooling. |
 
 `publish` is a packaging property, not an API-stability promise. `alint-core` and
 `alint-testkit` are the supported library surfaces; implementation crates carry an `Internal`
@@ -634,7 +633,7 @@ detailed in [`plugin-architecture.md`](https://github.com/asamarts/alint/blob/ma
   not implicitly invoke a shell. Exit code is the verdict; bounded stdout/stderr form the default
   failure message. Environment variables expose path, root, rule id, level, vars, and facts.
   Simple, scriptable, language-agnostic.
-- **Plugin contract** (planned, designed with the Phase 2 relation layer). One versioned
+- **Plugin contract** (draft shipped in v0.21 at `wit/alint-plugin/v0.1/plugin.wit`, gated by `witforge` in CI). One versioned
   contract, written in WIT, with adapter, analyzer, and fixer roles. Plugins propose typed
   edits; the host applies them. Built-in kinds and formats implement the same internal traits.
 - **Three hosts for that contract** (planned, in this order):
@@ -665,7 +664,7 @@ Selected via `--format`:
 
 All eight formats preserve typed analysis failures separately from policy violations. Failures
 always count as errors, cannot be baselined or fixed, and retain a stable class plus resource
-location where available. See the [output-format reference](../site/reference/output-formats/index.md).
+location where available. See the [output-format reference](https://alint.org/docs/reference/output-formats/).
 
 ## Full example
 

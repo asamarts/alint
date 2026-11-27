@@ -34,16 +34,7 @@ pub fn run(check: bool) -> Result<()> {
     let root = crate::workspace_root()?;
 
     if !npx_available() {
-        if check {
-            println!(
-                "[gen-mermaid] WARN: Node/npx not found - SKIPPING {DIAGRAMS_MD} freshness check."
-            );
-            println!(
-                "[gen-mermaid] Install Node >= 20 to run this gate locally (CI's runner already has it)."
-            );
-            return Ok(());
-        }
-        bail!("gen-mermaid needs Node/npx (for `likec4 gen mermaid`); install Node >= 20");
+        return handle_missing_npx(check, running_in_ci());
     }
 
     let sections = gallery_sections(
@@ -87,6 +78,27 @@ pub fn run(check: bool) -> Result<()> {
     fs::write(&path, &rendered).with_context(|| format!("write {}", path.display()))?;
     println!("wrote {DIAGRAMS_MD} ({} diagrams)", sections.len());
     Ok(())
+}
+
+fn running_in_ci() -> bool {
+    std::env::var("CI").is_ok_and(|v| v == "true" || v == "1")
+}
+
+fn handle_missing_npx(check: bool, in_ci: bool) -> Result<()> {
+    if check && !in_ci {
+        println!(
+            "[gen-mermaid] WARN: Node/npx not found - SKIPPING {DIAGRAMS_MD} freshness check."
+        );
+        println!("[gen-mermaid] Install Node >= 20 to run this gate locally (required in CI).");
+        return Ok(());
+    }
+    if in_ci {
+        bail!(
+            "gen-mermaid requires Node/npx in CI (CI=true) to enforce {DIAGRAMS_MD} freshness; \
+             refusing to fail open"
+        );
+    }
+    bail!("gen-mermaid needs Node/npx (for `likec4 gen mermaid`); install Node >= 20");
 }
 
 /// Is `npx` on PATH (i.e. can we run `likec4`)?
@@ -307,5 +319,13 @@ mod tests {
             Some("checkFlow")
         );
         assert_eq!(view_id_in_line("## Heading"), None);
+    }
+
+    #[test]
+    fn missing_npx_fails_in_ci_even_in_check_mode() {
+        assert!(handle_missing_npx(true, false).is_ok());
+        assert!(handle_missing_npx(false, false).is_err());
+        assert!(handle_missing_npx(true, true).is_err());
+        assert!(handle_missing_npx(false, true).is_err());
     }
 }

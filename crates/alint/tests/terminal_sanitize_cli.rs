@@ -269,3 +269,57 @@ fn suggest_explain_sanitizes_evidence_paths() {
     assert!(out.contains(".bak"), "evidence lists the file: {out}");
     assert_clean("suggest", &o.stdout);
 }
+
+/// On a PTY, `alint suggest` progress messages must sanitize attacker-named
+/// files and `--color=never` must not emit ANSI color escapes.
+#[cfg(unix)]
+#[test]
+fn suggest_pty_sanitizes_progress_filenames_and_honors_color_never() {
+    use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
+    use std::io::Read as _;
+
+    let Ok(pair) = NativePtySystem::default().openpty(PtySize {
+        rows: 24,
+        cols: 200,
+        pixel_width: 0,
+        pixel_height: 0,
+    }) else {
+        eprintln!("pty unavailable on this runner; skipping");
+        return;
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    let osc_name = "a\x1b]0;pwned\x07.js";
+    std::fs::write(tmp.path().join(osc_name), "console.log(1);\n").unwrap();
+    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_alint"));
+    for (name, value) in crate::hermetic::environment() {
+        cmd.env(name, value);
+    }
+    cmd.args(["suggest", "--color", "never", "--progress", "always"]);
+    cmd.cwd(tmp.path());
+    let mut child = pair.slave.spawn_command(cmd).expect("spawn in pty");
+    let mut reader = pair.master.try_clone_reader().unwrap();
+    let join = std::thread::spawn(move || {
+        let mut out = Vec::new();
+        let mut buf = [0u8; 4096];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => out.extend_from_slice(&buf[..n]),
+            }
+        }
+        out
+    });
+    drop(pair.slave);
+    child.wait().unwrap();
+    drop(pair.master);
+    let out = join.join().unwrap();
+    let text = String::from_utf8_lossy(&out);
+    assert!(
+        !text.contains("\x1b]0;pwned"),
+        "raw OSC leaked in suggest PTY output: {text:?}"
+    );
+    assert!(
+        !text.contains('\x1b'),
+        "raw ANSI escape leaked under --color=never: {text:?}"
+    );
+}

@@ -19,6 +19,8 @@ import com.redhat.devtools.lsp4ij.client.LanguageClientImpl
 import com.redhat.devtools.lsp4ij.server.LanguageServerException
 import com.redhat.devtools.lsp4ij.server.ProcessStreamConnectionProvider
 import com.redhat.devtools.lsp4ij.server.StreamConnectionProvider
+import java.lang.ref.WeakReference
+import java.util.Collections
 import java.util.WeakHashMap
 import java.util.concurrent.atomic.AtomicLong
 
@@ -27,11 +29,6 @@ internal const val ALINT_SERVER_ID = "alint"
 /**
  * Registers `alint lsp` with LSP4IJ. Wired in `plugin.xml` under the
  * `com.redhat.devtools.lsp4ij` server extension point.
- *
- * Uses LSP4IJ's `ProcessStreamConnectionProvider` (`setCommands` /
- * `setWorkingDirectory` / `getInitializationOptions`), `LanguageClientImpl`,
- * and `LanguageServerFactory`; the editors CI job (`./gradlew buildPlugin
- * verifyPlugin`) catches API drift in the pinned LSP4IJ version.
  */
 class AlintLanguageServerFactory : LanguageServerFactory {
     override fun createConnectionProvider(project: Project): StreamConnectionProvider =
@@ -41,21 +38,29 @@ class AlintLanguageServerFactory : LanguageServerFactory {
         AlintLanguageClient(project)
 }
 
-private class AlintConnectionProvider(private val project: Project) : ProcessStreamConnectionProvider() {
+internal class AlintConnectionProvider(private val project: Project) : ProcessStreamConnectionProvider() {
     val generation: Long = AlintTrustCoordinator.nextGeneration()
+    private val hasBinary: Boolean
 
     init {
-        val binary = AlintBinary.resolve()
+        val version = runCatching { AlintNotifier.pluginVersion() }.getOrNull()
+        val binary = AlintBinary.resolve(version)
         if (binary != null) {
+            hasBinary = true
+            AlintNotifier.resetMissingNotice(project)
             super.setCommands(listOf(binary, "lsp"))
             project.basePath?.let { super.setWorkingDirectory(it) }
         } else {
+            hasBinary = false
             thisLogger().warn("alint binary not found on PATH or in settings; server not started")
             AlintNotifier.binaryMissing(project)
         }
     }
 
     override fun start() {
+        if (!hasBinary) {
+            throw LanguageServerException("alint binary not found on PATH or in Settings -> Tools -> alint")
+        }
         AlintTrustCoordinator.onProviderStarting(project, this)
         try {
             super.start()
@@ -77,7 +82,6 @@ private class AlintConnectionProvider(private val project: Project) : ProcessStr
      * Forward the IDE's trusted-project state in `initializationOptions` so
      * `alint lsp` unlocks command rules, Git rules, custom facts, remote
      * `extends:`, and `{{env.*}}` only when the user has trusted the project.
-     * Computed dynamically on each initialize so restarts pick up changes.
      */
     override fun getInitializationOptions(rootUri: VirtualFile?): Any {
         val trusted = project.isTrusted()
@@ -94,27 +98,20 @@ private class AlintLanguageClient(project: Project) : LanguageClientImpl(project
 }
 
 /**
- * Coordinates workspace-trust restarts per project using only public LSP4IJ
- * and IntelliJ Platform APIs:
- *
- * - Tracks the active [AlintConnectionProvider] and its last initialized
- *   `trusted` value per project, avoiding LSP4IJ 0.7.0's async `stop()`
- *   status-clobber race (where an old process's delayed shutdown can set
- *   `ServerStatus.stopped` while the newly restarted server is alive) and
- *   deduplicating IDEA's double-fired `onProjectTrusted` notifications.
- * - Never starts a server that is not running and never re-enables a server
- *   the user disabled (`StartOptions().setWillEnable(false)`).
- * - Reconnects open editor tabs once a trust-triggered restart reaches
- *   [ServerStatus.started], because LSP4IJ 0.7.0's `restart()` clears
- *   connected documents before starting the fresh process.
+ * Coordinates workspace-trust and settings restarts per project using only
+ * public LSP4IJ and IntelliJ Platform APIs.
  */
-private object AlintTrustCoordinator {
+internal object AlintTrustCoordinator {
     private class ProjectState {
-        var activeProvider: AlintConnectionProvider? = null
+        // WeakReference prevents a strong value -> key chain from defeating
+        // WeakHashMap GC of disposed Projects.
+        var activeProviderRef: WeakReference<AlintConnectionProvider>? = null
         var lastInitializedTrusted: Boolean? = null
         var restartInFlight: Boolean = false
         var trustRestartInProgress: Boolean = false
         var reconnectOnStart: Boolean = false
+
+        fun activeProvider(): AlintConnectionProvider? = activeProviderRef?.get()
     }
 
     private val nextGen = AtomicLong(0)
@@ -129,9 +126,9 @@ private object AlintTrustCoordinator {
     fun onProviderStarting(project: Project, provider: AlintConnectionProvider) {
         synchronized(lock) {
             val state = stateOf(project)
-            val current = state.activeProvider
+            val current = state.activeProvider()
             if (current == null || provider.generation >= current.generation) {
-                state.activeProvider = provider
+                state.activeProviderRef = WeakReference(provider)
             }
         }
     }
@@ -139,9 +136,9 @@ private object AlintTrustCoordinator {
     fun onInitialized(project: Project, provider: AlintConnectionProvider, trusted: Boolean) {
         synchronized(lock) {
             val state = stateOf(project)
-            val current = state.activeProvider
+            val current = state.activeProvider()
             if (current == null || provider.generation >= current.generation) {
-                state.activeProvider = provider
+                state.activeProviderRef = WeakReference(provider)
                 state.lastInitializedTrusted = trusted
             }
         }
@@ -150,8 +147,8 @@ private object AlintTrustCoordinator {
     fun onProviderStopped(project: Project, provider: AlintConnectionProvider) {
         synchronized(lock) {
             val state = states[project] ?: return
-            if (state.activeProvider === provider) {
-                state.activeProvider = null
+            if (state.activeProvider() === provider) {
+                state.activeProviderRef = null
                 state.lastInitializedTrusted = null
                 if (!state.trustRestartInProgress) {
                     state.restartInFlight = false
@@ -161,7 +158,15 @@ private object AlintTrustCoordinator {
         }
     }
 
+    fun onSettingsChanged(project: Project) {
+        restartRunningServer(project, requireTrustChange = false)
+    }
+
     fun onTrustChanged(project: Project) {
+        restartRunningServer(project, requireTrustChange = true)
+    }
+
+    private fun restartRunningServer(project: Project, requireTrustChange: Boolean) {
         if (project.isDisposed || project.isDefault) return
         val definition = LanguageServersRegistry.getInstance().getServerDefinition(ALINT_SERVER_ID)
             ?: return
@@ -171,23 +176,24 @@ private object AlintTrustCoordinator {
         val status = manager.getServerStatus(ALINT_SERVER_ID)
         val shouldDispatch = synchronized(lock) {
             val state = stateOf(project)
-            val isActiveOrStopping = state.activeProvider != null ||
+            val isActiveOrStopping = state.activeProvider() != null ||
                 status == ServerStatus.starting ||
                 status == ServerStatus.started ||
                 status == ServerStatus.stopping
             if (!isActiveOrStopping) {
                 return@synchronized false
             }
-            val desiredTrusted = project.isTrusted()
-            if (!state.restartInFlight &&
-                state.lastInitializedTrusted == desiredTrusted &&
-                status != ServerStatus.stopping
-            ) {
-                return@synchronized false
+            if (requireTrustChange) {
+                val desiredTrusted = project.isTrusted()
+                if (!state.restartInFlight &&
+                    state.lastInitializedTrusted == desiredTrusted &&
+                    status != ServerStatus.stopping
+                ) {
+                    return@synchronized false
+                }
             }
             state.reconnectOnStart = true
             if (state.restartInFlight) {
-                // Re-checked once the in-flight restart reaches `started`.
                 return@synchronized false
             }
             state.restartInFlight = true
@@ -210,7 +216,7 @@ private object AlintTrustCoordinator {
             val currentStatus = currentManager.getServerStatus(ALINT_SERVER_ID)
             val stillActive = synchronized(lock) {
                 val state = states[project] ?: return@synchronized false
-                state.activeProvider != null ||
+                state.activeProvider() != null ||
                     currentStatus == ServerStatus.starting ||
                     currentStatus == ServerStatus.started ||
                     currentStatus == ServerStatus.stopping
@@ -220,20 +226,23 @@ private object AlintTrustCoordinator {
                 return@executeOnPooledThread
             }
             try {
-                // In LSP4IJ, `start()` on a started server invokes
-                // `LanguageServerWrapper.restart()`, spawning a fresh process
-                // that re-reads `getInitializationOptions`. Setting
-                // `willEnable = false` avoids silently re-enabling a server
-                // the user disabled in settings.
                 val options = LanguageServerManager.StartOptions()
                     .setWillEnable(false)
                     .setForceStart(false)
                 currentManager.start(currentDef, options)
+                // If the server finished stopping right before `start()` ran,
+                // `forceStart = false` can become a silent no-op and no
+                // `ServerStatus.started` event will arrive. Clear the in-flight
+                // flags so future restarts cannot wedge permanently.
+                val postStatus = currentManager.getServerStatus(ALINT_SERVER_ID)
+                if (postStatus == ServerStatus.stopped || postStatus == ServerStatus.none) {
+                    clearRestartInFlight(project)
+                }
             } catch (_: LanguageServerException) {
                 clearRestartInFlight(project)
             } catch (ex: Throwable) {
                 clearRestartInFlight(project)
-                thisLogger().warn("failed to restart alint language server after trust change", ex)
+                thisLogger().warn("failed to restart alint language server", ex)
             }
         }
     }
@@ -277,7 +286,7 @@ private object AlintTrustCoordinator {
         }
     }
 
-    private fun clearRestartInFlight(project: Project) {
+    internal fun clearRestartInFlight(project: Project) {
         synchronized(lock) {
             states[project]?.let { state ->
                 state.restartInFlight = false
@@ -306,8 +315,7 @@ private object AlintTrustCoordinator {
 /**
  * Restarts a running `alint` language server whenever the IDE's trusted-project
  * state changes so the new session re-initializes with updated `trusted`
- * `initializationOptions`. Registered as an application listener in `plugin.xml`
- * because `TrustedProjectsListener.TOPIC` is application-scoped.
+ * `initializationOptions`.
  */
 class AlintTrustedProjectsListener : TrustedProjectsListener {
     override fun onProjectTrusted(project: Project) {
@@ -321,15 +329,25 @@ class AlintTrustedProjectsListener : TrustedProjectsListener {
 
 /** Surfaces the "alint not found" prompt with an opt-in download action. */
 object AlintNotifier {
+    private val notifiedMissing: MutableSet<Project> =
+        Collections.synchronizedSet(Collections.newSetFromMap(WeakHashMap()))
+
+    fun resetMissingNotice(project: Project) {
+        notifiedMissing.remove(project)
+    }
+
     fun binaryMissing(project: Project) {
+        if (!notifiedMissing.add(project)) {
+            return
+        }
         val group = NotificationGroupManager.getInstance().getNotificationGroup("alint")
         group
             .createNotification(
                 "alint binary not found",
-                "Set its path in Settings, install it (brew / cargo / npm), or download the matching release.",
+                "Set its path in Settings -> Tools -> alint, install it (brew / cargo / npm), or download the matching release.",
                 NotificationType.WARNING,
             )
-            .addAction(object : NotificationAction("Download latest") {
+            .addAction(object : NotificationAction("Download matching release") {
                 override fun actionPerformed(
                     e: com.intellij.openapi.actionSystem.AnActionEvent,
                     notification: com.intellij.notification.Notification,
@@ -345,13 +363,13 @@ object AlintNotifier {
         ApplicationManager.getApplication().executeOnPooledThread {
             val group = NotificationGroupManager.getInstance().getNotificationGroup("alint")
             try {
-                // Download the alint release matching this plugin's
-                // (release-stamped) version — same strategy as the VS
-                // Code extension. (The Zed extension uses latest, since
-                // its wasm can't read its own version.)
                 val version = pluginVersion()
                 val path = AlintBinary.download(version) { thisLogger().info("alint: $it") }
-                AlintSettings.getInstance().alintPath = path
+                // Do NOT write the managed cache path into `AlintSettings.alintPath`:
+                // `AlintBinary.resolve(version)` probes the versioned cache dir
+                // automatically, so future plugin upgrades or a newly installed
+                // PATH binary are picked up without getting stuck on an old path.
+                resetMissingNotice(project)
                 group
                     .createNotification(
                         "alint downloaded",
@@ -360,6 +378,7 @@ object AlintNotifier {
                     )
                     .notify(project)
             } catch (ex: Exception) {
+                resetMissingNotice(project)
                 group
                     .createNotification(
                         "alint download failed",
@@ -371,14 +390,9 @@ object AlintNotifier {
         }
     }
 
-    // JetBrains Marketplace validation rejects BOTH `PluginManagerCore.getPlugin(PluginId)`
-    // and `PluginManager.getPluginByClass(Class)` as internal-API usage, even though
-    // released-IDE bytecode marks neither @ApiStatus.Internal. We sidestep the whole
-    // plugin-lookup surface by stamping the version into a generated resource at build
-    // time (see `generateVersionResource` in build.gradle.kts) and reading it from our
-    // own classloader. No platform API touched.
-    // See https://plugins.jetbrains.com/docs/intellij/api-internal.html
-    private fun pluginVersion(): String =
+    // Stamped into a classpath resource at build time (`generateVersionResource`
+    // in build.gradle.kts) so we avoid Marketplace-denied PluginManager* APIs.
+    internal fun pluginVersion(): String =
         AlintNotifier::class.java.classLoader
             .getResourceAsStream("alint-lsp/version.txt")
             ?.use { it.readBytes().toString(Charsets.UTF_8).trim() }

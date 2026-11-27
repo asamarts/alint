@@ -188,11 +188,7 @@ impl<'c> Places<'c> {
 /// past the end has no place.
 fn positions(bytes: &[u8], offsets: &[usize]) -> Option<Vec<Option<(usize, usize)>>> {
     let text = std::str::from_utf8(bytes).ok()?;
-    let start = if text.starts_with('\u{feff}') {
-        '\u{feff}'.len_utf8()
-    } else {
-        0
-    };
+    let start = text.len() - text.trim_start_matches('\u{feff}').len();
     let mut found = Vec::with_capacity(offsets.len());
     // The line at `cursor`, and the characters of it before `cursor`.
     let (mut cursor, mut line, mut column) = (start, 1, 0);
@@ -272,6 +268,9 @@ mod tests {
         assert_eq!(one("\u{feff}ab\nc", 0), None);
         assert_eq!(one("\u{feff}ab\nc", 1), None);
         assert_eq!(one("\u{feff}ab\nc", 8), None);
+        assert_eq!(one("\u{feff}\u{feff}ab", 6), Some((1, 1)));
+        assert_eq!(one("\u{feff}\u{feff}ab", 7), Some((1, 2)));
+        assert_eq!(one("\u{feff}\u{feff}ab", 3), None);
         assert_eq!(one("ab", 2), Some((1, 3)));
         assert!(positions(b"\xff", &[0]).is_none());
     }

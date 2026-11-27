@@ -202,10 +202,24 @@ impl PerFileRule for NoBomRule {
 /// the prefix this rule asked for; a BOM is rare, so read the rest only then.
 /// A file that can't be read is not promised a fix.
 fn payload_looks_binary(ctx: &Context<'_>, path: &Path, bytes: &[u8]) -> bool {
-    if bytes.len() < BOM_PREFIX_LEN {
-        return crate::io::looks_binary(bytes);
+    if crate::io::looks_binary(bytes) {
+        return true;
     }
-    crate::io::read_capped(&ctx.root.join(path)).map_or(true, |full| crate::io::looks_binary(&full))
+    // Only re-read from disk when the caller handed us an exact `BOM_PREFIX_LEN`
+    // prefix slice (file-major prefix dispatch or rule-major `evaluate`), so an
+    // unsaved LSP buffer longer than the prefix is classified purely from its
+    // in-memory bytes without touching disk. When the length matches the prefix
+    // size, fall back to the in-memory classification if the file is absent or
+    // has diverged on disk (an unsaved exact-16-byte editor buffer).
+    if bytes.len() != BOM_PREFIX_LEN {
+        return false;
+    }
+    match crate::io::read_capped(&ctx.root.join(path)) {
+        Ok(full) if full.starts_with(bytes) => crate::io::looks_binary(&full),
+        Ok(_) => false,
+        Err(crate::io::ReadCapError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(crate::io::ReadCapError::TooLarge(_) | crate::io::ReadCapError::Io(_)) => true,
+    }
 }
 
 pub static META: alint_core::KindMeta = alint_core::KindMeta {
@@ -450,5 +464,39 @@ mod utf16_tests {
                 .fix_edit(&vs[0], body, tmp.path())
                 .is_none()
         );
+    }
+
+    #[test]
+    fn evaluate_file_uses_in_memory_buffer_without_reading_stale_or_missing_disk_file() {
+        // D4#20: LSP unsaved buffers > 16 bytes must be classified from `bytes`,
+        // not a nonexistent or stale file on disk.
+        let rule = super::build(&spec_yaml(
+            "id: t\nkind: no_bom\npaths: \"**/*\"\nlevel: warning\n\
+             fix:\n  file_strip_bom: {}\n",
+        ))
+        .unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        // Disk file is binary with a NUL, but in-memory buffer is clean UTF-8 text > 16 bytes.
+        std::fs::write(tmp.path().join("a.txt"), b"\xEF\xBB\xBF\0binary on disk!!!").unwrap();
+        let idx = alint_core::FileIndex::from_entries(Vec::new());
+        let c = ctx(tmp.path(), &idx);
+        let per_file = rule.as_per_file().unwrap();
+        let in_memory_text = b"\xEF\xBB\xBFclean unsaved editor buffer longer than 16 bytes\n";
+        let vs = per_file
+            .evaluate_file(&c, std::path::Path::new("a.txt"), in_memory_text)
+            .unwrap();
+        assert_eq!(vs.len(), 1);
+        assert!(
+            !vs[0].not_fixable,
+            "clean in-memory buffer must stay fixable despite binary disk file"
+        );
+        // Nonexistent disk file with exact 16-byte in-memory buffer is also fixable.
+        let exact_16 = b"\xEF\xBB\xBF0123456789abc";
+        assert_eq!(exact_16.len(), super::BOM_PREFIX_LEN);
+        let vs = per_file
+            .evaluate_file(&c, std::path::Path::new("unsaved.txt"), exact_16)
+            .unwrap();
+        assert_eq!(vs.len(), 1);
+        assert!(!vs[0].not_fixable);
     }
 }

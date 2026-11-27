@@ -21,8 +21,8 @@ alint is deliberately **not**:
 
 - a code / AST linter — use [ESLint](https://eslint.org/), [Clippy](https://doc.rust-lang.org/clippy/), [ruff](https://docs.astral.sh/ruff/)
 - a SAST scanner — use [Semgrep](https://semgrep.dev/), [CodeQL](https://codeql.github.com/)
-- an IaC scanner — use [Checkov](https://www.checkov.io/), [Conftest](https://www.conftest.dev/), [tfsec](https://aquasecurity.github.io/tfsec/)
-- a commit-message linter — use [commitlint](https://commitlint.js.org/)
+- an IaC scanner — use [Checkov](https://www.checkov.io/), [Conftest](https://www.conftest.dev/), [Trivy](https://trivy.dev/)
+- a full Conventional Commits workflow suite (release-note/changelog generation, interactive commit prompts) — use [commitlint](https://commitlint.js.org/) (alint does ship structural `git_commit_*` rules for subject patterns, sign-offs, and commit-message hygiene)
 - a secret scanner — use [gitleaks](https://github.com/gitleaks/gitleaks), [trufflehog](https://github.com/trufflesecurity/trufflehog)
 
 Scope is the filesystem shape and contents of a repository, not the semantics of the code inside it. For where alint fits in monorepo workflows specifically — including when to reach for Bazel, Cargo, pre-commit, or OpenSSF Scorecard instead — see [alint and monorepos](/docs/about/monorepos/).
@@ -35,6 +35,7 @@ Scope is the filesystem shape and contents of a repository, not the semantics of
 - **Container**: [ghcr.io/asamarts/alint](https://ghcr.io/asamarts/alint)
 - **Homebrew**: [asamarts/homebrew-alint](https://github.com/asamarts/homebrew-alint)
 - **npm**: [@asamarts/alint](https://www.npmjs.com/package/@asamarts/alint)
+- **PyPI**: [pypi.org/project/alint](https://pypi.org/project/alint/)
 - **GitHub Action**: [asamarts/alint](/docs/integrations/github-actions/)
 
 ## License

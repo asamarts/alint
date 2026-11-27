@@ -624,9 +624,14 @@ fn take(
     if amount == 0 {
         return Ok(());
     }
-    let total = used
-        .fetch_add(amount, Ordering::Relaxed)
-        .saturating_add(amount);
+    let mut cur = used.load(Ordering::Relaxed);
+    let total = loop {
+        let next = cur.saturating_add(amount);
+        match used.compare_exchange_weak(cur, next, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => break next,
+            Err(actual) => cur = actual,
+        }
+    };
     limits.check(kind, total)
 }
 

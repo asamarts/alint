@@ -1,0 +1,36 @@
+test_version: 1
+name: include_manifest_paths scopes a rule using xml extraction from a .csproj manifest
+tags: [check, scope_filter, xml, no_trailing_whitespace]
+
+given:
+  tree:
+    App.csproj: |
+      <Project Sdk="Microsoft.NET.Sdk">
+        <ItemGroup>
+          <Compile Include="src/Included.cs" />
+          <Compile Include="src/Other.cs" />
+        </ItemGroup>
+      </Project>
+    src:
+      Included.cs: "class Included {} \n"
+      Other.cs: "class Other {}\n"
+    unused:
+      Ignored.cs: "class Ignored {} \n"
+  config: |
+    version: 1
+    rules:
+      - id: cs-nws
+        kind: no_trailing_whitespace
+        paths: "**/*.cs"
+        level: warning
+        scope_filter:
+          include_manifest_paths:
+            source: App.csproj
+            extract: { xml: "$.Project.ItemGroup.Compile..['@Include']" }
+
+when: [check]
+
+expect:
+  - exit: success
+    violations:
+      - {rule: cs-nws, level: warning, path: src/Included.cs}

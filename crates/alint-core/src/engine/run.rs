@@ -1240,6 +1240,7 @@ impl Engine {
         if !index.contains_file(file_path) {
             return Err(Error::file_not_in_index(file_path));
         }
+        self.ensure_manifest_scope_resolvable()?;
         self.enable_relation_caches(index);
 
         // Facts are constant for an index's lifetime, so cache them: the LSP

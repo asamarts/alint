@@ -1918,3 +1918,603 @@ fn v024_duplicate_vars_line_col_case_insensitive_formats_and_junit_agent_sanitiz
         }
     }
 }
+
+#[test]
+fn validate_config_rejects_invalid_ignore_globs_and_invalid_facts() {
+    for (label, yaml) in [
+        (
+            "invalid ignore glob",
+            "version: 1\nignore: ['[unterminated']\nrules: []\n",
+        ),
+        (
+            "invalid fact glob",
+            "version: 1\nfacts:\n  - id: bad_glob\n    any_file_exists: '[unclosed'\nrules: []\n",
+        ),
+        (
+            "invalid fact regex",
+            "version: 1\nfacts:\n  - id: bad_re\n    file_content_matches:\n      paths: '*.txt'\n      pattern: '[invalid'\nrules: []\n",
+        ),
+        (
+            "invalid fact extract",
+            "version: 1\nfacts:\n  - id: bad_ext\n    file_content_matches:\n      paths: '*.json'\n      extract: { json: '$[unterminated' }\n      pattern: 'x'\nrules: []\n",
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".alint.yml"), yaml).unwrap();
+        for args in [
+            &["validate-config"][..],
+            &["validate-config", "--format", "json"],
+        ] {
+            let out = run(dir.path(), args);
+            assert_eq!(
+                out.status.code(),
+                Some(1),
+                "{label} ({args:?}): expected exit 1, stdout={}, stderr={}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr),
+            );
+        }
+    }
+}
+
+#[test]
+fn export_agents_md_rejects_inline_json_and_exercises_title_inline_and_include_info() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        "version: 1\nrules:\n  - id: err-rule\n    kind: file_exists\n    paths: README.md\n    level: error\n    message: Must have README.\n  - id: info-rule\n    kind: file_exists\n    paths: CHANGELOG.md\n    level: info\n    message: Nice to have CHANGELOG.\n",
+    )
+    .unwrap();
+
+    let bad = run(
+        dir.path(),
+        &[
+            "export-agents-md",
+            "--format",
+            "json",
+            "--inline",
+            "--output",
+            "AGENTS.md",
+        ],
+    );
+    assert_eq!(bad.status.code(), Some(2), "{bad:?}");
+    assert!(!dir.path().join("AGENTS.md").exists());
+
+    let no_info = run(
+        dir.path(),
+        &["export-agents-md", "--section-title", "Custom Rules"],
+    );
+    assert!(no_info.status.success(), "{no_info:?}");
+    let no_info_text = String::from_utf8(no_info.stdout).unwrap();
+    assert!(no_info_text.contains("## Custom Rules"), "{no_info_text}");
+    assert!(!no_info_text.contains("info-rule"), "{no_info_text}");
+
+    let with_info = run(
+        dir.path(),
+        &[
+            "export-agents-md",
+            "--section-title",
+            "Custom Rules",
+            "--include-info",
+            "--inline",
+            "--output",
+            "AGENTS.md",
+        ],
+    );
+    assert!(with_info.status.success(), "{with_info:?}");
+    let agents = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
+    assert!(agents.contains("## Custom Rules"), "{agents}");
+    assert!(agents.contains("info-rule"), "{agents}");
+    assert!(agents.contains("<!-- alint:start -->"), "{agents}");
+}
+
+#[test]
+fn facts_and_init_reject_file_paths_and_facts_covers_all_predicates() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("README.md"), "hello\n").unwrap();
+    std::fs::write(dir.path().join("a.txt"), "1\n").unwrap();
+    std::fs::write(dir.path().join("b.txt"), "2\n").unwrap();
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        "version: 1\nfacts:\n  - id: all_docs\n    all_files_exist: [README.md, a.txt]\n  - id: txt_count\n    count_files: '*.txt'\n  - id: branch\n    git_branch: {}\nrules: []\n",
+    )
+    .unwrap();
+
+    for args in [&["facts", "README.md"][..], &["init", "README.md"]] {
+        let out = run(dir.path(), args);
+        assert_eq!(
+            out.status.code(),
+            Some(2),
+            "{args:?} must reject a file path: {out:?}"
+        );
+    }
+
+    let facts_out = run(dir.path(), &["facts", "--format", "json"]);
+    assert!(facts_out.status.success(), "{facts_out:?}");
+    let parsed: serde_json::Value = serde_json::from_slice(&facts_out.stdout).unwrap();
+    let facts = parsed["facts"].as_array().unwrap();
+    let by_id = |id: &str| facts.iter().find(|f| f["id"] == id).unwrap().clone();
+    assert_eq!(by_id("all_docs")["value"], true);
+    assert_eq!(by_id("txt_count")["value"], 2);
+    assert!(by_id("branch").get("value").is_some());
+}
+
+#[test]
+fn external_config_with_nested_configs_uses_repository_root_not_config_dir() {
+    let outside = tempfile::tempdir().unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    std::fs::write(
+        outside.path().join("policy.yml"),
+        "version: 1\nnested_configs: true\nrules: []\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(outside.path().join("sub")).unwrap();
+    std::fs::write(
+        outside.path().join("sub/.alint.yml"),
+        "version: 1\nrules:\n  - id: outside-rule\n    kind: file_exists\n    paths: NEVER.txt\n    level: error\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(repo.path().join("pkg")).unwrap();
+    std::fs::write(
+        repo.path().join("pkg/.alint.yml"),
+        "version: 1\nrules:\n  - id: repo-nested-rule\n    kind: file_exists\n    paths: REQUIRED.txt\n    level: error\n",
+    )
+    .unwrap();
+    let cfg = outside.path().join("policy.yml");
+    let out = run(
+        repo.path(),
+        &[
+            "check",
+            "--config",
+            cfg.to_str().unwrap(),
+            "--format",
+            "json",
+        ],
+    );
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let parsed: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let rule_ids: Vec<&str> = parsed["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|r| r["id"].as_str())
+        .collect();
+    assert!(rule_ids.contains(&"repo-nested-rule"), "{rule_ids:?}");
+    assert!(!rule_ids.contains(&"outside-rule"), "{rule_ids:?}");
+}
+
+#[test]
+fn format_aliases_match_canonical_and_work_before_or_after_subcommands() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        "version: 1\nrules:\n  - id: no-todo\n    kind: file_content_forbidden\n    paths: '*.txt'\n    pattern: TODO\n    level: error\n  - id: need-readme\n    kind: file_exists\n    paths: README.md\n    level: warning\n",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("a.txt"), "TODO here\n").unwrap();
+
+    for (canonical, alias) in [
+        ("human", "pretty"),
+        ("human", "text"),
+        ("github", "github-actions"),
+        ("gitlab", "gitlab-codequality"),
+        ("gitlab", "code-quality"),
+        ("junit", "junit-xml"),
+        ("markdown", "md"),
+        ("agent", "agentic"),
+        ("agent", "ai"),
+    ] {
+        let canon = run(dir.path(), &["check", "--format", canonical]);
+        let aliased = run(dir.path(), &["check", "--format", alias]);
+        assert_eq!(canon.status.code(), aliased.status.code(), "{alias}");
+        assert_eq!(canon.stdout, aliased.stdout, "alias {alias} != {canonical}");
+    }
+
+    // Dedicated contract checks for github, markdown, and junit on both
+    // file-located and pathless violations.
+    let gh = String::from_utf8(run(dir.path(), &["check", "--format", "github"]).stdout).unwrap();
+    assert!(
+        gh.contains("::error title=no-todo,file=a.txt,line=1,col=1::"),
+        "{gh}"
+    );
+    assert!(gh.contains("::warning title=need-readme::"), "{gh}");
+
+    let md = String::from_utf8(run(dir.path(), &["check", "--format", "markdown"]).stdout).unwrap();
+    assert!(md.contains("## `a.txt`"), "{md}");
+    assert!(md.contains("## Cross-file"), "{md}");
+
+    let ju = String::from_utf8(run(dir.path(), &["check", "--format", "junit"]).stdout).unwrap();
+    assert!(ju.contains("<testsuite") && ju.contains("no-todo"), "{ju}");
+
+    // Position parity: `--format <alias>` must behave identically before and
+    // after subcommands.
+    for (sub, alias) in [
+        ("export-agents-md", "md"),
+        ("suggest", "yml"),
+        ("suggest", "text"),
+        ("validate-config", "text"),
+    ] {
+        let before = run(dir.path(), &["--format", alias, sub]);
+        let after = run(dir.path(), &[sub, "--format", alias]);
+        assert!(
+            before.status.success(),
+            "--format {alias} {sub}: {before:?}"
+        );
+        assert!(after.status.success(), "{sub} --format {alias}: {after:?}");
+    }
+}
+
+#[test]
+fn check_quiet_suppresses_notes_and_ascii_no_docs_width_flags_work() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        "version: 1\nrules:\n  - id: paths-resolve\n    kind: registry_paths_resolve\n    source: registry.txt\n    extract: { lines: {} }\n    entries_are_globs: true\n    expect: file\n    level: warning\n  - id: need-readme\n    kind: file_exists\n    paths: README.md\n    level: error\n    policy_url: https://example.com/policy\n",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("registry.txt"), "src/${MOD}/lib.rs\n").unwrap();
+
+    let loud = run(dir.path(), &["check"]);
+    assert!(
+        String::from_utf8_lossy(&loud.stderr).contains("informational note"),
+        "{loud:?}"
+    );
+    let quiet = run(dir.path(), &["check", "--quiet"]);
+    assert!(
+        !String::from_utf8_lossy(&quiet.stderr).contains("informational note"),
+        "quiet must suppress notes hint: {:?}",
+        String::from_utf8_lossy(&quiet.stderr)
+    );
+
+    let styled = run(
+        dir.path(),
+        &[
+            "check",
+            "--ascii",
+            "--no-docs",
+            "--width",
+            "60",
+            "--color",
+            "never",
+        ],
+    );
+    let text = String::from_utf8(styled.stdout).unwrap();
+    assert!(
+        !text.contains('✗') && !text.contains('⚠'),
+        "non-ASCII glyph: {text}"
+    );
+    assert!(
+        !text.contains("https://alint.org/docs/"),
+        "--no-docs leaked docs link: {text}"
+    );
+}
+
+#[test]
+fn suggest_honors_no_gitignore_config_and_confidence() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join(".gitignore"), "ignored.bak\n").unwrap();
+    std::fs::write(dir.path().join("ignored.bak"), "old\n").unwrap();
+    std::fs::write(
+        dir.path().join("Cargo.toml"),
+        "[package]\nname = \"x\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("custom.yml"),
+        "version: 1\nextends:\n  - alint://bundled/oss-baseline@v1\n  - alint://bundled/rust@v1\nrules: []\n",
+    )
+    .unwrap();
+
+    let default_out = run(dir.path(), &["suggest", "--format", "json"]);
+    let default_json: serde_json::Value = serde_json::from_slice(&default_out.stdout).unwrap();
+    assert!(
+        !default_json["proposals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["id"] == "alint://bundled/agent-hygiene@v1"),
+        "gitignored .bak should be skipped by default: {default_json}"
+    );
+
+    let no_gi = run(
+        dir.path(),
+        &[
+            "suggest",
+            "--no-gitignore",
+            "--config",
+            "custom.yml",
+            "--format",
+            "json",
+        ],
+    );
+    let no_gi_json: serde_json::Value = serde_json::from_slice(&no_gi.stdout).unwrap();
+    let ids: Vec<&str> = no_gi_json["proposals"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|p| p["id"].as_str())
+        .collect();
+    assert!(
+        ids.contains(&"alint://bundled/agent-hygiene@v1"),
+        "--no-gitignore should see ignored.bak: {ids:?}"
+    );
+    assert!(
+        !ids.contains(&"alint://bundled/rust@v1"),
+        "--config custom.yml already covers rust@v1: {ids:?}"
+    );
+
+    let high_only = run(
+        dir.path(),
+        &[
+            "suggest",
+            "--no-gitignore",
+            "--confidence",
+            "high",
+            "--format",
+            "json",
+        ],
+    );
+    let high_json: serde_json::Value = serde_json::from_slice(&high_only.stdout).unwrap();
+    assert!(
+        high_json["proposals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|p| p["confidence"] == "high"),
+        "--confidence high leaked lower proposals: {high_json}"
+    );
+}
+
+#[test]
+fn init_monorepo_detects_pnpm_and_yarn_workspaces() {
+    let pnpm_dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        pnpm_dir.path().join("package.json"),
+        "{\"name\":\"root\"}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        pnpm_dir.path().join("pnpm-workspace.yaml"),
+        "packages:\n  - 'packages/*'\n",
+    )
+    .unwrap();
+    let out = run(pnpm_dir.path(), &["init", "--monorepo"]);
+    assert!(out.status.success(), "{out:?}");
+    let cfg = std::fs::read_to_string(pnpm_dir.path().join(".alint.yml")).unwrap();
+    assert!(
+        cfg.contains("alint://bundled/monorepo/pnpm-workspace@v1"),
+        "{cfg}"
+    );
+
+    let yarn_dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        yarn_dir.path().join("package.json"),
+        "{\"name\":\"root\",\"workspaces\":[\"packages/*\"]}\n",
+    )
+    .unwrap();
+    let out = run(yarn_dir.path(), &["init", "--monorepo"]);
+    assert!(out.status.success(), "{out:?}");
+    let cfg = std::fs::read_to_string(yarn_dir.path().join(".alint.yml")).unwrap();
+    assert!(
+        cfg.contains("alint://bundled/monorepo/yarn-workspace@v1"),
+        "{cfg}"
+    );
+}
+
+#[test]
+fn trusted_extends_cli_gates_remote_ignore_and_honors_untrusted() {
+    const REMOTE_BODY: &str = "version: 1\nignore:\n  - \"ignored.txt\"\nrules:\n  - id: no-txt\n    kind: file_absent\n    paths: \"*.txt\"\n    level: error\n";
+    const SRI: &str = "sha256-ee8aaf173734022f6393ca75145ea17a19815ba355f887f4e56578da5fd68f35";
+    let url = format!("https://example.invalid/remote.yml#{SRI}");
+
+    let home = tempfile::tempdir().unwrap();
+    let cache_roots = [
+        home.path().join("cache/alint/rulesets"),
+        home.path()
+            .join("Library/Caches/org.asamarts.alint/rulesets"),
+        home.path()
+            .join("localappdata/asamarts/alint/cache/rulesets"),
+    ];
+    for root in &cache_roots {
+        std::fs::create_dir_all(root).unwrap();
+        std::fs::write(root.join(format!("{SRI}.yml")), REMOTE_BODY).unwrap();
+    }
+
+    let repo = tempfile::tempdir().unwrap();
+    std::fs::write(repo.path().join("ignored.txt"), "ok\n").unwrap();
+    let run_with_cache = |args: &[&str]| {
+        crate::hermetic::command(alint_bin())
+            .args(args)
+            .current_dir(repo.path())
+            .env("HOME", home.path())
+            .env("XDG_CACHE_HOME", home.path().join("cache"))
+            .env("LOCALAPPDATA", home.path().join("localappdata"))
+            .output()
+            .expect("spawn alint")
+    };
+
+    // 1. Without `trusted_extends:`, remote `ignore:` is refused.
+    std::fs::write(
+        repo.path().join(".alint.yml"),
+        format!("version: 1\nextends:\n  - \"{url}\"\n"),
+    )
+    .unwrap();
+    let val_untrusted = run_with_cache(&["validate-config"]);
+    assert_eq!(val_untrusted.status.code(), Some(1), "{val_untrusted:?}");
+    let val_err = format!(
+        "{}{}",
+        String::from_utf8_lossy(&val_untrusted.stdout),
+        String::from_utf8_lossy(&val_untrusted.stderr)
+    );
+    assert!(val_err.contains("trusted_extends"), "{val_err}");
+    assert!(
+        val_err.contains("https://example.invalid/remote.yml"),
+        "{val_err}"
+    );
+
+    let chk_untrusted = run_with_cache(&["check"]);
+    assert_eq!(chk_untrusted.status.code(), Some(2), "{chk_untrusted:?}");
+    assert!(
+        String::from_utf8_lossy(&chk_untrusted.stderr).contains("trusted_extends"),
+        "{chk_untrusted:?}"
+    );
+
+    // 2. Listing the exact URL under `trusted_extends:` allows the remote `ignore:`.
+    std::fs::write(
+        repo.path().join(".alint.yml"),
+        format!("version: 1\ntrusted_extends:\n  - \"{url}\"\nextends:\n  - \"{url}\"\n"),
+    )
+    .unwrap();
+    let val_trusted = run_with_cache(&["validate-config"]);
+    assert_eq!(val_trusted.status.code(), Some(0), "{val_trusted:?}");
+    let chk_trusted = run_with_cache(&["check"]);
+    assert_eq!(chk_trusted.status.code(), Some(0), "{chk_trusted:?}");
+
+    // 3. `--untrusted` overrides `trusted_extends:` and refuses remote extends.
+    let chk_flag = run_with_cache(&["check", "--untrusted"]);
+    assert_eq!(chk_flag.status.code(), Some(2), "{chk_flag:?}");
+}
+
+#[test]
+fn validate_config_nonexistent_file_exits_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = run(dir.path(), &["validate-config", "nonexistent.yml"]);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(combined.contains("nonexistent.yml"), "{combined}");
+}
+
+#[test]
+fn test_subcommand_allow_host_keyring_flag() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("alint-tests")).unwrap();
+    std::fs::write(
+        dir.path().join("alint-tests/keyring.yml"),
+        r#"test_version: 1
+name: host keyring capability gate
+capabilities:
+  host_keyring: true
+given:
+  tree:
+    README.md: "ok\n"
+  config: |
+    version: 1
+    facts:
+      - id: has_readme
+        any_file_exists: README.md
+    rules:
+      - id: signed-commits
+        kind: git_commit_gpg_signed
+        when: "not facts.has_readme"
+        level: error
+when: [check]
+expect:
+  - exit: success
+    violations: []
+"#,
+    )
+    .unwrap();
+
+    let denied = run(dir.path(), &["test", "--format", "json"]);
+    assert_ne!(denied.status.code(), Some(0), "{denied:?}");
+    let denied_out = format!(
+        "{}{}",
+        String::from_utf8_lossy(&denied.stdout),
+        String::from_utf8_lossy(&denied.stderr)
+    );
+    assert!(
+        denied_out.contains("allow-host-keyring") || denied_out.contains("host_keyring"),
+        "{denied_out}"
+    );
+
+    let allowed = run(
+        dir.path(),
+        &["test", "--allow-host-keyring", "--format", "json"],
+    );
+    assert_eq!(
+        allowed.status.code(),
+        Some(0),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&allowed.stdout),
+        String::from_utf8_lossy(&allowed.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&allowed.stdout).unwrap();
+    assert_eq!(report["summary"]["passed"], 1, "{report}");
+}
+
+#[test]
+fn facts_cli_evaluates_all_files_exist_count_files_and_git_branch() {
+    let dir = tempfile::tempdir().unwrap();
+    let git = |args: &[&str]| {
+        let out = crate::hermetic::command("git")
+            .args(args)
+            .current_dir(dir.path())
+            .env("GIT_AUTHOR_NAME", "alint")
+            .env("GIT_AUTHOR_EMAIL", "alint@example.invalid")
+            .env("GIT_COMMITTER_NAME", "alint")
+            .env("GIT_COMMITTER_EMAIL", "alint@example.invalid")
+            .output()
+            .expect("git");
+        assert!(out.status.success(), "git {args:?} failed: {out:?}");
+    };
+    git(&["init", "-q", "-b", "feature/audit-facts"]);
+    std::fs::write(dir.path().join("a.txt"), "a\n").unwrap();
+    std::fs::write(dir.path().join("b.txt"), "b\n").unwrap();
+    std::fs::write(dir.path().join("c.rs"), "fn main() {}\n").unwrap();
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        r#"version: 1
+facts:
+  - id: both_txt
+    all_files_exist: [a.txt, b.txt]
+  - id: missing_one
+    all_files_exist: [a.txt, nope.txt]
+  - id: txt_count
+    count_files: "*.txt"
+  - id: branch_name
+    git_branch: {}
+rules:
+  - id: ok
+    kind: file_exists
+    paths: a.txt
+    level: error
+"#,
+    )
+    .unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "init"]);
+
+    let out = run(dir.path(), &["facts", "--format", "json"]);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let facts: std::collections::BTreeMap<&str, &serde_json::Value> = json["facts"]
+        .as_array()
+        .expect("facts array")
+        .iter()
+        .map(|entry| (entry["id"].as_str().unwrap(), &entry["value"]))
+        .collect();
+    assert_eq!(
+        facts.get("both_txt"),
+        Some(&&serde_json::json!(true)),
+        "{json}"
+    );
+    assert_eq!(
+        facts.get("missing_one"),
+        Some(&&serde_json::json!(false)),
+        "{json}"
+    );
+    assert_eq!(
+        facts.get("txt_count"),
+        Some(&&serde_json::json!(2)),
+        "{json}"
+    );
+    assert_eq!(
+        facts.get("branch_name"),
+        Some(&&serde_json::json!("feature/audit-facts")),
+        "{json}"
+    );
+}

@@ -112,6 +112,11 @@ VOLUME ["/cargo-target"]
 # bench env (e.g. for skipping interactive prompts).
 ENV ALINT_BENCH_DOCKER=1
 
+# Default non-root user for direct `docker run` invocations (`xtask bench-scale --docker`
+# overrides with `--user $(id -u):$(id -g)` so host-mounted outputs match the caller).
+RUN useradd -m -s /bin/bash bench
+USER bench
+
 # Default entrypoint = the bench harness. Args after the image
 # name flow into `xtask bench-scale ...` so a user can run:
 #   docker run alint-bench:0.5.7 --sizes 1k --tools alint

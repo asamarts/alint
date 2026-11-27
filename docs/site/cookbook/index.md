@@ -31,7 +31,7 @@ extends:
   - alint://bundled/hygiene/lockfiles@v1                 # Cargo.lock only at root
 ```
 
-Language-specific rulesets (`rust`, `node`, `python`, `go`) are gated by facts (`when: facts.is_<lang>`) and silently no-op in projects where they don't apply, so layering them is cheap.
+Language-specific rulesets (`rust`, `node`, `python`, `go`) are gated by facts (`when: facts.has_<lang>`) and silently no-op in projects where they don't apply, so layering them is cheap.
 
 ## 3. Override a bundled rule without restating its body
 
@@ -166,11 +166,9 @@ rules:
       - kind: file_min_lines
         paths: "{path}/README.md"
         min_lines: 5
-        level: warning
 
       - kind: file_exists
         paths: ["{path}/LICENSE", "{path}/LICENSE.md"]
-        level: warning
 ```
 
 ## 9. Nested `.alint.yml` for subtree-specific rules
@@ -227,7 +225,7 @@ rules:
       file_remove: {}
 ```
 
-Preview with `alint fix --dry-run`; apply with `alint fix`. Content-editing fixers honour `fix_size_limit` (default 1 MiB) and skip oversize files rather than rewriting them.
+Preview with `alint fix --dry-run`; apply safe fixes (`file_trim_trailing_whitespace`, `file_append_final_newline`) with `alint fix`. `file_remove` defaults to `unsafe` applicability (deleting files is irreversible), so apply it with `alint fix --unsafe-fixes` or opt in per rule with `file_remove: { applicability: safe }`. Content-editing fixers honour `fix_size_limit` (default 1 MiB) and skip oversize files rather than rewriting them.
 
 ## 11. Conditional rules gated on repo facts
 
@@ -385,12 +383,13 @@ extends:
   # debug residue, AI-affirmation prose, model-attributed TODOs.
   - alint://bundled/agent-hygiene@v1
   # AGENTS.md / CLAUDE.md / .cursorrules hygiene (existence, stub
-  # guard, bloat guard, stale-path heuristic). Fact-gated, safe
-  # no-op when no agent-context file is present.
+  # guard, bloat guard, stale-path verification). Content checks are
+  # fact-gated; `agent-context-recommended` emits one non-blocking
+  # `info` nudge (exit 0) when no agent-context file is present.
   - alint://bundled/agent-context@v1
 ```
 
-Layer with the language-ecosystem rulesets if your stack matches one. They're all `when: facts.is_<lang>` gated, so extending them costs nothing in projects where they don't apply:
+Layer with the language-ecosystem rulesets if your stack matches one. They're all `when: facts.has_<lang>` gated, so extending them costs nothing in projects where they don't apply:
 
 ```yaml
 version: 1

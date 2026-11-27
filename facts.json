@@ -1303,7 +1303,7 @@
     "editorconfig_conforms": {
       "dispatch": {
         "kind": "full_index",
-        "path_scope": false
+        "path_scope": true
       },
       "paths": "required",
       "scope_filter": {
@@ -3922,7 +3922,7 @@
         {
           "name": "reference",
           "type": "literal_path",
-          "rerootable": false
+          "rerootable": true
         },
         {
           "name": "peers",

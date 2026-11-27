@@ -516,6 +516,43 @@ impl Rule for KeyParityRule {
         false
     }
 
+    fn path_contents_sensitive_by_default(&self) -> bool {
+        matches!(
+            self.format_override.unwrap_or(self.reference_format),
+            KeyFormat::Dotenv | KeyFormat::Properties
+        )
+    }
+
+    fn visit_sensitive_paths(
+        &self,
+        explicit: bool,
+        ctx: &Context<'_>,
+        visit: &mut dyn FnMut(&Path),
+    ) {
+        let format_sensitive = self.path_contents_sensitive_by_default();
+        let is_sensitive_path = |path: &Path| {
+            explicit
+                || format_sensitive
+                || matches!(
+                    self.format_override.or_else(|| infer_format(path)),
+                    Some(KeyFormat::Dotenv | KeyFormat::Properties)
+                )
+        };
+        if is_sensitive_path(self.reference.as_path()) {
+            visit(self.reference.as_path());
+        }
+        if let Some(peer) = &self.literal_peer
+            && is_sensitive_path(peer.as_path())
+        {
+            visit(peer.as_path());
+        }
+        for entry in self.scope.candidate_files(ctx.index) {
+            if self.scope.matches(&entry.path, ctx.index) && is_sensitive_path(&entry.path) {
+                visit(&entry.path);
+            }
+        }
+    }
+
     #[allow(clippy::too_many_lines)]
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         if self.format_pending {
@@ -1629,7 +1666,7 @@ pub static META: alint_core::KindMeta = alint_core::KindMeta {
         alint_core::SelectorMeta {
             name: std::borrow::Cow::Borrowed("reference"),
             selector_type: alint_core::SelectorType::LiteralPath,
-            rerootable: false,
+            rerootable: true,
         },
         alint_core::SelectorMeta {
             name: std::borrow::Cow::Borrowed("peers"),

@@ -47,7 +47,7 @@ The mirror's `language: python` hook installs the prebuilt wheel (the same nativ
 
 ## Without a PyPI dependency
 
-If you would rather not pull from PyPI, point `repo:` at the alint repository itself. Its `language: rust` hook compiles alint from source on each machine (slower, and it needs a Rust toolchain), but adds no package-registry dependency:
+If you would rather not pull from PyPI, install `alint` via `install.sh`, Homebrew, or `cargo install alint` and point `repo:` at the alint repository itself. Its `language: system` hook runs your installed `alint` binary directly with no package-registry dependency:
 
 ```yaml
 repos:

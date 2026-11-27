@@ -1330,3 +1330,86 @@ fn an_extends_filter_read_from_the_environment_leaves_the_url_readable() {
         raw.environment_values
     );
 }
+
+#[test]
+fn intra_file_duplicate_rule_template_and_fact_ids_are_rejected_with_extends() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(tmp.path().join("base.yml"), "version: 1\nrules: []\n").unwrap();
+
+    // Duplicate rule id in the same file with extends:
+    let dup_rule = tmp.path().join("dup-rule.yml");
+    std::fs::write(
+        &dup_rule,
+        "version: 1\nextends: [./base.yml]\nrules:\n  - id: r\n    kind: file_exists\n    paths: a\n    level: error\n  - id: r\n    kind: file_exists\n    paths: b\n    level: warning\n",
+    )
+    .unwrap();
+    let err = load(&dup_rule).unwrap_err().to_string();
+    assert!(err.contains("duplicate rule id"), "{err}");
+
+    // Duplicate template id in the same file with extends:
+    let dup_tmpl = tmp.path().join("dup-tmpl.yml");
+    std::fs::write(
+        &dup_tmpl,
+        "version: 1\nextends: [./base.yml]\ntemplates:\n  - id: t\n    kind: file_exists\n    paths: a\n    level: error\n  - id: t\n    kind: file_exists\n    paths: b\n    level: error\nrules: []\n",
+    )
+    .unwrap();
+    let err = load(&dup_tmpl).unwrap_err().to_string();
+    assert!(err.contains("duplicate template id"), "{err}");
+
+    // Duplicate fact id in the same file with extends:
+    let dup_fact = tmp.path().join("dup-fact.yml");
+    std::fs::write(
+        &dup_fact,
+        "version: 1\nextends: [./base.yml]\nfacts:\n  - id: f\n    any_file_exists: a\n  - id: f\n    any_file_exists: b\nrules: []\n",
+    )
+    .unwrap();
+    let err = load(&dup_fact).unwrap_err().to_string();
+    assert!(err.contains("duplicate fact id"), "{err}");
+}
+
+#[test]
+fn drop_in_can_disable_allow_out_of_root_and_empty_selective_is_confined() {
+    let tmp = tempfile::tempdir().unwrap();
+    let top = tmp.path().join(".alint.yml");
+    std::fs::write(&top, "version: 1\nallow_out_of_root: true\nrules: []\n").unwrap();
+    let drop_in_dir = tmp.path().join(".alint.d");
+    std::fs::create_dir_all(&drop_in_dir).unwrap();
+    std::fs::write(
+        drop_in_dir.join("99-lockdown.yml"),
+        "version: 1\nallow_out_of_root: false\nrules: []\n",
+    )
+    .unwrap();
+    let cfg = load(&top).unwrap();
+    assert!(
+        cfg.allow_out_of_root.is_confined(),
+        "drop-in allow_out_of_root: false must override root allow_out_of_root: true"
+    );
+
+    // Empty `{}` selective map is confined and allowed even under untrusted load.
+    let empty_sel = tmp.path().join("empty-sel.yml");
+    std::fs::write(&empty_sel, "version: 1\nallow_out_of_root: {}\nrules: []\n").unwrap();
+    let opts = LoadOptions {
+        out_of_root_policy: crate::OutOfRootPolicy::Deny,
+        ..Default::default()
+    };
+    let cfg = load_with(&empty_sel, &opts).unwrap();
+    assert!(cfg.allow_out_of_root.is_confined());
+}
+
+#[test]
+fn nested_configs_enabled_handles_bom_and_rejects_null_like_load() {
+    let tmp = tempfile::tempdir().unwrap();
+    let bom_cfg = tmp.path().join("bom.yml");
+    std::fs::write(
+        &bom_cfg,
+        "\u{feff}nested_configs: true\nversion: 1\nrules: []\n",
+    )
+    .unwrap();
+    assert!(nested_configs_enabled(&bom_cfg).unwrap());
+    assert!(load(&bom_cfg).unwrap().nested_configs);
+
+    let null_cfg = tmp.path().join("null.yml");
+    std::fs::write(&null_cfg, "nested_configs: null\nversion: 1\nrules: []\n").unwrap();
+    assert!(nested_configs_enabled(&null_cfg).is_err());
+    assert!(load(&null_cfg).is_err());
+}

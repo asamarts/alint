@@ -979,3 +979,230 @@ fn selected_trace_allows_conditional_extraction_to_skip_binary_input() {
             .any(|stage| stage.class == alint_core::TraceStageClass::Extraction)
     );
 }
+
+#[test]
+fn duplicate_literal_paths_match_file_major_and_rule_major_counts() {
+    let spec = std::sync::Arc::new(spec_yaml(
+        "id: dup\nkind: json_path_equals\npaths: [\"a.json\", \"a.json\"]\n\
+         path: \"$.x\"\nequals: 1\nlevel: error\n",
+    ));
+    let registry = crate::builtin_registry();
+    let rule = registry.build(&spec).unwrap();
+    let (tmp, index) = tempdir_with_files(&[("a.json", br#"{"x":2}"#)]);
+    let rule_major = rule.evaluate(&ctx(tmp.path(), &index)).unwrap();
+    let engine = alint_core::Engine::from_entries(
+        vec![alint_core::RuleEntry::new(rule).with_spec(spec)],
+        registry,
+    );
+    let report = engine.run(tmp.path(), &index).unwrap();
+    assert_eq!(
+        rule_major.len(),
+        1,
+        "rule-major must deduplicate literal paths"
+    );
+    assert_eq!(report.results[0].violations.len(), 1);
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn all_eight_formats_sweep_equals_matches_and_absent_pass_and_fail() {
+    struct Case<'a> {
+        prefix: &'a str,
+        filename: &'a str,
+        content: &'a str,
+        present_path: &'a str,
+        absent_path: &'a str,
+        equals_ok: &'a str,
+        equals_bad: &'a str,
+        matches_ok: &'a str,
+        matches_bad: &'a str,
+    }
+    let registry = crate::builtin_registry();
+    let cases = [
+        Case {
+            prefix: "json",
+            filename: "a.json",
+            content: r#"{"env": "prod", "secret": "x"}"#,
+            present_path: "$.env",
+            absent_path: "$.secret",
+            equals_ok: "\"prod\"",
+            equals_bad: "\"dev\"",
+            matches_ok: "^prod$",
+            matches_bad: "^staging$",
+        },
+        Case {
+            prefix: "yaml",
+            filename: "a.yml",
+            content: "env: prod\nsecret: x\n",
+            present_path: "$.env",
+            absent_path: "$.secret",
+            equals_ok: "\"prod\"",
+            equals_bad: "\"dev\"",
+            matches_ok: "^prod$",
+            matches_bad: "^staging$",
+        },
+        Case {
+            prefix: "toml",
+            filename: "a.toml",
+            content: "[app]\nenv = \"prod\"\nsecret = \"x\"\n",
+            present_path: "$.app.env",
+            absent_path: "$.app.secret",
+            equals_ok: "\"prod\"",
+            equals_bad: "\"dev\"",
+            matches_ok: "^prod$",
+            matches_bad: "^staging$",
+        },
+        Case {
+            prefix: "xml",
+            filename: "a.xml",
+            content: "<root><env>prod</env><secret>x</secret></root>",
+            present_path: "$.root.env",
+            absent_path: "$.root.secret",
+            equals_ok: "\"prod\"",
+            equals_bad: "\"dev\"",
+            matches_ok: "^prod$",
+            matches_bad: "^staging$",
+        },
+        Case {
+            prefix: "dotenv",
+            filename: ".env",
+            content: "ENV=prod\nSECRET=x\n",
+            present_path: "$.ENV",
+            absent_path: "$.SECRET",
+            equals_ok: "\"prod\"",
+            equals_bad: "\"dev\"",
+            matches_ok: "^prod$",
+            matches_bad: "^staging$",
+        },
+        Case {
+            prefix: "properties",
+            filename: "a.properties",
+            content: "app.env=prod\napp.secret=x\n",
+            present_path: "$['app.env']",
+            absent_path: "$['app.secret']",
+            equals_ok: "\"prod\"",
+            equals_bad: "\"dev\"",
+            matches_ok: "^prod$",
+            matches_bad: "^staging$",
+        },
+        Case {
+            prefix: "ini",
+            filename: "a.ini",
+            content: "[app]\nenv = prod\nsecret = x\n",
+            present_path: "$['app']['env']",
+            absent_path: "$['app']['secret']",
+            equals_ok: "\"prod\"",
+            equals_bad: "\"dev\"",
+            matches_ok: "^prod$",
+            matches_bad: "^staging$",
+        },
+        Case {
+            prefix: "hcl",
+            filename: "a.tf",
+            content: "locals {\n  env = \"prod\"\n  secret = \"x\"\n}\n",
+            present_path: "$.locals.env",
+            absent_path: "$.locals.secret",
+            equals_ok: "\"prod\"",
+            equals_bad: "\"dev\"",
+            matches_ok: "^prod$",
+            matches_bad: "^staging$",
+        },
+    ];
+
+    for c in cases {
+        let (tmp, idx) = tempdir_with_files(&[(c.filename, c.content.as_bytes())]);
+
+        // *_path_equals pass & fail
+        let eq_ok = spec_yaml(&format!(
+            "id: t\nkind: {0}_path_equals\npaths: \"{1}\"\npath: \"{2}\"\nequals: {3}\nlevel: error\n",
+            c.prefix, c.filename, c.present_path, c.equals_ok
+        ));
+        assert!(
+            registry
+                .build(&eq_ok)
+                .unwrap()
+                .evaluate(&ctx(tmp.path(), &idx))
+                .unwrap()
+                .is_empty(),
+            "{}_path_equals pass failed",
+            c.prefix
+        );
+        let eq_bad = spec_yaml(&format!(
+            "id: t\nkind: {0}_path_equals\npaths: \"{1}\"\npath: \"{2}\"\nequals: {3}\nlevel: error\n",
+            c.prefix, c.filename, c.present_path, c.equals_bad
+        ));
+        assert_eq!(
+            registry
+                .build(&eq_bad)
+                .unwrap()
+                .evaluate(&ctx(tmp.path(), &idx))
+                .unwrap()
+                .len(),
+            1,
+            "{}_path_equals fail should fire",
+            c.prefix
+        );
+
+        // *_path_matches pass & fail
+        let m_ok = spec_yaml(&format!(
+            "id: t\nkind: {0}_path_matches\npaths: \"{1}\"\npath: \"{2}\"\nmatches: \"{3}\"\nlevel: error\n",
+            c.prefix, c.filename, c.present_path, c.matches_ok
+        ));
+        assert!(
+            registry
+                .build(&m_ok)
+                .unwrap()
+                .evaluate(&ctx(tmp.path(), &idx))
+                .unwrap()
+                .is_empty(),
+            "{}_path_matches pass failed",
+            c.prefix
+        );
+        let m_bad = spec_yaml(&format!(
+            "id: t\nkind: {0}_path_matches\npaths: \"{1}\"\npath: \"{2}\"\nmatches: \"{3}\"\nlevel: error\n",
+            c.prefix, c.filename, c.present_path, c.matches_bad
+        ));
+        assert_eq!(
+            registry
+                .build(&m_bad)
+                .unwrap()
+                .evaluate(&ctx(tmp.path(), &idx))
+                .unwrap()
+                .len(),
+            1,
+            "{}_path_matches fail should fire",
+            c.prefix
+        );
+
+        // *_path_absent pass (missing path) & fail (present path)
+        let abs_ok = spec_yaml(&format!(
+            "id: t\nkind: {0}_path_absent\npaths: \"{1}\"\npath: \"$.definitely_not_here\"\nlevel: error\n",
+            c.prefix, c.filename
+        ));
+        assert!(
+            registry
+                .build(&abs_ok)
+                .unwrap()
+                .evaluate(&ctx(tmp.path(), &idx))
+                .unwrap()
+                .is_empty(),
+            "{}_path_absent pass failed",
+            c.prefix
+        );
+        let abs_bad = spec_yaml(&format!(
+            "id: t\nkind: {0}_path_absent\npaths: \"{1}\"\npath: \"{2}\"\nlevel: error\n",
+            c.prefix, c.filename, c.absent_path
+        ));
+        assert_eq!(
+            registry
+                .build(&abs_bad)
+                .unwrap()
+                .evaluate(&ctx(tmp.path(), &idx))
+                .unwrap()
+                .len(),
+            1,
+            "{}_path_absent fail should fire",
+            c.prefix
+        );
+    }
+}

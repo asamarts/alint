@@ -1201,6 +1201,7 @@ fn a_nested_rule_marker_does_not_grow_with_its_path() {
         };
         let opts = LoadOptions::with_catalog(test_catalog());
         let mut names = vec!["an extends: entry".to_string()];
+        let env_values = Vec::new();
         let (rules, _, _) = nested::discover_nested(
             tmp.path(),
             &root_cfg.canonicalize().unwrap(),
@@ -1208,6 +1209,7 @@ fn a_nested_rule_marker_does_not_grow_with_its_path() {
             &opts,
             RunningVersion::current(),
             &mut names,
+            &env_values,
         )
         .unwrap();
         let source = format!("{dir}/.alint.yml");
@@ -1223,4 +1225,184 @@ fn a_nested_rule_marker_does_not_grow_with_its_path() {
         template_budget::size_of_mapping(marker)
     };
     assert_eq!(marker_at("a"), marker_at(&deep));
+}
+
+#[test]
+fn nested_rejects_empty_and_exclude_only_paths_top_level_and_in_require() {
+    for bad_paths in [
+        "[]",
+        "[\"!dummy\"]",
+        "\"!dummy\"",
+        "{ exclude: [\"dummy\"] }",
+        "{ include: [], exclude: [\"dummy\"] }",
+    ] {
+        let top = format!(
+            "version: 1\nrules:\n  - id: bad\n    kind: no_zero_width_chars\n    paths: {bad_paths}\n    level: error\n"
+        );
+        let err = load_with_nested(&top).unwrap_err();
+        assert!(
+            err.contains("at least one non-negated pattern"),
+            "top-level {bad_paths} must fail closed: {err}"
+        );
+
+        let req = format!(
+            "version: 1\nrules:\n  - id: bad-req\n    kind: for_each_dir\n    select: \"sub\"\n    level: error\n    require:\n      - kind: no_zero_width_chars\n        paths: {bad_paths}\n"
+        );
+        let err_req = load_with_nested(&req).unwrap_err();
+        assert!(
+            err_req.contains("at least one non-negated pattern"),
+            "require {bad_paths} must fail closed: {err_req}"
+        );
+    }
+}
+
+#[test]
+fn nested_rejects_env_interpolation_and_env_when_oracles() {
+    #[derive(Debug)]
+    struct SecretEnv;
+    impl crate::EnvironmentProvider for SecretEnv {
+        fn get(&self, name: &str) -> Option<String> {
+            (name == "SECRET").then(|| "super-secret-token".to_string())
+        }
+    }
+
+    let load_nested_case = |root_yaml: &str, nested_yaml: &str| {
+        let tmp = tempfile::tempdir().unwrap();
+        let root_cfg = tmp.path().join(".alint.yml");
+        std::fs::write(&root_cfg, root_yaml).unwrap();
+        let pkg = tmp.path().join("packages/evil");
+        std::fs::create_dir_all(&pkg).unwrap();
+        std::fs::write(pkg.join(".alint.yml"), nested_yaml).unwrap();
+        let mut opts = LoadOptions::with_catalog(test_catalog());
+        opts.environment = std::sync::Arc::new(SecretEnv);
+        load_with(&root_cfg, &opts).map_err(|e| e.to_string())
+    };
+
+    // 1. Direct {{env.SECRET}} interpolation in nested config.
+    let err = load_nested_case(
+        "version: 1\nnested_configs: true\nrules: []\n",
+        "version: 1\nrules:\n  - id: r\n    kind: file_exists\n    paths: \"{{env.SECRET}}\"\n    level: error\n",
+    )
+    .unwrap_err();
+    assert!(
+        err.contains("environment interpolation") && !err.contains("super-secret-token"),
+        "expected env interpolation refusal without secret leak: {err}"
+    );
+
+    // 2. Direct `when: env.SECRET ...`
+    let err = load_nested_case(
+        "version: 1\nnested_configs: true\nrules: []\n",
+        "version: 1\nrules:\n  - id: r\n    kind: file_exists\n    paths: a.txt\n    when: 'env.SECRET != null'\n    level: error\n",
+    )
+    .unwrap_err();
+    assert!(err.contains("env.SECRET"), "unexpected error: {err}");
+
+    // 3. `when_iter: env.SECRET ...`
+    let err = load_nested_case(
+        "version: 1\nnested_configs: true\nrules: []\n",
+        "version: 1\nrules:\n  - id: r\n    kind: for_each_dir\n    select: '*'\n    when_iter: 'env.SECRET != null'\n    require:\n      - kind: file_exists\n        paths: '{path}/a.txt'\n    level: error\n",
+    )
+    .unwrap_err();
+    assert!(err.contains("env.SECRET"), "unexpected error: {err}");
+
+    // 4. `when: vars.root_secret ...` where root interpolated `root_secret` from env.
+    let err = load_nested_case(
+        "version: 1\nnested_configs: true\nvars:\n  root_secret: '{{env.SECRET}}'\nrules: []\n",
+        "version: 1\nrules:\n  - id: r\n    kind: file_exists\n    paths: a.txt\n    when: 'vars.root_secret == \"x\"'\n    level: error\n",
+    )
+    .unwrap_err();
+    assert!(
+        err.contains("vars.root_secret") && !err.contains("super-secret-token"),
+        "unexpected error: {err}"
+    );
+
+    // 5. Template-assembled `when: "{{vars.cond}}"` from root template filled by nested config.
+    let err = load_nested_case(
+        "version: 1\nnested_configs: true\ntemplates:\n  - id: t\n    kind: file_exists\n    paths: a.txt\n    when: '{{vars.cond}}'\n    level: error\nrules: []\n",
+        "version: 1\nrules:\n  - id: r\n    extends_template: t\n    vars:\n      cond: 'env.SECRET != null'\n",
+    )
+    .unwrap_err();
+    assert!(err.contains("env.SECRET"), "unexpected error: {err}");
+}
+
+#[test]
+fn nested_require_confines_key_parity_reference_and_scope_filter_manifest_source() {
+    let cfg = load_with_nested(
+        r#"version: 1
+rules:
+  - id: per-dir-parity
+    kind: for_each_dir
+    select: "sub"
+    level: error
+    require:
+      - kind: key_parity
+        reference: ".env"
+        peers: "{path}/empty.env"
+      - kind: file_content_forbidden
+        paths: "{path}/a.txt"
+        pattern: "TODO"
+        scope_filter:
+          include_manifest_paths:
+            source: "Cargo.toml"
+            extract: { toml: "$.workspace.members[*]" }
+"#,
+    )
+    .unwrap();
+    let require = format!("{:?}", cfg.rules[0].extra.get("require"));
+    assert!(
+        require.contains("packages/foo/.env"),
+        "key_parity.reference must be re-rooted under nested prefix: {require}"
+    );
+    assert!(
+        require.contains("packages/foo/Cargo.toml"),
+        "require scope_filter manifest source must be re-rooted under nested prefix: {require}"
+    );
+
+    let bad = load_with_nested(
+        r#"version: 1
+rules:
+  - id: escape-manifest
+    kind: for_each_dir
+    select: "sub"
+    level: error
+    require:
+      - kind: file_content_forbidden
+        paths: "{path}/a.txt"
+        pattern: "TODO"
+        scope_filter:
+          include_manifest_paths:
+            source: "../Cargo.toml"
+            extract: { toml: "$.workspace.members[*]" }
+"#,
+    )
+    .unwrap_err();
+    assert!(bad.contains("escape"), "unexpected error: {bad}");
+}
+
+#[test]
+fn scope_glob_rejects_escapes_even_with_empty_prefix_and_escapes_metachar_dirs() {
+    assert!(nested::scope_glob("/etc/passwd", "").is_err());
+    assert!(nested::scope_glob("../outside/**", "").is_err());
+    assert!(nested::scope_glob(r"C:\Windows\win.ini", "").is_err());
+
+    // Glob metacharacters in subdirectory names (Next.js `app/[id]/.alint.yml`)
+    // must be escaped so `[id]` does not match sibling `app/i/`.
+    let tmp = tempfile::tempdir().unwrap();
+    let root_cfg = tmp.path().join(".alint.yml");
+    std::fs::write(&root_cfg, "version: 1\nnested_configs: true\nrules: []\n").unwrap();
+    let dir = tmp.path().join("app/[id]");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join(".alint.yml"),
+        "version: 1\nrules:\n  - id: id-txt\n    kind: file_absent\n    paths: '*.txt'\n    level: error\n",
+    )
+    .unwrap();
+    let cfg = load(&root_cfg).unwrap();
+    let scope = alint_core::Scope::from_spec(&cfg.rules[0]).unwrap();
+    let idx = alint_core::FileIndex::from_entries(vec![]);
+    assert!(scope.matches(Path::new("app/[id]/bad.txt"), &idx));
+    assert!(
+        !scope.matches(Path::new("app/i/bad.txt"), &idx),
+        "bracket metacharacter in nested dir must not match sibling app/i/"
+    );
 }

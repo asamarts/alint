@@ -55,18 +55,25 @@ rules:
   # --- Manifest -----------------------------------------------------
   - id: java-manifest-exists
     when: facts.has_java
-    # Maven (`pom.xml`) or Gradle (Groovy or Kotlin DSL). Either
-    # is fine; mixed setups are unusual but valid.
+    # Maven (`pom.xml`) or Gradle (Groovy or Kotlin DSL, including
+    # multi-project roots with only `settings.gradle(.kts)`).
     kind: file_exists
     paths:
       - pom.xml
+      - "**/pom.xml"
       - build.gradle
+      - "**/build.gradle"
       - build.gradle.kts
-    root_only: true
+      - "**/build.gradle.kts"
+      - settings.gradle
+      - "**/settings.gradle"
+      - settings.gradle.kts
+      - "**/settings.gradle.kts"
     level: error
     message: >-
       Java project: `pom.xml` (Maven) or `build.gradle` /
-      `build.gradle.kts` (Gradle) at the root is required.
+      `build.gradle.kts` / `settings.gradle` / `settings.gradle.kts`
+      (Gradle) is required.
     policy_url: "https://maven.apache.org/guides/introduction/introduction-to-the-pom.html"
 
   # --- Wrapper scripts for reproducible builds ----------------------

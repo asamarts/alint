@@ -452,6 +452,8 @@ fn hover_shows_repository_markdown_literally() {
             .to_string(),
         line: None,
         column: None,
+        has_path: true,
+        baseline_key: None,
         policy_url: Some("javascript:alert(1)".to_string()),
         fixable: false,
         sensitive: false,

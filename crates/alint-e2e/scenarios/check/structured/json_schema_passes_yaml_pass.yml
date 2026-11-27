@@ -1,0 +1,36 @@
+test_version: 1
+name: json_schema_passes is silent on a schema-conforming YAML document
+tags: [check, json_schema_passes, structured, yaml, passing]
+
+given:
+  tree:
+    schemas:
+      deploy.schema.json: |
+        {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "required": ["apiVersion", "kind", "replicas"],
+          "properties": {
+            "apiVersion": {"type": "string"},
+            "kind": {"type": "string"},
+            "replicas": {"type": "integer", "minimum": 1}
+          }
+        }
+    deploy.yml: |
+      apiVersion: apps/v1
+      kind: Deployment
+      replicas: 3
+  config: |
+    version: 1
+    rules:
+      - id: deploy-yaml-schema
+        kind: json_schema_passes
+        paths: "deploy.yml"
+        schema_path: "schemas/deploy.schema.json"
+        level: error
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

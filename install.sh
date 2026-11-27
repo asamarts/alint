@@ -66,20 +66,20 @@ verify_signature() {
   # The release signs with the new-format Sigstore bundle (cosign v3+); an older
   # cosign cannot parse it and would false-abort a perfectly good release.
   local cver
-  cver="$(cosign version 2>/dev/null | awk -F'v' '/GitVersion/ { split($2, a, "."); print a[1] + 0; exit }')"
+  cver="$(cosign version 2>/dev/null | awk '/GitVersion/ { sub(/^.*:[[:space:]]*v?/, ""); split($0, a, "."); print a[1] + 0; exit }')"
   if (( ${cver:-0} < 3 )); then
     _verify_skip_or_fail "cosign ${cver:-<unknown>}.x is too old for the new-format signature (need v3+)"
     return 0
   fi
-  if ! curl -fsSL --retry 3 --retry-delay 2 -o SHA256SUMS "${BASE_URL}/SHA256SUMS" 2>/dev/null \
-     || ! curl -fsSL --retry 3 --retry-delay 2 -o SHA256SUMS.cosign.bundle "${BASE_URL}/SHA256SUMS.cosign.bundle" 2>/dev/null; then
+  if ! _download SHA256SUMS "${BASE_URL}/SHA256SUMS" 2>/dev/null \
+     || ! _download SHA256SUMS.cosign.bundle "${BASE_URL}/SHA256SUMS.cosign.bundle" 2>/dev/null; then
     _verify_skip_or_fail "no cosign signature found for ${VERSION} (unsigned release, or it could not be downloaded)"
     return 0
   fi
   echo "==> Verifying release signature (cosign)"
   if ! cosign verify-blob \
       --bundle SHA256SUMS.cosign.bundle \
-      --certificate-identity-regexp "^https://github\\.com/${REPO}/\\.github/workflows/release\\.yml@refs/tags/v" \
+      --certificate-identity "https://github.com/${REPO}/.github/workflows/release.yml@refs/tags/${VERSION}" \
       --certificate-oidc-issuer https://token.actions.githubusercontent.com \
       SHA256SUMS >/dev/null 2>&1; then
     echo "error: cosign could not verify SHA256SUMS for ${VERSION}. A genuinely bad" >&2
@@ -161,6 +161,10 @@ _download() {
 main() {
 
   REPO="${ALINT_REPO:-asamarts/alint}"
+  if [[ ! "${REPO}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+    echo "error: invalid ALINT_REPO '${REPO}' (expected owner/repo)." >&2
+    exit 1
+  fi
   VERSION="${ALINT_VERSION:-latest}"
   if [[ "${VERSION}" != "latest" ]] && ! _is_release_tag "${VERSION}"; then
     echo "error: invalid ALINT_VERSION '${VERSION}' (expected 'latest' or a tag like v1.2.3, with optional pre-release/build suffixes)." >&2
@@ -225,6 +229,12 @@ main() {
 
   echo "==> Verifying SHA-256"
   cd "${TMPDIR}"
+  local sidecar_file
+  sidecar_file="$(awk '{ n = $2; sub(/^\*/, "", n); print n; exit }' "${ARCHIVE}.sha256")"
+  if [[ "${sidecar_file}" != "${ARCHIVE}" ]]; then
+    echo "error: ${ARCHIVE}.sha256 names '${sidecar_file}', expected '${ARCHIVE}'" >&2
+    exit 1
+  fi
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum -c "${ARCHIVE}.sha256"
   elif command -v shasum >/dev/null 2>&1; then
@@ -248,20 +258,29 @@ main() {
   fi
 
   mkdir -p "${INSTALL_DIR}"
-  cp "${STAGED_DIR}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
-  chmod +x "${INSTALL_DIR}/${BINARY}"
+  local tmp_bin
+  tmp_bin="$(mktemp "${INSTALL_DIR}/.${BINARY}.XXXXXX")"
+  if ! cp "${STAGED_DIR}/${BINARY}" "${tmp_bin}" \
+     || ! chmod +x "${tmp_bin}" \
+     || ! mv -f "${tmp_bin}" "${INSTALL_DIR}/${BINARY}"; then
+    rm -f "${tmp_bin}"
+    exit 1
+  fi
 
   echo "==> Installed ${BINARY} to ${INSTALL_DIR}/${BINARY}"
 
   # Post-install sanity
   "${INSTALL_DIR}/${BINARY}" --version 2>/dev/null || true
 
-  # Helpful PATH hint
-  if ! echo ":${PATH}:" | grep -q ":${INSTALL_DIR}:"; then
-    echo ""
-    echo "note: ${INSTALL_DIR} is not in your PATH. Add it to your shell rc, e.g.:"
-    echo "      echo 'export PATH=\"${INSTALL_DIR}:\$PATH\"' >> ~/.bashrc"
-  fi
+  # Helpful PATH hint (literal substring match; safe with metacharacters & unset PATH)
+  case ":${PATH:-}:" in
+    *":${INSTALL_DIR}:"*) ;;
+    *)
+      echo ""
+      echo "note: ${INSTALL_DIR} is not in your PATH. Add it to your shell rc, e.g.:"
+      echo "      echo 'export PATH=\"${INSTALL_DIR}:\$PATH\"' >> ~/.bashrc"
+      ;;
+  esac
 }
 
 main "$@"

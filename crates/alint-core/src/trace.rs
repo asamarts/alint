@@ -951,7 +951,7 @@ fn trace_rule_payload_schema(_: &mut schemars::SchemaGenerator) -> schemars::Sch
             "id": { "type": "string" },
             "rule_kind": { "type": "string" },
             "categories": { "type": "array", "items": { "type": "string" } },
-            "summary": { "type": "string" },
+            "summary": { "type": ["string", "null"] },
             "capabilities": {
                 "type": "array",
                 "items": {
@@ -1950,6 +1950,13 @@ mod tests {
             trace.stages.last().map(|stage| stage.reason),
             Some(TraceReason::OutcomeAnalysisFailure)
         );
+    }
+
+    #[test]
+    fn rule_trace_schema_accepts_null_rule_summary() {
+        let schema = rule_trace_schema();
+        let summary_type = &schema["properties"]["rule"]["properties"]["summary"]["type"];
+        assert_eq!(summary_type, &serde_json::json!(["string", "null"]));
     }
 
     fn passing_result() -> RuleResult {

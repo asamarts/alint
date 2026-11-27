@@ -874,3 +874,58 @@ jobs:
     let err = YamlDocument::parse_unguarded(cyclic).unwrap_err();
     assert!(err.contains("collection that contains it"), "{err}");
 }
+
+#[test]
+fn dockerfile_chained_onbuild_heredoc_and_case_insensitive_add_url() {
+    // Chained ONBUILD is invalid per Dockerfile grammar -> ResourceParse.
+    let chained = "FROM alpine@sha256:0000000000000000000000000000000000000000000000000000000000000000\n\
+                   ONBUILD ONBUILD FROM ubuntu:latest\n";
+    let findings = run("Dockerfile", chained, None);
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(
+        findings[0].analysis_failure_kind(),
+        Some(AnalysisFailureKind::ResourceParse)
+    );
+
+    // ENV `<<EOF` and RUN `<<<` here-string must NOT start heredocs that swallow FROM;
+    // RUN `<<\EOF` IS a real heredoc; uppercase `ADD HTTPS://...` must be flagged.
+    let df = "FROM alpine@sha256:0000000000000000000000000000000000000000000000000000000000000000\n\
+              ENV MSG=\"<<EOF\"\n\
+              RUN cat <<<EOF\n\
+              RUN <<\\EOF\n\
+              FROM fake:latest\n\
+              EOF\n\
+              ADD HTTPS://example.com/archive.tar.gz /tmp/\n\
+              FROM ubuntu:latest\n";
+    let findings = run("Dockerfile", df, None);
+    assert_eq!(findings.len(), 2, "{findings:?}");
+    assert!(findings.iter().all(|f| f.analysis_failure_kind().is_none()));
+    assert!(
+        findings.iter().any(|f| {
+            f.message.contains("ADD source")
+                && f.baseline_key
+                    .as_deref()
+                    .is_some_and(|k| k.contains("HTTPS://example.com"))
+        }),
+        "{findings:?}"
+    );
+    assert!(
+        findings.iter().any(|f| {
+            f.message.contains("base image")
+                && f.baseline_key
+                    .as_deref()
+                    .is_some_and(|k| k.contains("ubuntu:latest"))
+        }),
+        "{findings:?}"
+    );
+}
+
+#[test]
+fn yaml_non_scalar_mapping_keys_and_deep_merge_fail_closed() {
+    // Non-scalar YAML mapping key must not panic or skip later valid keys.
+    let yaml =
+        "jobs:\n  [a, b]: ignored\n  build:\n    steps:\n      - uses: actions/checkout@v4\n";
+    let findings = run(".github/workflows/ci.yml", yaml, None);
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0].analysis_failure_kind(), None);
+}

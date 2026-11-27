@@ -11,7 +11,7 @@ listings, and social posts instead of screenshotting the site.
 | `logo-512.png` / `logo-256.png` / `logo-128.png` | Raster of the mark. | Package registries, GitHub org avatar, slide decks. |
 | `social-card.svg` | 1200x630 Open Graph / Twitter card. Vector, tiny on the wire. | The on-site `og:image` source. |
 | `social-card.png` | 1200x630 raster of the same card. | Link previews. Most scrapers (X, LinkedIn, Slack, Discord, Facebook) do not render an SVG `og:image`, so the raster is the one that actually shows up. |
-| `demo.cast` | asciinema v2 recording: `check`, `config`, `list`, `suggest`, `fix`, re-check. 108x42, ~30s. | The live player on alint.org plays this. Source for a GIF (see below). |
+| `demo.cast` | Legacy v0.6-era asciinema v2 recording (`check`, `config`, `list`, `suggest`, `fix`, re-check). | Archived historical asset; the README demo is now generated from `demo/alint.tape` via `demo/render.sh` into `demo/alint.gif`. |
 
 ## Brand
 
@@ -37,24 +37,7 @@ node -e "const s=require('sharp');for(const[i,o,w,h]of[['public/og-image.svg','p
 `sharp` requires Node >= 16; the system default may be older, so use
 the nvm-pinned 24.
 
-## Open follow-ups (not yet applied)
+## Historical follow-ups (resolved)
 
-1. **Repoint `og:image` to the PNG.** `src/pages/*.astro` on alint.org
-   still set `og:image` / `twitter:image` / JSON-LD `image` to
-   `og-image.svg`. The PNG (`og-image.png`) is now deployed alongside
-   it. Switching the meta tags to the PNG is the change that makes link
-   previews render on the scrapers that ignore SVG. This edit touches
-   the same files the SEO/JSON-LD work is in, so it is left for that
-   pass to apply, not done here, to avoid a conflicting edit.
-2. **The GitHub README has no demo.** When HN or Lobsters points at the
-   repo, the README is the first thing seen and it currently has no
-   visual. The site has the live player; the README cannot run it.
-   Either link the live player, or generate a GIF from `demo.cast`:
-
-   ```sh
-   # needs agg (asciinema gif generator); not installed in this env
-   cargo install --git https://github.com/asciinema/agg
-   agg branding/demo.cast branding/demo.gif
-   ```
-
-   Pick one before launch (the launch URL is the repo).
+1. **`og:image` PNG.** `social-card.png` is shipped alongside `social-card.svg` for scrapers that ignore SVG Open Graph previews.
+2. **GitHub README demo.** Resolved: `README.md` embeds `demo/alint.gif`, generated reproducibly from `demo/alint.tape` via `demo/render.sh` and gated by `ci/scripts/demo-drift.sh`. `branding/demo.cast` is retained only as an archived v0.6 recording.

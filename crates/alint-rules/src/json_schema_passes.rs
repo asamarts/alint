@@ -174,6 +174,35 @@ impl Rule for JsonSchemaPassesRule {
         self.allow_out_of_root = allow;
     }
 
+    fn path_contents_sensitive_by_default(&self) -> bool {
+        self.format_override.is_some_and(Format::redacts_by_default)
+    }
+
+    fn visit_sensitive_paths(
+        &self,
+        explicit: bool,
+        ctx: &Context<'_>,
+        visit: &mut dyn FnMut(&Path),
+    ) {
+        let manifest_sensitive = self.scope.sensitive_manifest_sources().next().is_some();
+        for path in self.scope.sensitive_manifest_sources() {
+            visit(path);
+        }
+        let default_sensitive = self.path_contents_sensitive_by_default();
+        for entry in self.scope.candidate_files(ctx.index) {
+            if !self.scope.matches(&entry.path, ctx.index) {
+                continue;
+            }
+            let file_sensitive = self
+                .format_override
+                .or_else(|| Format::detect_from_path(&entry.path))
+                .is_some_and(Format::redacts_by_default);
+            if explicit || manifest_sensitive || default_sensitive || file_sensitive {
+                visit(&entry.path);
+            }
+        }
+    }
+
     // Linear read/parse/validate handling keeps each failure owned by its input file.
     #[allow(clippy::too_many_lines)]
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
@@ -281,15 +310,19 @@ impl Rule for JsonSchemaPassesRule {
                 String::from_utf8_lossy(&raw_bytes)
             };
 
+            let sensitive = format.redacts_by_default();
             let parsed = match ctx.parse_structured_strict(&entry.path, format, &text, strict_json)
             {
                 Ok(v) => v,
                 Err(err) => {
-                    violations.push(
+                    let mut finding =
                         Violation::new(format!("not a valid {} document: {err}", format.label()))
                             .with_path(entry.path.clone())
-                            .as_analysis_failure(AnalysisFailureKind::ResourceParse),
-                    );
+                            .as_analysis_failure(AnalysisFailureKind::ResourceParse);
+                    if sensitive {
+                        finding.redact_message(&self.id);
+                    }
+                    violations.push(finding);
                     continue;
                 }
             };
@@ -297,21 +330,33 @@ impl Rule for JsonSchemaPassesRule {
             for error in validator.iter_errors(&parsed) {
                 // jsonschema 0.36+ privatised `instance_path` and exposes
                 // it via the `instance_path()` accessor method.
-                let detail = format!("schema violation at `{}`: {error}", error.instance_path());
+                // Never include raw `jsonschema::ValidationError` text for
+                // sensitive formats (.env / .properties): it quotes instance
+                // values directly.
+                let detail = if sensitive {
+                    format!(
+                        "schema violation at `{}` (details redacted)",
+                        error.instance_path()
+                    )
+                } else {
+                    format!("schema violation at `{}`: {error}", error.instance_path())
+                };
                 let msg = self.message.clone().unwrap_or(detail);
                 // One document can fail N schema constraints; without a key the
                 // N path-only findings collapse to one fingerprint and a new
                 // schema violation would be masked. Key on the (data location,
                 // schema constraint) pair — stable and reword-proof.
-                violations.push(
-                    Violation::new(msg)
-                        .with_path(entry.path.clone())
-                        .with_baseline_key(format!(
-                            "schema\u{0}{}\u{0}{}",
-                            error.instance_path(),
-                            error.schema_path()
-                        )),
-                );
+                let mut finding = Violation::new(msg)
+                    .with_path(entry.path.clone())
+                    .with_baseline_key(format!(
+                        "schema\u{0}{}\u{0}{}",
+                        error.instance_path(),
+                        error.schema_path()
+                    ));
+                if sensitive {
+                    finding.redact_message(&self.id);
+                }
+                violations.push(finding);
             }
         }
         Ok(violations)
@@ -800,6 +845,38 @@ mod tests {
         assert!(
             v.is_empty(),
             "empty / whitespace / comment-only files must satisfy {{\"type\":\"object\"}}: {v:?}"
+        );
+    }
+
+    #[test]
+    fn dotenv_and_properties_targets_are_marked_sensitive_and_redacted() {
+        use crate::test_support::{ctx, spec_yaml, tempdir_with_files};
+        let (tmp, idx) = tempdir_with_files(&[
+            (
+                "schema.json",
+                br#"{"type":"object","properties":{"API_KEY":{"type":"integer"}},"required":["API_KEY"]}"#,
+            ),
+            (".env", b"API_KEY=super-secret-token-value\n"),
+        ]);
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: json_schema_passes\n\
+             paths: \".env\"\n\
+             schema_path: schema.json\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let mut sensitive = Vec::new();
+        rule.visit_sensitive_paths(false, &ctx(tmp.path(), &idx), &mut |p| {
+            sensitive.push(p.to_path_buf());
+        });
+        assert_eq!(sensitive, vec![std::path::PathBuf::from(".env")]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert!(
+            !v[0].message.contains("super-secret-token-value"),
+            "secret dotenv value leaked into violation message: {}",
+            v[0].message
         );
     }
 }

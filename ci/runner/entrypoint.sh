@@ -86,12 +86,17 @@ cleanup() {
 trap cleanup SIGTERM SIGINT
 
 echo "==> Starting runner agent"
-AGENT_LOG="$(mktemp)"
+AGENT_TMP="$(mktemp -d)"
+AGENT_LOG="${AGENT_TMP}/agent.log"
+AGENT_FIFO="${AGENT_TMP}/agent.fifo"
+mkfifo "$AGENT_FIFO"
 set +e
-# Process substitution, NOT `./run.sh | tee`: after a pipeline bash sets `$!` to
-# the LAST element, so a pipe would make AGENT_PID the tee process and the
-# handler would stop tee while the agent never got a signal at all.
-./run.sh > >(tee "$AGENT_LOG") 2>&1 &
+# Stream via a named FIFO so AGENT_PID stays `./run.sh` (receiving SIGTERM) AND
+# we can explicitly `wait "$TEE_PID"` before reading `$AGENT_LOG`, eliminating
+# the race where bash process substitution has not finished flushing on exit.
+tee "$AGENT_LOG" < "$AGENT_FIFO" &
+TEE_PID=$!
+./run.sh > "$AGENT_FIFO" 2>&1 &
 AGENT_PID=$!
 
 # Wait again after the handler runs. `wait` returns as soon as a trap fires,
@@ -103,11 +108,12 @@ while :; do
     AGENT_STATUS=$?
     kill -0 "$AGENT_PID" 2>/dev/null || break
 done
+wait "$TEE_PID"
 set -e
 
 if grep -qF 'registration has been deleted from the server' "$AGENT_LOG"; then
     discard_stale_credentials
 fi
-rm -f "$AGENT_LOG"
+rm -rf "$AGENT_TMP"
 
 exit "$AGENT_STATUS"

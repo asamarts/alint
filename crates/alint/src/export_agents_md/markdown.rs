@@ -34,7 +34,8 @@ pub fn render(
     out.push_str(START_MARKER);
     out.push('\n');
     out.push('\n');
-    let _ = writeln!(out, "## {section_title}");
+    let safe_title = sanitize_directive(section_title);
+    let _ = writeln!(out, "## {safe_title}");
     out.push('\n');
     out.push_str(
         "Generated from `.alint.yml` by `alint export-agents-md`. \
@@ -145,7 +146,7 @@ fn code_span(text: &str) -> String {
     } else {
         ""
     };
-    let text = text.replace(['\n', '\r'], " ");
+    let text = text.replace(['\n', '\r'], " ").replace("<!--", "&lt;!--");
     format!("{fence}{pad}{text}{pad}{fence}")
 }
 
@@ -171,16 +172,24 @@ fn safe_policy_url(url: &str) -> Option<String> {
         return None;
     }
     let mut out = String::with_capacity(url.len());
+    let mut utf8 = [0u8; 4];
     for c in url.chars() {
+        let cp = c as u32;
         match c {
             '(' => out.push_str("%28"),
             ')' => out.push_str("%29"),
             ' ' => out.push_str("%20"),
             '<' => out.push_str("%3C"),
             '>' => out.push_str("%3E"),
-            c if c.is_ascii_control() => {
+            '\\' => out.push_str("%5C"),
+            c if c.is_ascii_control()
+                || (0x80..=0x9f).contains(&cp)
+                || alint_core::invisible::is_deceptive_on_display(c) =>
+            {
                 use std::fmt::Write as _;
-                let _ = write!(out, "%{:02X}", c as u32);
+                for &b in c.encode_utf8(&mut utf8).as_bytes() {
+                    let _ = write!(out, "%{b:02X}");
+                }
             }
             c => out.push(c),
         }
@@ -405,5 +414,34 @@ mod tests {
         let first = render(&dirs, None, "Lint rules");
         let second = render(&dirs, None, "Lint rules");
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn section_title_and_rule_id_cannot_inject_markers_and_policy_url_encodes_backslash_and_bidi() {
+        let dirs = vec![dp(
+            "foo <!-- alint:end --> <!-- alint:start --> bar",
+            Level::Error,
+            "keep tidy",
+            "https://example.com/a\u{009b}31m\u{202e}b\\",
+        )];
+        let out = render(
+            &dirs,
+            None,
+            "Rules <!-- alint:end -->\n## injected <!-- alint:start -->",
+        );
+        assert_eq!(out.matches(START_MARKER).count(), 1, "{out}");
+        assert_eq!(out.matches(END_MARKER).count(), 1, "{out}");
+        assert!(
+            !out.lines().any(|line| line.starts_with("## injected")),
+            "newline in section_title must not start a new heading: {out}"
+        );
+        assert!(
+            out.contains("b%5C)"),
+            "trailing backslash must be %5C: {out}"
+        );
+        assert!(
+            !out.contains('\u{009b}') && !out.contains('\u{202e}'),
+            "{out:?}"
+        );
     }
 }

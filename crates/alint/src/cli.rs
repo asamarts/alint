@@ -218,7 +218,12 @@ pub(crate) struct Cli {
     /// the bare `alint --only <id>` lints the current directory like
     /// `alint check --only <id>` - to lint a different path, use the
     /// explicit form `alint check --only <id> <path>`.
-    #[arg(long, global = true, value_name = "RULE_ID")]
+    #[arg(
+        long,
+        global = true,
+        value_name = "RULE_ID",
+        allow_hyphen_values = true
+    )]
     pub(crate) only: Vec<String>,
 
     #[command(subcommand)]
@@ -435,7 +440,10 @@ pub(crate) enum Command {
             value_name = "FORMAT",
             default_value = "markdown",
             ignore_case = true,
-            value_parser = clap::builder::PossibleValuesParser::new(["markdown", "json"]),
+            value_parser = clap::builder::PossibleValuesParser::new([
+                clap::builder::PossibleValue::new("markdown").alias("md"),
+                clap::builder::PossibleValue::new("json"),
+            ]),
         )]
         format: String,
     },
@@ -459,7 +467,11 @@ pub(crate) enum Command {
             value_name = "FORMAT",
             default_value = "human",
             ignore_case = true,
-            value_parser = clap::builder::PossibleValuesParser::new(["human", "yaml", "json"]),
+            value_parser = clap::builder::PossibleValuesParser::new([
+                clap::builder::PossibleValue::new("human").aliases(["pretty", "text"]),
+                clap::builder::PossibleValue::new("yaml").alias("yml"),
+                clap::builder::PossibleValue::new("json"),
+            ]),
         )]
         format: String,
         /// Lower bound on signal strength for proposals. `low`
@@ -513,7 +525,10 @@ pub(crate) enum Command {
             value_name = "FORMAT",
             default_value = "human",
             ignore_case = true,
-            value_parser = clap::builder::PossibleValuesParser::new(["human", "json"]),
+            value_parser = clap::builder::PossibleValuesParser::new([
+                clap::builder::PossibleValue::new("human").aliases(["pretty", "text"]),
+                clap::builder::PossibleValue::new("json"),
+            ]),
         )]
         format: String,
     },
@@ -541,7 +556,10 @@ pub(crate) enum Command {
             value_name = "FORMAT",
             default_value = "human",
             ignore_case = true,
-            value_parser = clap::builder::PossibleValuesParser::new(["human", "json"]),
+            value_parser = clap::builder::PossibleValuesParser::new([
+                clap::builder::PossibleValue::new("human").aliases(["pretty", "text"]),
+                clap::builder::PossibleValue::new("json"),
+            ]),
         )]
         format: String,
     },

@@ -1,0 +1,22 @@
+test_version: 1
+name: php ruleset does not fail on nested composer.json or non-PHP vendor directory in polyglot monorepo
+tags: [check, extends, bundled, php, polyglot]
+
+given:
+  tree:
+    services:
+      billing:
+        composer.json: '{"name": "acme/billing"}'
+    go-svc:
+      vendor:
+        dep.go: "package dep\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/php@v1
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

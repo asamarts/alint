@@ -343,9 +343,18 @@ pub(crate) fn rendered_route_exists(ctx: &Context<'_>, mapped: &Path) -> bool {
     if mapped.as_os_str().is_empty() || ctx.index.contains_path(mapped) {
         return true;
     }
-    if mapped.extension().is_none() {
-        let mut markdown = mapped.to_path_buf();
-        markdown.set_extension("md");
+    let has_md_ext = mapped
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| {
+            ext.eq_ignore_ascii_case("md")
+                || ext.eq_ignore_ascii_case("markdown")
+                || ext.eq_ignore_ascii_case("mdx")
+        });
+    if !has_md_ext {
+        let mut os = mapped.as_os_str().to_os_string();
+        os.push(".md");
+        let markdown = PathBuf::from(os);
         if ctx.index.contains_file(&markdown) {
             return true;
         }
@@ -854,5 +863,15 @@ mod tests {
             (bom.links[0].line, bom.links[0].column),
             (plain.links[0].line, plain.links[0].column)
         );
+    }
+
+    #[test]
+    fn dotted_extensionless_doc_link_resolves_to_md() {
+        let (tmp, idx) = tempdir_with_files(&[
+            ("README.md", b"[release](/docs/v1.2)\n"),
+            ("docs/v1.2.md", b"# v1.2\n"),
+        ]);
+        let rule = build(&spec("root: { url_prefix: /docs/, dir: docs }\n")).unwrap();
+        assert!(rule.evaluate(&ctx(tmp.path(), &idx)).unwrap().is_empty());
     }
 }

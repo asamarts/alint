@@ -65,6 +65,7 @@
           "minimum": 0
         }
       },
+      "additionalProperties": false,
       "required": [
         "channel",
         "detail"
@@ -98,7 +99,7 @@
             "null"
           ],
           "format": "uint",
-          "minimum": 0
+          "minimum": 1
         },
         "end_column": {
           "type": [
@@ -106,7 +107,7 @@
             "null"
           ],
           "format": "uint",
-          "minimum": 0
+          "minimum": 1
         },
         "end_line": {
           "type": [
@@ -114,7 +115,7 @@
             "null"
           ],
           "format": "uint",
-          "minimum": 0
+          "minimum": 1
         },
         "kind": {
           "type": "string"
@@ -125,7 +126,7 @@
             "null"
           ],
           "format": "uint",
-          "minimum": 0
+          "minimum": 1
         },
         "message": {
           "type": "string"
@@ -140,6 +141,7 @@
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
         "rule",
         "kind",
@@ -155,7 +157,7 @@
             "null"
           ],
           "format": "uint",
-          "minimum": 0
+          "minimum": 1
         },
         "end_column": {
           "type": [
@@ -163,7 +165,7 @@
             "null"
           ],
           "format": "uint",
-          "minimum": 0
+          "minimum": 1
         },
         "end_line": {
           "type": [
@@ -171,7 +173,7 @@
             "null"
           ],
           "format": "uint",
-          "minimum": 0
+          "minimum": 1
         },
         "kind": {
           "type": "string"
@@ -182,7 +184,7 @@
             "null"
           ],
           "format": "uint",
-          "minimum": 0
+          "minimum": 1
         },
         "message": {
           "type": "string"
@@ -194,6 +196,7 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
         "kind",
         "message"
@@ -208,7 +211,7 @@
             "null"
           ],
           "format": "uint",
-          "minimum": 0
+          "minimum": 1
         },
         "end_column": {
           "type": [
@@ -216,7 +219,7 @@
             "null"
           ],
           "format": "uint",
-          "minimum": 0
+          "minimum": 1
         },
         "end_line": {
           "type": [
@@ -224,7 +227,7 @@
             "null"
           ],
           "format": "uint",
-          "minimum": 0
+          "minimum": 1
         },
         "label": {
           "type": "string"
@@ -235,12 +238,13 @@
             "null"
           ],
           "format": "uint",
-          "minimum": 0
+          "minimum": 1
         },
         "path": {
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
         "label",
         "path"
@@ -261,7 +265,7 @@
             "null"
           ],
           "format": "uint",
-          "minimum": 0
+          "minimum": 1
         },
         "end_column": {
           "type": [
@@ -269,7 +273,7 @@
             "null"
           ],
           "format": "uint",
-          "minimum": 0
+          "minimum": 1
         },
         "end_line": {
           "type": [
@@ -277,7 +281,7 @@
             "null"
           ],
           "format": "uint",
-          "minimum": 0
+          "minimum": 1
         },
         "fingerprint": {
           "type": "string"
@@ -294,7 +298,7 @@
             "null"
           ],
           "format": "uint",
-          "minimum": 0
+          "minimum": 1
         },
         "message": {
           "type": "string"
@@ -315,6 +319,7 @@
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
         "rule",
         "level",
@@ -529,6 +534,7 @@
           }
         }
       },
+      "additionalProperties": false,
       "required": [
         "exit",
         "violations",

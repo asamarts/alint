@@ -108,7 +108,18 @@ rules:
 "#;
 
 fn workspace_target() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target")
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    match std::env::var_os("CARGO_TARGET_DIR") {
+        Some(dir) if !dir.is_empty() => {
+            let path = PathBuf::from(dir);
+            if path.is_absolute() {
+                path
+            } else {
+                workspace_root.join(path)
+            }
+        }
+        _ => workspace_root.join("target"),
+    }
 }
 
 /// The binary under measurement: `ALINT_DET_BIN` when set (the reference perf

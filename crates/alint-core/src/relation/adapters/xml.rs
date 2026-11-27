@@ -51,7 +51,10 @@ impl Adapter for AndroidStringsAdapter {
     ) -> Result<AdapterOutput, AdapterError> {
         let text = xml_text(bytes)?;
         guarded_xml(text)?;
-        let document = roxmltree::Document::parse(text).map_err(|error| xml_parse_error(&error))?;
+        let stripped = text.trim_start_matches('\u{feff}');
+        let bom_offset = text.len() - stripped.len();
+        let document =
+            roxmltree::Document::parse(stripped).map_err(|error| xml_parse_error(&error))?;
         let root = document.root_element();
         if root.tag_name().name() != "resources" {
             return Err(AdapterError::Parse(
@@ -74,7 +77,7 @@ impl Adapter for AndroidStringsAdapter {
             {
                 continue;
             }
-            let span = crate::structured_format::xml_attr_value_span(text, name)
+            let span = crate::structured_format::xml_attr_value_span(stripped, name)
                 .unwrap_or_else(|| name.range_value());
             check_row_count(limits, rows.len() + 1)?;
             let pointer_bytes = 2usize
@@ -92,7 +95,10 @@ impl Adapter for AndroidStringsAdapter {
                     u32::try_from(rows.len()).expect("the row limit is far below u32::MAX"),
                     RowState::Key,
                 )
-                .with_span(ByteSpan::new(span.start, span.end)),
+                .with_span(ByteSpan::new(
+                    span.start + bom_offset,
+                    span.end + bom_offset,
+                )),
             );
         }
         Ok(AdapterOutput::new(rows))
@@ -138,7 +144,10 @@ impl Adapter for ResxAdapter {
     ) -> Result<AdapterOutput, AdapterError> {
         let text = xml_text(bytes)?;
         guarded_xml(text)?;
-        let document = roxmltree::Document::parse(text).map_err(|error| xml_parse_error(&error))?;
+        let stripped = text.trim_start_matches('\u{feff}');
+        let bom_offset = text.len() - stripped.len();
+        let document =
+            roxmltree::Document::parse(stripped).map_err(|error| xml_parse_error(&error))?;
         if document.root_element().tag_name().name() != "root" {
             return Err(AdapterError::Parse(
                 ".resx resources must have a <root> element".to_string(),
@@ -163,7 +172,7 @@ impl Adapter for ResxAdapter {
             if name.value().starts_with(">>") || name.value().starts_with("$this") {
                 continue;
             }
-            let span = crate::structured_format::xml_attr_value_span(text, name)
+            let span = crate::structured_format::xml_attr_value_span(stripped, name)
                 .unwrap_or_else(|| name.range_value());
             check_row_count(limits, rows.len() + 1)?;
             let pointer_bytes = std::mem::size_of::<Segment>().saturating_add(name.value().len());
@@ -177,7 +186,10 @@ impl Adapter for ResxAdapter {
                     u32::try_from(rows.len()).expect("the row limit is far below u32::MAX"),
                     RowState::Key,
                 )
-                .with_span(ByteSpan::new(span.start, span.end)),
+                .with_span(ByteSpan::new(
+                    span.start + bom_offset,
+                    span.end + bom_offset,
+                )),
             );
         }
         Ok(AdapterOutput::new(rows))
@@ -353,5 +365,24 @@ mod tests {
             )
             .unwrap_err();
         assert!(matches!(error, AdapterError::Limit(_)), "{error}");
+    }
+
+    #[test]
+    fn multi_bom_xml_adapters_adjust_attribute_spans() {
+        let android_text =
+            "\u{feff}\u{feff}<resources><string name=\"app\">App</string></resources>";
+        let android = rows(&AndroidStringsAdapter::new(), android_text);
+        assert_eq!(
+            &android_text[android.rows[0].span.unwrap().as_range()],
+            "app"
+        );
+
+        let resx_text =
+            "\u{feff}\u{feff}<root><data name=\"Greeting\"><value>Hi</value></data></root>";
+        let resx = rows(&ResxAdapter::new(), resx_text);
+        assert_eq!(
+            &resx_text[resx.rows[0].span.unwrap().as_range()],
+            "Greeting"
+        );
     }
 }

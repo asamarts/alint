@@ -372,7 +372,13 @@ fn find_comment_blocks(text: &str, lang: Language) -> Vec<CommentBlock> {
                 let stripped = strip_block_comment_markers(l, open, close);
                 block_content.push_str(&stripped);
                 block_content.push('\n');
-                if l.contains(close) && (j > i || trimmed.matches(close).count() > 0) {
+                let closes_here = if j > i {
+                    l.contains(close)
+                } else {
+                    trimmed.len() >= open.len() + close.len()
+                        && trimmed[open.len()..].contains(close)
+                };
+                if closes_here {
                     closed = true;
                     j += 1;
                     break;
@@ -629,5 +635,13 @@ mod tests {
         assert_eq!(Language::Auto.resolve(path), Language::Typescript);
         let path = Path::new("unknown");
         assert_eq!(Language::Auto.resolve(path), Language::Auto);
+    }
+
+    #[test]
+    fn slash_star_slash_is_not_treated_as_a_closed_block_comment() {
+        let src = "/*/\nlet x = compute(y);\nif x > 0 { return x; }\nlog_metric(\"a\", x);\n*/\n";
+        let blocks = find_comment_blocks(src, Language::Rust);
+        assert_eq!(blocks.len(), 1, "{blocks:?}");
+        assert_eq!(blocks[0].lines.len(), 5);
     }
 }

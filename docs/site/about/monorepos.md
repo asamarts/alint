@@ -47,7 +47,7 @@ The boundary that holds across the table: **alint reasons about the tree as data
 A progression the design points toward: start small, add layers as the value justifies the config surface. You don't have to climb all the way; steps 1–3 already produce a useful baseline.
 
 1. **One-line start.** `extends: alint://bundled/oss-baseline@v1` in `.alint.yml`, plus a workflow that runs `alint check` on PRs.
-2. **Ecosystem overlay.** Add `rust@v1` / `node@v1` / `python@v1` / `go@v1` / `java@v1` for the languages in your tree. Each defines a `facts.is_<lang>` gate, so a Java ruleset in a tree without Java contributes zero rules.
+2. **Ecosystem overlay.** Add `rust@v1` / `node@v1` / `python@v1` / `go@v1` / `java@v1` for the languages in your tree. Each defines a `facts.has_<lang>` gate, so a Java ruleset in a tree without Java contributes zero rules.
 3. **CI hardening.** Add `ci/github-actions@v1` to require `permissions.contents: read` and SHA-pinned actions in every workflow.
 4. **Field-level overrides.** When a bundled rule almost fits but you want it as a warning instead of an error, override just the `level:` (the rest of the rule inherits).
 5. **Custom structured-query rules.** Write a few `json_path_*` / `yaml_path_*` / `toml_path_*` rules for repo-specific invariants, e.g., every `Cargo.toml` declares `edition = "2024"`.
@@ -137,7 +137,7 @@ extends:
   - alint://bundled/docs/adr@v1
 ```
 
-Each ecosystem ruleset is gated by its own `facts.is_<lang>` check, so a tree without Java contributes no Java rules. Layering is cheap.
+Each ecosystem ruleset is gated by its own `facts.has_<lang>` check, so a tree without Java contributes no Java rules. Layering is cheap.
 
 ### Bazel / Buck / Pants monorepos
 

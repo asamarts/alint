@@ -182,13 +182,24 @@ fn is_js_or_ts(path: &Path) -> bool {
     )
 }
 
+fn has_dir_component(path: &Path, names: &[&str]) -> bool {
+    path.components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::Normal(seg)
+                if seg.to_str().is_some_and(|s| names.contains(&s))
+        )
+    })
+}
+
 fn is_test_path(path: &Path) -> bool {
-    let s = path.to_string_lossy();
-    s.contains("/test/")
-        || s.contains("/tests/")
-        || s.contains("/__tests__/")
-        || s.contains(".test.")
-        || s.contains(".spec.")
+    let filename = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default();
+    has_dir_component(path, &["test", "tests", "__tests__"])
+        || filename.contains(".test.")
+        || filename.contains(".spec.")
 }
 
 /// Broader test-fixture filter applied to every antipattern
@@ -198,11 +209,7 @@ fn is_test_path(path: &Path) -> bool {
 /// shaped backup / scratch files under those paths don't fire
 /// false positives.
 fn is_fixture_or_test_path(path: &Path) -> bool {
-    let s = path.to_string_lossy();
-    is_test_path(path)
-        || s.contains("/fixtures/")
-        || s.contains("/test-fixtures/")
-        || s.contains("/snapshots/")
+    is_test_path(path) || has_dir_component(path, &["fixtures", "test-fixtures", "snapshots"])
 }
 
 fn preview_paths(paths: &[&Path], max: usize) -> String {
@@ -267,6 +274,27 @@ mod tests {
         assert!(is_test_path(Path::new("packages/api/test/foo.ts")));
         assert!(is_test_path(Path::new("src/foo.spec.ts")));
         assert!(!is_test_path(Path::new("src/foo.ts")));
+    }
+
+    #[test]
+    fn excludes_top_level_and_nested_test_and_fixture_directories() {
+        for excluded in [
+            "tests/foo.bak",
+            "test/a.js",
+            "__tests__/a.ts",
+            "fixtures/a.bak",
+            "test-fixtures/a.orig",
+            "snapshots/a.orig",
+            "src/tests/a.bak",
+            "pkg/fixtures/sample.bak",
+        ] {
+            assert!(
+                is_fixture_or_test_path(Path::new(excluded)),
+                "expected excluded: {excluded}"
+            );
+        }
+        assert!(!is_fixture_or_test_path(Path::new("src/testing/a.bak")));
+        assert!(!is_fixture_or_test_path(Path::new("app.bak")));
     }
 
     #[test]

@@ -297,6 +297,128 @@ fn every_fix_op_is_exercised_and_proven_convergent() {
     panic!("\n{report}");
 }
 
+/// Map every inline rule `id` to `(kind, fix_op)`.
+fn collect_id_to_kind_and_op(v: &Value, out: &mut HashMap<String, (String, String)>) {
+    match v {
+        Value::Mapping(m) => {
+            let id = m.get(Value::String("id".into())).and_then(Value::as_str);
+            let kind = m.get(Value::String("kind".into())).and_then(Value::as_str);
+            let fix = m
+                .get(Value::String("fix".into()))
+                .and_then(Value::as_mapping);
+            if let (Some(id), Some(kind), Some(fix)) = (id, kind, fix)
+                && let Some((key, _)) = fix.iter().next()
+                && let Some(op) = key.as_str()
+            {
+                out.insert(id.to_string(), (kind.to_string(), op.to_string()));
+            }
+            for (_, child) in m {
+                collect_id_to_kind_and_op(child, out);
+            }
+        }
+        Value::Sequence(seq) => {
+            for child in seq {
+                collect_id_to_kind_and_op(child, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+#[test]
+fn every_declared_kind_and_fix_op_pair_has_an_e2e_fix_scenario() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("scenarios")
+        .join("fix");
+    let mut covered_pairs: BTreeSet<(String, String)> = BTreeSet::new();
+
+    for path in yml_files(&dir) {
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(scn) = alint_core::yaml::from_str::<Value>(&text) else {
+            continue;
+        };
+        let Some(config) = scn
+            .get("given")
+            .and_then(|g| g.get("config"))
+            .and_then(Value::as_str)
+        else {
+            continue;
+        };
+        let Ok(cfg) = alint_core::yaml::from_str::<Value>(config) else {
+            continue;
+        };
+        let mut id_to_pair = HashMap::new();
+        collect_id_to_kind_and_op(&cfg, &mut id_to_pair);
+        if id_to_pair.is_empty() {
+            continue;
+        }
+        let when: Vec<String> = scn
+            .get("when")
+            .and_then(Value::as_sequence)
+            .map(|s| {
+                s.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let expect: Vec<Value> = scn
+            .get("expect")
+            .and_then(Value::as_sequence)
+            .cloned()
+            .unwrap_or_default();
+        for (i, step) in when.iter().enumerate() {
+            if !is_fix_step(step) {
+                continue;
+            }
+            let Some(exp) = expect.get(i) else {
+                continue;
+            };
+            let mut fired = str_list(exp, "applied");
+            fired.extend(str_list(exp, "suggested"));
+            for id in fired {
+                if let Some((kind, op)) = id_to_pair.get(&id) {
+                    let canonical = alint_rules::categories::ALIAS_TO_CANONICAL
+                        .iter()
+                        .find_map(|(a, c)| (*a == kind.as_str()).then_some(*c))
+                        .unwrap_or(kind.as_str());
+                    covered_pairs.insert((canonical.to_string(), op.clone()));
+                }
+            }
+        }
+    }
+
+    // Covered by dedicated native Unix symlink test in `unix_metadata.rs`.
+    let native_allowlist: BTreeSet<(&str, &str)> = BTreeSet::from([("no_symlinks", "file_remove")]);
+    let registry = alint_rules::builtin_registry();
+    let mut missing = Vec::new();
+    for (kind, meta) in registry.kind_metadata() {
+        if alint_rules::categories::ALIAS_TO_CANONICAL
+            .iter()
+            .any(|(alias, _)| *alias == kind)
+        {
+            continue;
+        }
+        for op in meta.fix_ops.iter() {
+            let op: &str = op.as_ref();
+            if native_allowlist.contains(&(kind, op)) {
+                continue;
+            }
+            if !covered_pairs.contains(&(kind.to_string(), op.to_string())) {
+                missing.push(format!("({kind}, {op})"));
+            }
+        }
+    }
+    missing.sort();
+    assert!(
+        missing.is_empty(),
+        "{} declared (kind, fix_op) pair(s) have no E2E fix scenario under scenarios/fix/:\n  - {}",
+        missing.len(),
+        missing.join("\n  - "),
+    );
+}
+
 /// Deterministic unit tests for [`classify_scenario`], so both convergence
 /// shapes are gated directly on synthetic input. The corpus proves Case B many
 /// times over but has thin Case-A coverage (one scenario), and a corpus edit

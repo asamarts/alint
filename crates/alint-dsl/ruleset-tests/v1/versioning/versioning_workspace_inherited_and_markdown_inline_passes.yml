@@ -1,0 +1,41 @@
+test_version: 1
+name: versioning bundle skips workspace-inherited Cargo versions and allows inline markdown backticks in CHANGELOG
+tags: [check, extends, bundled, versioning, cross_file]
+
+given:
+  tree:
+    VERSION: "1.2.3\n"
+    Cargo.toml: |
+      [workspace]
+      members = ["crates/app"]
+
+      [workspace.package]
+      version = "1.2.3"
+    crates:
+      app:
+        Cargo.toml: |
+          [package]
+          name = "app"
+          version.workspace = true
+    CHANGELOG.md: |
+      # Changelog
+
+      Follows [Semantic Versioning](<https://semver.org>) and `Keep a Changelog`.
+
+      ## [Unreleased]
+
+      - Improved `foo` handling (~10ms faster) and `<T>` diagnostics.
+
+      ## [1.2.3] - 2026-10-01
+
+      - Initial release.
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/versioning@v1
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

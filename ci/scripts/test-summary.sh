@@ -60,15 +60,52 @@ expect "shell-only route, harness failed" fail CHANGES_RESULT=success SHELL_CHAN
 expect "reference perf gate failed"   fail CHANGES_RESULT=success PERF_REFERENCE_RESULT=failure
 expect "reference perf gate cancelled" fail CHANGES_RESULT=success PERF_REFERENCE_RESULT=cancelled
 expect "reference perf gate passed"   pass CHANGES_RESULT=success PERF_REFERENCE_RESULT=success
-expect "plugin contract passed"      pass CHANGES_RESULT=success RUST_CHANGED=true WITFORGE_RESULT=success
-expect "plugin contract failed"      fail CHANGES_RESULT=success RUST_CHANGED=true WITFORGE_RESULT=failure
-expect "plugin contract cancelled"   fail CHANGES_RESULT=success RUST_CHANGED=true WITFORGE_RESULT=cancelled
-expect "plugin contract skipped on a rust change" fail CHANGES_RESULT=success RUST_CHANGED=true WITFORGE_RESULT=skipped
-expect "plugin contract result missing on a rust change" fail CHANGES_RESULT=success RUST_CHANGED=true
+RUST_OK=(
+  RUST_CHANGED=true
+  FMT_RESULT=success MSRV_RESULT=success CLIPPY_RESULT=success TEST_RESULT=success
+  YAML_COMPARE_RESULT=success AUDIT_RESULT=success DENY_RESULT=success
+  BUILD_RESULT=success DOCS_JOB_RESULT=success DOGFOOD_RESULT=success
+  WITFORGE_RESULT=success
+)
+expect "plugin contract passed"      pass CHANGES_RESULT=success "${RUST_OK[@]}"
+expect "plugin contract failed"      fail CHANGES_RESULT=success "${RUST_OK[@]}" WITFORGE_RESULT=failure
+expect "plugin contract cancelled"   fail CHANGES_RESULT=success "${RUST_OK[@]}" WITFORGE_RESULT=cancelled
+expect "plugin contract skipped on a rust change" fail CHANGES_RESULT=success "${RUST_OK[@]}" WITFORGE_RESULT=skipped
+expect "plugin contract result missing on a rust change" fail CHANGES_RESULT=success "${RUST_OK[@]}" WITFORGE_RESULT=
 expect "plugin contract skipped, no rust change" pass CHANGES_RESULT=success WITFORGE_RESULT=skipped
 expect "plugin contract failed, no rust change"  fail CHANGES_RESULT=success WITFORGE_RESULT=failure
 expect "plugin contract passed, no rust change"  pass CHANGES_RESULT=success WITFORGE_RESULT=success
 expect "plugin contract cancelled, no rust change" fail CHANGES_RESULT=success WITFORGE_RESULT=cancelled
+# Cancelled critical jobs must NEVER pass the aggregate summary gate (H6).
+expect "test cancelled"              fail CHANGES_RESULT=success "${RUST_OK[@]}" TEST_RESULT=cancelled
+expect "audit cancelled"             fail CHANGES_RESULT=success "${RUST_OK[@]}" AUDIT_RESULT=cancelled
+expect "deny cancelled"              fail CHANGES_RESULT=success "${RUST_OK[@]}" DENY_RESULT=cancelled
+expect "clippy cancelled"            fail CHANGES_RESULT=success "${RUST_OK[@]}" CLIPPY_RESULT=cancelled
+expect "docs cancelled"              fail CHANGES_RESULT=success DOCS_CHANGED=true DOCS_JOB_RESULT=cancelled
+expect "packaging cancelled"         fail CHANGES_RESULT=success PACKAGING_CHANGED=true PACKAGING_RESULT=cancelled
+# Unexpected skips when triggered must fail closed (H6).
+expect "test skipped on rust change" fail CHANGES_RESULT=success "${RUST_OK[@]}" TEST_RESULT=skipped
+expect "docs skipped on docs change" fail CHANGES_RESULT=success DOCS_CHANGED=true DOCS_JOB_RESULT=skipped
+expect "packaging skipped on packaging change" fail CHANGES_RESULT=success PACKAGING_CHANGED=true PACKAGING_RESULT=skipped
+expect "docs-only PR succeeds"       pass CHANGES_RESULT=success DOCS_CHANGED=true DOCS_JOB_RESULT=success
+
+# A docs-only route must render as '| Docs | pass |', not '(no changes)' (H6).
+docs_row=$(env -i PATH="$PATH" CHANGES_RESULT=success RUST_CHANGED=false DOCS_CHANGED=true \
+  BENCH_CHANGED=false EXAMPLES_CHANGED=false EDITORS_CHANGED=false \
+  SUPPLY_CHAIN_CHANGED=false PACKAGING_CHANGED=false SHELL_CHANGED=false \
+  SECRETS_INVENTORY_RESULT=success ACTION_PINS_RESULT=success \
+  FMT_RESULT=skipped MSRV_RESULT=skipped \
+  CLIPPY_RESULT=skipped TEST_RESULT=skipped AUDIT_RESULT=skipped DENY_RESULT=skipped \
+  SUPPLY_CHAIN_RESULT=skipped BUILD_RESULT=skipped DOCS_JOB_RESULT=success \
+  DOGFOOD_RESULT=skipped BENCH_SMOKE_RESULT=skipped EXAMPLES_RESULT=skipped \
+  SHELL_TESTS_RESULT=skipped EDITORS_RESULT=skipped PACKAGING_RESULT=skipped \
+  bash ci/scripts/summary.sh 2>/dev/null | grep '^| Docs |' || true)
+if [[ "$docs_row" == "| Docs | pass |" ]]; then
+  pass=$((pass + 1))
+else
+  echo "  FAIL: docs-only route renders as '${docs_row}', expected '| Docs | pass |'" >&2
+  fail=$((fail + 1))
+fi
 
 # A shell-only route must render as a real result, not "(no changes)".
 row=$(env -i PATH="$PATH" CHANGES_RESULT=success RUST_CHANGED=false DOCS_CHANGED=false \

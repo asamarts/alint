@@ -54,18 +54,24 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     | sh -s -- -y --default-toolchain ${RUST_VERSION} \
     && rustup component add clippy rustfmt
 
-# Cargo subcommands used by ci/scripts/
-RUN cargo install --locked cargo-audit
+# Cargo subcommands used by ci/scripts/ (version matches ci/scripts/audit.sh)
+ARG CARGO_AUDIT_VERSION=0.22.2
+RUN RUSTFLAGS='' cargo install --locked cargo-audit --version "${CARGO_AUDIT_VERSION}"
 
 # Create non-root runner user
 RUN useradd -m -d /home/runner -s /bin/bash runner
 
-# Install GitHub Actions runner agent
+# Install GitHub Actions runner agent (SHA-256 verified against upstream release)
 WORKDIR /home/runner/actions-runner
 RUN DPKG_ARCH=$(dpkg --print-architecture) \
-    && case "$DPKG_ARCH" in amd64) ARCH=x64 ;; arm64) ARCH=arm64 ;; *) ARCH="$DPKG_ARCH" ;; esac \
+    && case "$DPKG_ARCH" in \
+         amd64) ARCH=x64; RUNNER_SHA256=04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d ;; \
+         arm64) ARCH=arm64; RUNNER_SHA256=58b758e420b87093fbd4bfddd368074960053e2f1388f01848c82624b90f27d1 ;; \
+         *) echo "unsupported architecture: $DPKG_ARCH" >&2; exit 1 ;; \
+       esac \
     && curl -fsSL -o runner.tar.gz \
        "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-${ARCH}-${RUNNER_VERSION}.tar.gz" \
+    && echo "${RUNNER_SHA256}  runner.tar.gz" | sha256sum -c - \
     && tar xzf runner.tar.gz \
     && rm runner.tar.gz \
     && ./bin/installdependencies.sh \

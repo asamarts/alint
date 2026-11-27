@@ -26,8 +26,10 @@ This directory mixes two audiences:
 | `launch-evidence.md` | **Public** (URL-referenced) | Engineering audit summary across 30 OSS case studies. Linked from `ROADMAP.md` + the launch blog post; lives only here, served via `raw.githubusercontent`. |
 | `CONFIG-AUTHORING.md` | Internal | 22-pitfall catalogue from the launch-prep validation passes (P2a + P2b). Reference material for `.alint.yml` schema, parser, and runtime-audit work. |
 | `private-macos-validation.md` | Internal | Host-agnostic runbook for native tests on privately managed macOS capacity: trusted-commit boundary, SSH/environment isolation, validation contract, privacy-safe evidence, and mandatory cleanup. |
+| `release-credentials.md` | Internal | Release-channel publishing credentials, Trusted Publishing (OIDC) trust relationships, and rotation procedures. |
 | `case-study-deep-analysis-log.md` | Internal | Master tracking + cross-cutting findings from the per-case-study deep analyses that fed the v0.10 rule-kind backlog. |
 | `case-study-revalidation-log.md` | Internal | Master tracker for the 2026-05-07 30-case-study revalidation pass against v0.9.17. |
+| `case-study-v011-reanalysis-log.md` | Internal | Master log for the v0.11 re-analysis pass updating all 30 case-study configs against v0.10/v0.11 rule kinds. |
 | `case-study-revalidation-batch-{1..6}.md` | Internal | Per-batch findings from the same pass (5 case studies each, alphabetical). |
 | `marketing-extraction-batch-{1..6}.md` | Internal | Per-batch marketing / optics / positioning extraction from the case studies. Source material for landing-page copy + the launch blog post. |
 | `archive/v0.9.22-cleanup-plan.md` | Internal (archived) | Closed tracker for the v0.9.22 doc + prevention-automation cleanup cycle (all 14 items done). Moved to `archive/` at cycle-close per the one-shot-tracker convention below. |

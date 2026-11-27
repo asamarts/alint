@@ -305,27 +305,7 @@ fn build_ref(repo: &Path, workdir: &Path, target_dir: &Path, sha: &str) -> Resul
     let benches = criterion_benches(&wt)?;
     let manifest = std::fs::read_to_string(wt.join("crates/alint-bench/Cargo.toml"))?;
     clean_workspace_packages(&wt, target_dir)?;
-    let mut cmd = Command::new(cargo());
-    cmd.current_dir(&wt)
-        .env("CARGO_TARGET_DIR", target_dir)
-        .arg("--config")
-        .arg(format!(
-            "patch.crates-io.criterion.path={:?}",
-            shim.to_string_lossy()
-        ))
-        .args([
-            "bench",
-            "-p",
-            "alint-bench",
-            "--no-run",
-            "--message-format=json",
-        ]);
-    if manifest.contains("\nfs-benches") {
-        cmd.args(["--features", "fs-benches"]);
-    }
-    for b in &benches {
-        cmd.args(["--bench", b]);
-    }
+    let mut cmd = configure_historical_bench_cmd(&wt, target_dir, &shim, &manifest, &benches);
     eprintln!(
         "[micro-det] building {short} ({} bench targets)",
         benches.len()
@@ -832,6 +812,40 @@ fn report(
     Ok(failures)
 }
 
+fn configure_historical_bench_cmd(
+    wt: &Path,
+    target_dir: &Path,
+    shim: &Path,
+    manifest: &str,
+    benches: &[String],
+) -> Command {
+    let mut cmd = Command::new(cargo());
+    // Frozen historical refs meet a newer stable compiler: never let CI's
+    // `RUSTFLAGS="-D warnings"` fail an older tag on newly stabilized lints.
+    cmd.current_dir(wt)
+        .env("CARGO_TARGET_DIR", target_dir)
+        .env("RUSTFLAGS", "--cap-lints=warn")
+        .arg("--config")
+        .arg(format!(
+            "patch.crates-io.criterion.path={:?}",
+            shim.to_string_lossy()
+        ))
+        .args([
+            "bench",
+            "-p",
+            "alint-bench",
+            "--no-run",
+            "--message-format=json",
+        ]);
+    if manifest.contains("\nfs-benches") {
+        cmd.args(["--features", "fs-benches"]);
+    }
+    for b in benches {
+        cmd.args(["--bench", b]);
+    }
+    cmd
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -961,5 +975,29 @@ mod tests {
         assert!(md.contains("`cross_file/pair/1000`"));
         assert!(md.contains("**REGRESSION**"));
         assert!(md.contains("1 more benchmark(s) within ±0.5%."));
+    }
+
+    #[test]
+    fn historical_bench_cmd_caps_lints_regardless_of_ci_rustflags() {
+        let cmd = configure_historical_bench_cmd(
+            Path::new("/tmp/wt"),
+            Path::new("/tmp/target"),
+            Path::new("/tmp/shim"),
+            "",
+            &["b1".to_string()],
+        );
+        let envs: BTreeMap<String, Option<String>> = cmd
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.map(|v| v.to_string_lossy().into_owned()),
+                )
+            })
+            .collect();
+        assert_eq!(
+            envs.get("RUSTFLAGS").and_then(|v| v.as_deref()),
+            Some("--cap-lints=warn")
+        );
     }
 }

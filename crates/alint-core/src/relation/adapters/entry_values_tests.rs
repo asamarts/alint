@@ -533,3 +533,19 @@ fn a_yaml_block_scalar_key_is_a_row() {
         "{block:?}"
     );
 }
+
+#[test]
+fn leaves_mode_keeps_duplicate_scalar_sibling_next_to_object() {
+    // Duplicate JSON key where one occurrence is an object and another is a scalar:
+    // `leaves: true` must emit the scalar leaf instead of dropping it because an
+    // earlier sibling under the same path had children.
+    let text = r#"{"a": {"b": 1}, "a": 2}"#;
+    let output = run(Format::Json, &["$"], true, &[], text).unwrap();
+    assert_eq!(
+        rows(&output),
+        [
+            (None, "a.b".into(), number("1")),
+            (None, "a".into(), number("2")),
+        ]
+    );
+}

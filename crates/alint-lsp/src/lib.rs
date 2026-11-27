@@ -82,9 +82,11 @@ use lsp_types::{
     CodeActionProviderCapability, CodeActionResponse, Diagnostic, DiagnosticRelatedInformation,
     DiagnosticSeverity, DidCloseTextDocumentParams, Hover, HoverContents, HoverParams,
     HoverProviderCapability, InitializeParams, InitializeResult, LogMessageParams, MarkupContent,
-    MarkupKind, MessageType, OneOf, Position, PublishDiagnosticsParams, Range, ServerCapabilities,
-    ServerInfo, ShowMessageParams, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
-    WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities,
+    MarkupKind, MessageType, OneOf, Position, PublishDiagnosticsParams, Range,
+    ResourceOperationKind, ServerCapabilities, ServerInfo, ShowMessageParams,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+    TextDocumentSyncSaveOptions, Url, WorkspaceFoldersServerCapabilities,
+    WorkspaceServerCapabilities,
 };
 use parking_lot::Mutex;
 
@@ -108,8 +110,10 @@ mod tests;
 mod trust_tests;
 
 use config::{ConfigError, SessionKey, Settings, check_workspace, eval_buffer, workspace_folders};
-use diagnostics::{GroupCtx, finding_to_diagnostic, range_contains, ranges_overlap};
-use edits::{fix_edit_to_workspace_edit, located_edits_to_workspace_edit};
+use diagnostics::{
+    GroupCtx, finding_to_diagnostic, normalize_path_key, range_contains, ranges_overlap,
+};
+use edits::{ResourceOpSupport, fix_edit_to_workspace_edit, located_edits_to_workspace_edit};
 use render::{render_finding, render_notes};
 #[cfg(test)]
 use transport::run_connection;
@@ -290,6 +294,14 @@ struct Finding {
     /// (1,1) anchor from a path-less finding anchored at the file start.
     line: Option<usize>,
     column: Option<usize>,
+    /// Whether the underlying violation targeted a concrete repo-relative file
+    /// (as opposed to a path-less or path-sensitive finding anchored on the
+    /// config file). Prevents per-file fixers from fabricating a path targeting
+    /// `.alint.yml`.
+    has_path: bool,
+    /// Optional structured-rule baseline correlation key, preserved so located
+    /// fixers honour `session.baseline` and rewrite only live findings.
+    baseline_key: Option<String>,
     policy_url: Option<String>,
     /// Whether the rule declares a fixer - gates the "Apply fix" code
     /// action without re-deriving the rule set.
@@ -483,6 +495,9 @@ struct State {
     folders: Vec<PathBuf>,
     /// Whether the client accepts `Diagnostic.relatedInformation`.
     related_information_supported: bool,
+    /// Which `WorkspaceEdit.documentChanges` resource operations the client
+    /// advertised in `capabilities.workspace.workspaceEdit`.
+    resource_ops: ResourceOpSupport,
     /// The client vouched for the workspace (`trusted: true` in its
     /// initialization options). See [`Settings::trusted`].
     trusted: bool,
@@ -491,6 +506,9 @@ struct State {
     /// URIs of documents the editor currently has open. Diagnostics
     /// are published (and cleared) for these.
     open: HashSet<Url>,
+    /// Normalized filesystem path -> client's exact open `Url` (preserving
+    /// Windows drive casing and percent-encoding sent by the client).
+    open_uri_by_path: HashMap<PathBuf, Url>,
     /// Cached engine + index per session from the last full check.
     /// The change hot path and code actions need them.
     sessions: HashMap<SessionKey, Arc<Session>>,
@@ -503,6 +521,13 @@ struct State {
     /// Config-file URIs we published diagnostics to (findings anchored
     /// there, or a config error) - cleared when no longer relevant.
     config_uris: HashSet<Url>,
+    /// Normalized paths of active config files (for path-based membership
+    /// checks across non-canonical client URIs).
+    config_paths: HashSet<PathBuf>,
+    /// Active config load/build error diagnostics per config URI, preserved
+    /// across follow-up per-file re-evaluations (e.g. multi-root shared
+    /// `--config` where one root is healthy and another failed).
+    broken_diags: HashMap<Url, Vec<Diagnostic>>,
     /// Last-published findings per URI, so `hover` can answer by
     /// position without re-running rules.
     diagnostics: HashMap<Url, Vec<Finding>>,
@@ -813,16 +838,35 @@ impl ServerCore {
             .and_then(|text| text.publish_diagnostics.as_ref())
             .and_then(|publish| publish.related_information)
             .unwrap_or(false);
+        let resource_ops = params
+            .capabilities
+            .workspace
+            .as_ref()
+            .and_then(|ws| ws.workspace_edit.as_ref())
+            .filter(|we| we.document_changes == Some(true))
+            .and_then(|we| we.resource_operations.as_deref())
+            .map(|ops| ResourceOpSupport {
+                create: ops.contains(&ResourceOperationKind::Create),
+                delete: ops.contains(&ResourceOperationKind::Delete),
+                rename: ops.contains(&ResourceOperationKind::Rename),
+            })
+            .unwrap_or_default();
         {
             let mut state = self.state.lock();
             state.folders = workspace_folders(params);
             state.related_information_supported = related_information_supported;
+            state.resource_ops = resource_ops;
             state.trusted = trusted;
         }
         InitializeResult {
             capabilities: ServerCapabilities {
-                text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::FULL,
+                text_document_sync: Some(TextDocumentSyncCapability::Options(
+                    TextDocumentSyncOptions {
+                        open_close: Some(true),
+                        change: Some(TextDocumentSyncKind::FULL),
+                        save: Some(TextDocumentSyncSaveOptions::Supported(true)),
+                        ..TextDocumentSyncOptions::default()
+                    },
                 )),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
@@ -877,12 +921,21 @@ impl ServerCore {
         let _publish_guard = self.reeval_publish.lock();
         let is_config = {
             let mut state = self.state.lock();
+            let norm = uri.to_file_path().ok().map(|p| normalize_path_key(&p));
+            if let Some(norm) = &norm
+                && state.open_uri_by_path.get(norm) == Some(&uri)
+            {
+                state.open_uri_by_path.remove(norm);
+            }
             state.open.remove(&uri);
             state.documents.remove(&uri);
             state.versions.remove(&uri);
             state.doc_seq.remove(&uri);
             state.doc_config.remove(&uri);
-            let is_config = state.config_uris.contains(&uri);
+            let is_config = state.config_uris.contains(&uri)
+                || norm
+                    .as_ref()
+                    .is_some_and(|p| state.config_paths.contains(p));
             if !is_config {
                 state.diagnostics.remove(&uri);
             }
@@ -925,6 +978,8 @@ impl ServerCore {
                 || !state.broken.is_empty()
                 || !state.doc_config.is_empty()
                 || !state.config_uris.is_empty()
+                || !state.config_paths.is_empty()
+                || !state.broken_diags.is_empty()
                 || !state.diagnostics.is_empty()
                 || !state.last_notes.is_empty()
                 || !state.last_walk_warnings.is_empty();
@@ -1059,13 +1114,14 @@ impl ServerCore {
             {
                 return;
             }
-            state
-                .diagnostics
-                .get(uri)
-                .map(|findings| {
-                    findings_to_diagnostics(findings, state.related_information_supported)
-                })
-                .unwrap_or_default()
+            let mut diags = state.broken_diags.get(uri).cloned().unwrap_or_default();
+            if let Some(findings) = state.diagnostics.get(uri) {
+                diags.extend(findings_to_diagnostics(
+                    findings,
+                    state.related_information_supported,
+                ));
+            }
+            diags
         };
         self.publish_diagnostics(uri.clone(), diagnostics, Some(version));
     }
@@ -1091,9 +1147,10 @@ impl ServerCore {
             // governing config is broken (only its error is shown).
             return;
         };
-        let Ok(abs) = uri.to_file_path() else {
+        let Ok(raw_abs) = uri.to_file_path() else {
             return;
         };
+        let abs = normalize_path_key(&raw_abs);
         let Ok(rel) = abs.strip_prefix(&session.root).map(Path::to_path_buf) else {
             self.publish_cached_if_current(&uri, version, seq, &session);
             return;
@@ -1164,10 +1221,10 @@ impl ServerCore {
                 .map(|prev| prev.iter().filter(|f| !f.per_file).cloned().collect())
                 .unwrap_or_default();
             merged.extend(per_file);
-            let diags: Vec<Diagnostic> = merged
-                .iter()
-                .map(|finding| finding_to_diagnostic(finding, state.related_information_supported))
-                .collect();
+            let mut diags = state.broken_diags.get(&uri).cloned().unwrap_or_default();
+            diags.extend(merged.iter().map(|finding| {
+                finding_to_diagnostic(finding, state.related_information_supported)
+            }));
             if merged.is_empty() {
                 state.diagnostics.remove(&uri);
             } else {
@@ -1204,22 +1261,24 @@ impl ServerCore {
         let Some(inputs) = self.code_action_inputs(&uri) else {
             return Ok(None);
         };
-        let Ok(abs) = uri.to_file_path() else {
+        let Ok(raw_abs) = uri.to_file_path() else {
             return Ok(None);
         };
+        let abs = normalize_path_key(&raw_abs);
         let version = inputs.version;
         let seq = inputs.seq;
-        let (mut actions, unsafe_flags) =
-            match catch_unwind(AssertUnwindSafe(|| fix_actions(&inputs, &abs, selection))) {
-                Ok(Some(res)) => res,
-                Ok(None) => return Ok(None),
-                Err(payload) => {
-                    let summary = panic_summary(&*payload);
-                    tracing::error!(panic = %summary, "alint LSP code action panicked");
-                    self.log_message(MessageType::ERROR, "alint: code action panicked");
-                    return Err("alint: code action panicked".to_string());
-                }
-            };
+        let (mut actions, unsafe_flags) = match catch_unwind(AssertUnwindSafe(|| {
+            fix_actions(&inputs, &uri, &abs, selection)
+        })) {
+            Ok(Some(res)) => res,
+            Ok(None) => return Ok(None),
+            Err(payload) => {
+                let summary = panic_summary(&*payload);
+                tracing::error!(panic = %summary, "alint LSP code action panicked");
+                self.log_message(MessageType::ERROR, "alint: code action panicked");
+                return Err("alint: code action panicked".to_string());
+            }
+        };
         // The buffer changed, closed, or its governing session reloaded/broke
         // while edits were computed: they would apply to stale text or rules.
         {
@@ -1267,6 +1326,7 @@ impl ServerCore {
             version: state.versions.get(uri).copied(),
             seq: state.doc_seq.get(uri).copied(),
             related_information_supported: state.related_information_supported,
+            resource_ops: state.resource_ops,
         })
     }
 }
@@ -1281,13 +1341,16 @@ struct CodeActionInputs {
     /// The server-assigned sequence, guarding against close/reopen version reuse.
     seq: Option<u64>,
     related_information_supported: bool,
+    resource_ops: ResourceOpSupport,
 }
 
 /// The quick-fixes for the findings of `abs` that overlap `selection`, and
 /// whether each is Unsafe-tier; `None` when the file gets no fix at all.
 /// Runs on a worker thread with an 8 MiB stack.
+#[allow(clippy::too_many_lines)]
 fn fix_actions(
     inputs: &CodeActionInputs,
+    doc_uri: &Url,
     abs: &Path,
     selection: Range,
 ) -> Option<(CodeActionResponse, Vec<bool>)> {
@@ -1296,9 +1359,11 @@ fn fix_actions(
         findings,
         text,
         related_information_supported,
+        resource_ops,
         ..
     } = inputs;
     let related_information_supported = *related_information_supported;
+    let resource_ops = *resource_ops;
     let Ok(rel) = abs.strip_prefix(&session.root).map(Path::to_path_buf) else {
         return None;
     };
@@ -1321,6 +1386,39 @@ fn fix_actions(
     {
         return None;
     }
+
+    // Group overlapping fixable, non-sensitive findings by rule id in
+    // deterministic first-seen order so selecting multiple findings of one
+    // rule emits a single deduplicated CodeAction (preserving `is_preferred`).
+    let mut rule_order: Vec<&str> = Vec::new();
+    let mut overlapping_by_rule: HashMap<&str, Vec<&Finding>> = HashMap::new();
+    for finding in findings {
+        if !finding.fixable || finding.sensitive || !ranges_overlap(finding.range, selection) {
+            continue;
+        }
+        let entry = overlapping_by_rule
+            .entry(finding.rule_id.as_str())
+            .or_insert_with(|| {
+                rule_order.push(finding.rule_id.as_str());
+                Vec::new()
+            });
+        entry.push(finding);
+    }
+
+    let finding_to_violation = |finding: &Finding| {
+        let mut violation = Violation::new(finding.message.clone());
+        // Only attach `rel` when the underlying finding actually targeted a
+        // concrete file; pathless config-anchored findings must keep
+        // `path = None` so per-file fixers never target `.alint.yml`.
+        if finding.has_path {
+            violation = violation.with_path(rel.clone());
+        }
+        violation.line = finding.line;
+        violation.column = finding.column;
+        violation.baseline_key = finding.baseline_key.clone().map(std::borrow::Cow::Owned);
+        violation
+    };
+
     let mut actions: CodeActionResponse = Vec::new();
     // Parallel to `actions`: whether each offered fix is Unsafe-tier. An Unsafe
     // quick-fix is labeled `(unsafe)` and never auto-preferred, so the click is
@@ -1329,41 +1427,34 @@ fn fix_actions(
     // delete). Only Safe and Unsafe tiers reach here -- Suggestion / demoted
     // fixes are already filtered out below.
     let mut unsafe_flags: Vec<bool> = Vec::new();
-    for finding in findings {
-        if !finding.fixable || finding.sensitive || !ranges_overlap(finding.range, selection) {
-            continue;
-        }
-        let Some(fixer) = session.engine.fixer_for(&finding.rule_id) else {
+    for rule_id in rule_order {
+        let Some(fixer) = session.engine.fixer_for(rule_id) else {
             continue;
         };
         let unsafe_fix = fixer.applicability() == Applicability::Unsafe;
-        let mut violation = Violation::new(finding.message.clone()).with_path(rel.clone());
-        // Preserve the reported location so range-scoped fixers act on
-        // the right line/column (not just whole-file fixers).
-        violation.line = finding.line;
-        violation.column = finding.column;
-        // A LOCATED fixer (Phase 1 `replace`) emits byte-range edits via
-        // `collect_edits`, not `fix_edit`. Collect ALL of them for this file and
-        // map each byte range to a UTF-16 `TextEdit` -- one multi-edit
-        // `WorkspaceEdit`, so the code action rewrites every occurrence, matching
-        // `alint fix` (the diagnostic is one-per-file but the located fix is
-        // per-match). The synthetic `violation` carries NO baseline_key, so the
-        // structured fixer's W4 violation-set correlation finds an empty budget
-        // and falls back to fixing every occurrence -- exactly the "fix all"
-        // action wanted here. A whole-file fixer keeps the `fix_edit` -> edit path.
-        let workspace_edit = if fixer.collects_located_edits() {
-            // A located fix edits this document only.
-            if session.edit_refusal(&finding.rule_id, &rel).is_some() {
+        let title = if unsafe_fix {
+            format!("alint: fix `{rule_id}` (unsafe)")
+        } else {
+            format!("alint: fix `{rule_id}`")
+        };
+        let overlapping = &overlapping_by_rule[rule_id];
+
+        // A LOCATED fixer (`replace`, structured `set_value`/`remove_value`/
+        // `replace`) emits byte-range edits via `collect_edits`, not `fix_edit`.
+        // Pass every live (non-baselined) finding of this rule in the document
+        // with its `baseline_key` intact so W4 correlation rewrites ONLY live
+        // occurrences, leaving grandfathered baseline entries untouched.
+        if fixer.collects_located_edits() {
+            if session.edit_refusal(rule_id, &rel).is_some() {
                 continue;
             }
-            // Run the SAME pipeline `alint fix` uses (tier-filter -> overlap-skip
-            // -> post-splice verify/demote) and offer ONLY the surviving edits.
-            // Without this the LSP would one-click-apply a fix the engine
-            // refuses -- a partial removal that leaves the violation, an
-            // unverifiable `replace`, or a below-threshold / W2-demoted
-            // (Suggestion-tier) untrusted-remote content fixer.
+            let live_violations: Vec<Violation> = findings
+                .iter()
+                .filter(|f| f.rule_id == rule_id && f.fixable && !f.sensitive)
+                .map(&finding_to_violation)
+                .collect();
             let batch: Vec<LocatedEdit> = fixer
-                .collect_edits(std::slice::from_ref(&violation), &rel, bytes, &session.root)
+                .collect_edits(&live_violations, &rel, bytes, &session.root)
                 .into_iter()
                 .enumerate()
                 .map(|(i, ce)| LocatedEdit {
@@ -1379,47 +1470,70 @@ fn fix_actions(
                 .filter(|(_, outcome)| *outcome == LocatedOutcome::Applied)
                 .map(|(le, _)| le.collected)
                 .collect();
-            match located_edits_to_workspace_edit(&applied, text, &rel, &session.root) {
-                Some(we) => we,
-                None => continue,
-            }
+            let Some(workspace_edit) = located_edits_to_workspace_edit(&applied, text, doc_uri)
+            else {
+                continue;
+            };
+            let diags = overlapping
+                .iter()
+                .map(|f| finding_to_diagnostic(f, related_information_supported))
+                .collect();
+            actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                title,
+                kind: Some(CodeActionKind::QUICKFIX),
+                diagnostics: Some(diags),
+                edit: Some(workspace_edit),
+                ..CodeAction::default()
+            }));
+            unsafe_flags.push(unsafe_fix);
         } else {
             // Whole-file / file-op fixer: gate on its tier so a Suggestion-tier
             // fixer -- notably a W2-demoted content fixer from an untrusted
-            // remote `extends:` -- is not offered as an ordinary quick-fix
-            // (demotion drops it to Suggestion; a bare `alint fix` only
-            // suggests it, never auto-writes).
+            // remote `extends:` -- is not offered as an ordinary quick-fix.
             if !fixer.applicability().applies_at(Applicability::Unsafe) {
                 continue;
             }
-            let Some(edit) = fixer.fix_edit(&violation, bytes, &session.root) else {
-                continue;
-            };
-            if edit_paths(&edit).any(|path| session.edit_refusal(&finding.rule_id, path).is_some())
-            {
-                continue;
+            // Deduplicate identical WorkspaceEdits emitted for multiple
+            // overlapping findings of the same rule while preserving distinct
+            // per-finding edits if a fixer emits them.
+            let mut deduped: Vec<(lsp_types::WorkspaceEdit, Vec<Diagnostic>)> = Vec::new();
+            for finding in overlapping {
+                let violation = finding_to_violation(finding);
+                let Some(edit) = fixer.fix_edit(&violation, bytes, &session.root) else {
+                    continue;
+                };
+                if edit_paths(&edit).any(|path| session.edit_refusal(rule_id, path).is_some()) {
+                    continue;
+                }
+                let Some(workspace_edit) = fix_edit_to_workspace_edit(
+                    &edit,
+                    &session.root,
+                    Some((&rel, doc_uri)),
+                    resource_ops,
+                ) else {
+                    continue;
+                };
+                let diag = finding_to_diagnostic(finding, related_information_supported);
+                if let Some((_, existing_diags)) = deduped
+                    .iter_mut()
+                    .find(|(existing_we, _)| *existing_we == workspace_edit)
+                {
+                    existing_diags.push(diag);
+                } else {
+                    deduped.push((workspace_edit, vec![diag]));
+                }
             }
-            match fix_edit_to_workspace_edit(&edit, &session.root) {
-                Some(we) => we,
-                None => continue,
+            for (workspace_edit, diags) in deduped {
+                actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                    title: title.clone(),
+                    kind: Some(CodeActionKind::QUICKFIX),
+                    diagnostics: Some(diags),
+                    edit: Some(workspace_edit),
+                    ..CodeAction::default()
+                }));
+                unsafe_flags.push(unsafe_fix);
             }
-        };
-        let title = if unsafe_fix {
-            format!("alint: fix `{}` (unsafe)", finding.rule_id)
-        } else {
-            format!("alint: fix `{}`", finding.rule_id)
-        };
-        actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-            title,
-            kind: Some(CodeActionKind::QUICKFIX),
-            diagnostics: Some(vec![finding_to_diagnostic(
-                finding,
-                related_information_supported,
-            )]),
-            edit: Some(workspace_edit),
-            ..CodeAction::default()
-        }));
-        unsafe_flags.push(unsafe_fix);
+        }
     }
     Some((actions, unsafe_flags))
 }
@@ -1546,11 +1660,25 @@ fn publish_config_diagnostics(
     let mut config_findings_by_uri: HashMap<Url, Vec<Finding>> = HashMap::new();
     let mut config_broken_by_uri: HashMap<Url, Vec<Diagnostic>> = HashMap::new();
     let mut config_uris: HashSet<Url> = HashSet::new();
+    let mut config_paths: HashSet<PathBuf> = HashSet::new();
 
     for key in keys {
-        let Ok(uri) = Url::from_file_path(&key.config) else {
+        let norm_cfg = normalize_path_key(&key.config);
+        // Reuse the client's exact open URI when the config is open so
+        // Windows drive-letter casing / percent-encoding never splits
+        // diagnostics, breaks hover, or bypasses edit-during-check guards.
+        let open_uri = state.open_uri_by_path.get(&norm_cfg).cloned().or_else(|| {
+            docs.iter().find_map(|(u, ..)| {
+                u.to_file_path()
+                    .ok()
+                    .filter(|p| normalize_path_key(p) == norm_cfg)
+                    .map(|_| u.clone())
+            })
+        });
+        let Some(uri) = open_uri.or_else(|| Url::from_file_path(&key.config).ok()) else {
             continue;
         };
+        config_paths.insert(norm_cfg.clone());
         config_uris.insert(uri.clone());
         if let Some(error) = state.broken.get(&key) {
             let diagnostic = Diagnostic {
@@ -1572,7 +1700,7 @@ fn publish_config_diagnostics(
         } else {
             let findings = by_config
                 .get(&key)
-                .and_then(|m| m.get(&key.config).cloned())
+                .and_then(|m| m.get(&norm_cfg).cloned())
                 .unwrap_or_default();
             let entry = config_findings_by_uri.entry(uri).or_default();
             for finding in findings {
@@ -1600,6 +1728,11 @@ fn publish_config_diagnostics(
     for uri in ordered_config_uris {
         let mut findings = config_findings_by_uri.remove(&uri).unwrap_or_default();
         let broken_diags = config_broken_by_uri.remove(&uri).unwrap_or_default();
+        if broken_diags.is_empty() {
+            state.broken_diags.remove(&uri);
+        } else {
+            state.broken_diags.insert(uri.clone(), broken_diags.clone());
+        }
 
         // If this config file was open (potentially with unsaved edits) when
         // the check started and closed before `apply_check` ran, strip overlaid
@@ -1680,10 +1813,15 @@ fn publish_config_diagnostics(
     no_longer_configs.sort();
     for uri in no_longer_configs {
         state.diagnostics.remove(&uri);
+        state.broken_diags.remove(&uri);
         let version = state.versions.get(&uri).copied();
         applied.publish.push((uri, Vec::new(), version));
     }
     state.config_uris = config_uris;
+    state.config_paths = config_paths;
+    state
+        .broken_diags
+        .retain(|uri, _| state.config_uris.contains(uri));
 }
 
 fn apply_check(
@@ -1712,6 +1850,7 @@ fn apply_check(
         let findings = uri
             .to_file_path()
             .ok()
+            .map(|p| normalize_path_key(&p))
             .and_then(|abs| {
                 let config = state.doc_config.get(uri)?;
                 by_config.get(config)?.get(&abs).cloned()

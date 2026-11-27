@@ -65,10 +65,11 @@ pub fn splice_inline_inner(path: &Path, body: &str) -> Result<SpliceOutcome> {
     // the end marker (per `markdown::render`). We split it
     // into the inner region we want to inject.
     let inner = body.trim_end_matches('\n');
-    debug_assert!(
-        inner.starts_with(START_MARKER) && inner.ends_with(END_MARKER),
-        "rendered body must include the alint markers",
-    );
+    if !inner.starts_with(START_MARKER) || !inner.ends_with(END_MARKER) {
+        bail!(
+            "cannot splice --inline content that is not delimited by `{START_MARKER}` and `{END_MARKER}`"
+        );
+    }
 
     crate::safe_write::refuse_symlink_or_special(path, "AGENTS.md")?;
     let existing =
@@ -94,6 +95,14 @@ pub fn splice_inline_inner(path: &Path, body: &str) -> Result<SpliceOutcome> {
              Resolve to a single pair (or remove all of them and re-run).",
             path.display(),
             start_count,
+        );
+    }
+    if end_count > 1 {
+        bail!(
+            "{}: contains {} `{END_MARKER}` markers; refusing to splice ambiguously. \
+             Resolve to a single pair (or remove all of them and re-run).",
+            path.display(),
+            end_count,
         );
     }
     if start_count == 1 && end_count == 0 {
@@ -265,5 +274,32 @@ mod tests {
         let err = splice_inline_inner(&link, &body()).unwrap_err();
         assert!(err.to_string().contains("symlink"), "unexpected: {err}");
         assert_eq!(fs::read_to_string(&target).unwrap(), "untouched\n");
+    }
+
+    #[test]
+    fn rejects_multiple_end_markers() {
+        let tmp = td();
+        let path = tmp.path().join("AGENTS.md");
+        fs::write(
+            &path,
+            format!("{START_MARKER}\nfirst\n{END_MARKER}\nextra\n{END_MARKER}\n"),
+        )
+        .unwrap();
+        let err = splice_inline_inner(&path, &body()).unwrap_err();
+        assert!(
+            err.to_string().contains(END_MARKER) && err.to_string().contains("ambiguously"),
+            "unexpected: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_markerless_body_at_runtime() {
+        let tmp = td();
+        let path = tmp.path().join("AGENTS.md");
+        let err = splice_inline_inner(&path, "{\"format\":\"agents-md\"}\n").unwrap_err();
+        assert!(
+            err.to_string().contains("not delimited"),
+            "unexpected: {err}"
+        );
     }
 }

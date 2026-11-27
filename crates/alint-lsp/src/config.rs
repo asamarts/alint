@@ -10,7 +10,9 @@ use lsp_types::{InitializeParams, Position, Range, Url};
 use alint_core::baseline::Baseline;
 use alint_core::{Engine, Level, Report, RuleEntry, RuleResult, WalkOptions, walk};
 
-use crate::diagnostics::{TextSource, group_findings, hint_findings};
+use crate::diagnostics::{
+    TextSource, decode_disk_text, group_findings, hint_findings, normalize_path_key,
+};
 use alint_core::RuleRegistry;
 
 use crate::{ConfigRun, Finding, Session, WorkspaceCheck};
@@ -98,20 +100,23 @@ pub(crate) fn check_workspace(
         }
     }
     for (uri, _) in docs {
-        if let Ok(abs) = uri.to_file_path()
-            && let Some(key) = session_key(&abs, folders, fixed)
-        {
-            if !keys.contains(&key) {
-                keys.push(key.clone());
+        if let Ok(raw_abs) = uri.to_file_path() {
+            let abs = normalize_path_key(&raw_abs);
+            if let Some(key) = session_key(&abs, folders, fixed) {
+                if !keys.contains(&key) {
+                    keys.push(key.clone());
+                }
+                check.doc_config.insert(uri.clone(), key);
             }
-            check.doc_config.insert(uri.clone(), key);
         }
     }
     for key in keys {
         let overlays: Vec<(PathBuf, String)> = docs
             .iter()
             .filter(|(uri, _)| check.doc_config.get(uri) == Some(&key))
-            .filter_map(|(uri, text)| Some((uri.to_file_path().ok()?, text.clone()?)))
+            .filter_map(|(uri, text)| {
+                Some((normalize_path_key(&uri.to_file_path().ok()?), text.clone()?))
+            })
             .collect();
         let run = run_config(&key, &overlays, settings, registry);
         check.runs.push((key, run));
@@ -156,13 +161,13 @@ pub(crate) fn session_key(
 /// of its own (see [`session_key`]): the config at the top of the nearest
 /// repository above `doc`, when that top is inside `folder`.
 fn repository_key(doc: &Path, folder: &Path) -> Option<SessionKey> {
-    let top = alint_core::git::repository_top(doc.parent()?)?;
+    let top = normalize_path_key(&alint_core::git::repository_top(doc.parent()?)?);
     if !top.starts_with(folder) {
         return None;
     }
     // Discovery from a repository's top checks the top and stops there.
-    let config = alint_dsl::discover(&top)?;
-    let root = config.parent()?.to_path_buf();
+    let config = normalize_path_key(&alint_dsl::discover(&top)?);
+    let root = normalize_path_key(config.parent()?);
     Some(SessionKey { config, root })
 }
 
@@ -170,14 +175,14 @@ fn repository_key(doc: &Path, folder: &Path) -> Option<SessionKey> {
 fn folder_key(folder: &Path, fixed: Option<&Path>) -> Option<SessionKey> {
     if let Some(config) = fixed {
         return Some(SessionKey {
-            config: config.to_path_buf(),
-            root: folder.to_path_buf(),
+            config: normalize_path_key(config),
+            root: normalize_path_key(folder),
         });
     }
-    let config = alint_dsl::discover(folder)?;
+    let config = normalize_path_key(&alint_dsl::discover(folder)?);
     let root = config
         .parent()
-        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+        .map_or_else(|| PathBuf::from("."), normalize_path_key);
     Some(SessionKey { config, root })
 }
 
@@ -234,18 +239,29 @@ fn run_config(
 
     // Overlay: an open document whose buffer differs from disk gets its
     // per-file findings from the buffer, not the stale on-disk bytes.
-    // Cap the on-disk read to the buffer's byte length: a larger regular file
-    // cannot equal the buffer, and a FIFO/device is refused before opening.
-    for (abs, text) in overlays {
-        let on_disk = alint_core::bounded_file::read_regular_capped(abs, text.len() as u64).ok();
-        if on_disk.as_deref() == Some(text.as_bytes()) {
+    // Editors strip leading UTF-8 BOMs and decode UTF-16 before sending text
+    // over LSP, so treat a buffer as unchanged when either the raw bytes or the
+    // BOM-decoded disk text match (preserving `no_bom` findings on clean files).
+    // Bound the disk read to `2 * text.len() + 4` (enough for UTF-16 + BOM),
+    // capped at `MAX_ANALYZE_BYTES`, and refuse FIFOs/devices before opening.
+    for (raw_abs, text) in overlays {
+        let abs = normalize_path_key(raw_abs);
+        let cap = (text.len() as u64)
+            .saturating_mul(2)
+            .saturating_add(4)
+            .min(alint_core::MAX_ANALYZE_BYTES);
+        let on_disk = alint_core::bounded_file::read_regular_capped(&abs, cap).ok();
+        if on_disk
+            .as_deref()
+            .is_some_and(|bytes| bytes == text.as_bytes() || decode_disk_text(bytes) == *text)
+        {
             continue;
         }
         let Ok(rel) = abs.strip_prefix(&session.root) else {
             continue;
         };
-        if let Ok(fresh) = eval_buffer(&session, abs, rel, text.clone()) {
-            let entry = by_path.entry(abs.clone()).or_default();
+        if let Ok(fresh) = eval_buffer(&session, &abs, rel, text.clone()) {
+            let entry = by_path.entry(abs).or_default();
             entry.retain(|f| !f.per_file);
             entry.extend(fresh);
         }
@@ -267,14 +283,15 @@ pub(crate) fn eval_buffer(
     rel: &Path,
     text: String,
 ) -> alint_core::Result<Vec<Finding>> {
+    let abs = normalize_path_key(abs);
     let results = session
         .engine
         .run_for_file(&session.root, &session.index, rel, text.as_bytes())
         .map_err(|error| session.environment_redactor.redact_error(error))?;
     let results = apply_baseline(session, results, Some((rel, text.as_bytes())));
-    let mut texts = TextSource::with_overlays(HashMap::from([(abs.to_path_buf(), text)]));
+    let mut texts = TextSource::with_overlays(HashMap::from([(abs.clone(), text)]));
     let mut by_path = group_findings(&session.group_ctx(), &results, &mut texts);
-    Ok(by_path.remove(abs).unwrap_or_default())
+    Ok(by_path.remove(&abs).unwrap_or_default())
 }
 
 /// Every workspace folder from the `initialize` params (multi-root),
@@ -283,7 +300,7 @@ pub(crate) fn workspace_folders(params: &InitializeParams) -> Vec<PathBuf> {
     if let Some(folders) = &params.workspace_folders {
         let paths: Vec<PathBuf> = folders
             .iter()
-            .filter_map(|f| f.uri.to_file_path().ok())
+            .filter_map(|f| f.uri.to_file_path().ok().map(|p| normalize_path_key(&p)))
             .collect();
         if !paths.is_empty() {
             return paths;
@@ -293,7 +310,7 @@ pub(crate) fn workspace_folders(params: &InitializeParams) -> Vec<PathBuf> {
     params
         .root_uri
         .as_ref()
-        .and_then(|u| u.to_file_path().ok())
+        .and_then(|u| u.to_file_path().ok().map(|p| normalize_path_key(&p)))
         .into_iter()
         .collect()
 }
@@ -878,13 +895,15 @@ fn extract_line_column(text: &str) -> Option<(usize, usize)> {
 /// withheld.
 fn load_session_config(
     config_path: &Path,
+    repository_root: &Path,
     settings: &Settings,
     registry: &RuleRegistry,
 ) -> Result<(alint_core::Config, bool), ConfigError> {
     let trusted = settings.trusted;
     let environment = Arc::new(UntrustedEnvironment::default());
     let mut load_options = alint_dsl::LoadOptions::with_catalog(registry.catalog())
-        .with_global_git_excludes(!cfg!(test));
+        .with_global_git_excludes(!cfg!(test))
+        .with_repository_root(Some(repository_root.to_path_buf()));
     if !trusted {
         load_options.environment = environment.clone();
         load_options.remote_policy = alint_dsl::RemotePolicy::Deny;
@@ -1073,7 +1092,8 @@ fn build_session_for_config(
     let config_path = key.config.as_path();
     let effective_root = key.root.clone();
     let trusted = settings.trusted;
-    let (config, mut withheld) = load_session_config(config_path, settings, registry)?;
+    let (config, mut withheld) =
+        load_session_config(config_path, &effective_root, settings, registry)?;
     crate::notify_tracing_env_values(&config.environment_values);
     // A top-level value read from the environment can reach an error below
     // (an unreadable `baseline:`, an invalid `ignore:` glob in the walk).

@@ -1376,6 +1376,7 @@ fn remove_null_schemas(value: &mut serde_json::Value) {
 
 fn package_path_schema() -> serde_json::Value {
     serde_json::json!({
+        "type": "string",
         "minLength": 1,
         "allOf": [
             {"not": {"pattern": "^(?:/|[A-Za-z]:)"}},
@@ -1484,6 +1485,58 @@ fn customize_git_schema(root: &mut serde_json::Value, path_schema: &serde_json::
             }
         }
     }
+    // Mirror `validate_policy_git`: forbid combining `commits` with `add`/
+    // `add_force`, and forbid staging or committing when `init` is false.
+    root["$defs"]["PolicyGit"]["allOf"] = serde_json::json!([
+        {
+            "not": {
+                "allOf": [
+                    {
+                        "required": ["commits"],
+                        "properties": { "commits": { "minItems": 1 } }
+                    },
+                    {
+                        "anyOf": [
+                            {
+                                "required": ["add"],
+                                "properties": { "add": { "minItems": 1 } }
+                            },
+                            {
+                                "required": ["add_force"],
+                                "properties": { "add_force": { "minItems": 1 } }
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+        {
+            "not": {
+                "allOf": [
+                    {
+                        "required": ["init"],
+                        "properties": { "init": { "const": false } }
+                    },
+                    {
+                        "anyOf": [
+                            {
+                                "required": ["add"],
+                                "properties": { "add": { "minItems": 1 } }
+                            },
+                            {
+                                "required": ["add_force"],
+                                "properties": { "add_force": { "minItems": 1 } }
+                            },
+                            {
+                                "required": ["commits"],
+                                "properties": { "commits": { "minItems": 1 } }
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    ]);
     for field in ["message", "date"] {
         root["$defs"]["PolicyDetailedCommit"]["properties"][field]["pattern"] =
             serde_json::Value::String(r"^[^\u0000]+$".to_string());
@@ -1502,7 +1555,7 @@ fn customize_policy_root_schema(root: &mut serde_json::Value, path_schema: &serd
     root["properties"]["tags"]["uniqueItems"] = serde_json::Value::Bool(true);
     root["properties"]["tags"]["items"]["pattern"] = serde_json::Value::String(r"\S".to_string());
     for field in ["kind", "title"] {
-        root["$defs"]["PolicyTestDocs"]["properties"][field]["pattern"] =
+        root["$defs"]["PolicyDocsExample"]["properties"][field]["pattern"] =
             serde_json::Value::String(r"\S".to_string());
     }
     root["properties"]["snapshot"]
@@ -1865,6 +1918,96 @@ docs: { title: "", case: pass, kind: "" }
                 .filter(|diagnostic| diagnostic.code == ValidationCode::InvalidDocsMetadata)
                 .count(),
             2
+        );
+    }
+
+    #[test]
+    fn policy_test_schema_rejects_blank_docs_non_string_git_paths_invalid_git_combos_and_has_no_orphan_defs()
+     {
+        // Every `$defs` entry must be referenced (catches typos like `PolicyTestDocs`).
+        fn collect_refs(v: &serde_json::Value, out: &mut std::collections::BTreeSet<String>) {
+            match v {
+                serde_json::Value::Object(map) => {
+                    if let Some(name) = map
+                        .get("$ref")
+                        .and_then(serde_json::Value::as_str)
+                        .and_then(|r| r.strip_prefix("#/$defs/"))
+                    {
+                        out.insert(name.to_string());
+                    }
+                    for (k, child) in map {
+                        if k != "$defs" {
+                            collect_refs(child, out);
+                        }
+                    }
+                }
+                serde_json::Value::Array(items) => items.iter().for_each(|i| collect_refs(i, out)),
+                _ => {}
+            }
+        }
+        let schema_value = serde_json::to_value(policy_test_schema()).unwrap();
+        let validator = jsonschema::validator_for(&schema_value).expect("schema compiles");
+        let defs = schema_value["$defs"].as_object().unwrap();
+        let mut reachable = std::collections::BTreeSet::new();
+        collect_refs(&schema_value, &mut reachable);
+        let mut queue: Vec<String> = reachable.iter().cloned().collect();
+        while let Some(name) = queue.pop() {
+            let def = defs
+                .get(&name)
+                .unwrap_or_else(|| panic!("dangling $ref to $defs/{name}"));
+            let mut nested = std::collections::BTreeSet::new();
+            collect_refs(def, &mut nested);
+            for dep in nested {
+                if reachable.insert(dep.clone()) {
+                    queue.push(dep);
+                }
+            }
+        }
+        let orphans: Vec<&String> = defs
+            .keys()
+            .filter(|name| !reachable.contains(*name))
+            .collect();
+        assert!(
+            orphans.is_empty(),
+            "unreferenced $defs in policy-test.json: {orphans:?}"
+        );
+
+        let base = |extra_given: &str, extra_root: &str| {
+            let yaml = format!(
+                "test_version: 1\nname: demo\ngiven:\n  tree: {{ a.txt: x }}\n  config: \"version: 1\\nrules: []\\n\"\n{extra_given}when: [check]\nexpect:\n  - exit: success\n    violations: []\n{extra_root}"
+            );
+            let val: ayaml::Value = alint_core::yaml::from_str(&yaml).unwrap();
+            serde_json::to_value(val).unwrap()
+        };
+
+        assert!(
+            !validator.is_valid(&base(
+                "",
+                "docs: { title: \"   \", kind: \"   \", case: fail }\n"
+            )),
+            "whitespace docs.title/docs.kind must fail schema validation"
+        );
+        assert!(
+            !validator.is_valid(&base("  git:\n    init: true\n    add: [123]\n", "")),
+            "non-string given.git.add items must fail schema validation"
+        );
+        assert!(
+            !validator.is_valid(&base(
+                "  git:\n    init: true\n    add: [\".\"]\n    commits: [\"init\"]\n",
+                ""
+            )),
+            "combining given.git.commits with add must fail schema validation"
+        );
+        assert!(
+            !validator.is_valid(&base("  git:\n    init: false\n    add: [\".\"]\n", "")),
+            "given.git.init: false with add must fail schema validation"
+        );
+        assert!(
+            validator.is_valid(&base(
+                "  git:\n    init: true\n    commits: [\"init\"]\n",
+                "docs: { title: \"Example\", kind: \"file_exists\", case: pass }\n"
+            )),
+            "valid git commits and docs metadata must pass schema validation"
         );
     }
 }

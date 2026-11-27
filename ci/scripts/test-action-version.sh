@@ -89,9 +89,9 @@ expect_rejected "SHA pin rejects a malformed baked release" "" "$sha" next
 
 # Behavioural check of the Install step's install.sh source. Extract the step's
 # `run:` script from action.yml and execute it in a sandbox whose `curl` and
-# installer are stubs: a local `uses: ./` (empty action_ref) must run the
-# install.sh bundled beside action.yml (the commit under test) and never
-# fetch one from the network; a remote ref must fetch install.sh at that ref.
+# installer are stubs: BOTH local (`uses: ./`) and remote (`uses: org/alint@ref`)
+# invocations must run the install.sh bundled beside action.yml in $ACTION_PATH
+# and NEVER re-fetch install.sh from raw.githubusercontent.com (M4).
 sandbox=$(mktemp -d)
 trap 'rm -rf "$sandbox"' EXIT
 # Plain-text extraction (no PyYAML dependency on the runner): the `run: |`
@@ -150,14 +150,22 @@ else
 fi
 
 remote_out=$(run_install_step v9.8.7)
-if grep -q FETCHED-INSTALLER <<< "$remote_out" &&
-   grep -q 'raw.githubusercontent.com/asamarts/alint/v9.8.7/install.sh' "$sandbox/curl.log"; then
-  echo "  ok: remote action fetches install.sh at its pinned ref"
+if grep -q BUNDLED-INSTALLER <<< "$remote_out" && [[ ! -s "$sandbox/curl.log" ]]; then
+  echo "  ok: remote action runs the bundled install.sh (no raw.githubusercontent.com fetch)"
   pass=$((pass + 1))
 else
-  echo "  FAIL: remote action did not fetch install.sh at its pinned ref" >&2
+  echo "  FAIL: remote action did not run the bundled install.sh without network fetch" >&2
   echo "$remote_out" >&2
+  cat "$sandbox/curl.log" >&2
   fail=$((fail + 1))
+fi
+
+if grep -q 'raw\.githubusercontent\.com' action.yml; then
+  echo "  FAIL: action.yml still references raw.githubusercontent.com" >&2
+  fail=$((fail + 1))
+else
+  echo "  ok: action.yml does not reference raw.githubusercontent.com"
+  pass=$((pass + 1))
 fi
 
 echo "[test-action-version] $pass passed, $fail failed"

@@ -46,10 +46,16 @@ impl Scan {
     /// Build the cached scan. Walks the repo (per a basic
     /// `WalkOptions`), detects ecosystem, parses the user's
     /// existing config (best-effort), and probes git.
-    pub fn collect(root: &Path, progress: &Progress) -> Result<Self> {
+    pub fn collect(
+        root: &Path,
+        no_gitignore: bool,
+        config_path: Option<&Path>,
+        progress: &Progress,
+    ) -> Result<Self> {
         let phase = progress.phase("Walking repository", None);
-        let index = walk(root, &WalkOptions::default())
-            .with_context(|| format!("walking {}", root.display()))?;
+        let walk_opts = WalkOptions::default().with_respect_gitignore(!no_gitignore);
+        let index =
+            walk(root, &walk_opts).with_context(|| format!("walking {}", root.display()))?;
         let n = index.entries.len();
         phase.finish(&format!("Walked {n} entries"));
         crate::config_cmd::report_walk_warnings(&index);
@@ -59,7 +65,7 @@ impl Scan {
         // detector is cheap.
         let detection = crate::init::detect(root, true);
 
-        let extends_uris = read_existing_extends(root);
+        let extends_uris = read_existing_extends(root, config_path);
         let has_git = alint_core::git::collect_tracked_paths(root).is_some();
 
         Ok(Self {
@@ -117,9 +123,15 @@ impl Scan {
 /// recognises). Returns an empty vec when no config exists or
 /// the file isn't parseable — degraded gracefully so `suggest`
 /// always has something to say.
-fn read_existing_extends(root: &Path) -> Vec<String> {
-    for name in [".alint.yml", ".alint.yaml", "alint.yml", "alint.yaml"] {
-        let path = root.join(name);
+fn read_existing_extends(root: &Path, explicit_config: Option<&Path>) -> Vec<String> {
+    let candidates: Vec<PathBuf> = match explicit_config {
+        Some(path) => vec![path.to_path_buf()],
+        None => [".alint.yml", ".alint.yaml", "alint.yml", "alint.yaml"]
+            .into_iter()
+            .map(|name| root.join(name))
+            .collect(),
+    };
+    for path in candidates {
         // The loader's reader: a FIFO or a device (`/dev/zero`) planted under
         // the config's name is refused, not read forever, and so is a file
         // past the size a config may have.
@@ -240,7 +252,7 @@ mod tests {
     #[test]
     fn empty_repo_scan_walks_zero_entries() {
         let tmp = td();
-        let scan = Scan::collect(tmp.path(), &Progress::null()).unwrap();
+        let scan = Scan::collect(tmp.path(), false, None, &Progress::null()).unwrap();
         assert_eq!(scan.index.entries.len(), 0);
         assert!(!scan.has_git);
         assert_eq!(scan.detection.languages, [] as [crate::init::Language; 0]);
@@ -254,7 +266,7 @@ mod tests {
             ".alint.yml",
             "version: 1\nextends:\n  - alint://bundled/oss-baseline@v1\n  - alint://bundled/rust@v1\nrules: []\n",
         );
-        let scan = Scan::collect(tmp.path(), &Progress::null()).unwrap();
+        let scan = Scan::collect(tmp.path(), false, None, &Progress::null()).unwrap();
         assert!(scan.has_extends("alint://bundled/oss-baseline@v1"));
         assert!(scan.has_extends("alint://bundled/rust@v1"));
         assert!(!scan.has_extends("alint://bundled/node@v1"));
@@ -269,7 +281,10 @@ mod tests {
         let tmp = td();
         let bomb = format!("extends: {}1{}", "[".repeat(200_000), "]".repeat(200_000));
         touch(tmp.path(), ".alint.yml", &bomb);
-        assert_eq!(read_existing_extends(tmp.path()), Vec::<String>::new());
+        assert_eq!(
+            read_existing_extends(tmp.path(), None),
+            Vec::<String>::new()
+        );
     }
 
     /// ROB-11: the reader read `.alint.yml` with `read_to_string`, so a FIFO
@@ -296,7 +311,7 @@ mod tests {
         );
         let root = tmp.path().to_path_buf();
         let (sender, receiver) = std::sync::mpsc::channel();
-        std::thread::spawn(move || drop(sender.send(read_existing_extends(&root))));
+        std::thread::spawn(move || drop(sender.send(read_existing_extends(&root, None))));
         let extends = receiver
             .recv_timeout(std::time::Duration::from_secs(2))
             .expect("reading a FIFO or /dev/zero must not run on");
@@ -311,7 +326,7 @@ mod tests {
             ".alint.yml",
             "version: 1\nextends:\n  - url: alint://bundled/python@v1\n    only: [python-pyproject-toml]\nrules: []\n",
         );
-        let scan = Scan::collect(tmp.path(), &Progress::null()).unwrap();
+        let scan = Scan::collect(tmp.path(), false, None, &Progress::null()).unwrap();
         assert!(scan.has_extends("alint://bundled/python@v1"));
     }
 
@@ -321,7 +336,7 @@ mod tests {
         touch(tmp.path(), ".alint.yml", "{this is not: valid: yaml::");
         // Scan must still build — we silently degrade to an
         // empty extends list rather than fail the command.
-        let scan = Scan::collect(tmp.path(), &Progress::null()).unwrap();
+        let scan = Scan::collect(tmp.path(), false, None, &Progress::null()).unwrap();
         assert_eq!(scan.extends_uris, [] as [String; 0]);
     }
 

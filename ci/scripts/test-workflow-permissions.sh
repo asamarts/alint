@@ -75,8 +75,8 @@ EXPECTED_JOB_OVERRIDES = {
         'contents': 'read',
         'id-token': 'write',
     },
+    ('release.yml', 'build-wheels'): {'contents': 'read'},
     ('release.yml', 'publish-pypi'): {
-        'contents': 'read',
         'id-token': 'write',
     },
     ('release.yml', 'homebrew'): {'contents': 'read'},
@@ -257,7 +257,10 @@ WRITE_INDICATORS = (
     (re.compile(r'\bgh\s+workflow\s+run\b'), 'actions', 'workflow dispatch'),
     (re.compile(r'^\s*push:\s*true\s*$', re.MULTILINE), 'packages', 'registry push'),
     (re.compile(r'actions/attest-build-provenance@'), 'attestations', 'GitHub attestation'),
+    (re.compile(r'actions/attest@'), 'attestations', 'GitHub SBOM attestation'),
 )
+
+PIP_INSTALL_RE = re.compile(r'\b(?:python3?\s+-m\s+)?pip3?\s+install\b[^\n]*')
 
 for workflow, (_, jobs) in parsed.items():
     for job_name, job in jobs.items():
@@ -268,6 +271,13 @@ for workflow, (_, jobs) in parsed.items():
         for pattern, permission, marker in WRITE_INDICATORS:
             if pattern.search(code):
                 require_write(workflow, job_name, permission, marker, code)
+        effective = effective_permissions(workflow, job_name)
+        for match in PIP_INSTALL_RE.finditer(code):
+            cmd = match.group(0)
+            if effective.get('id-token') == 'write':
+                fail(f'{workflow}:{job_name}: pip install is prohibited in a job with id-token: write')
+            if '==' not in cmd and '-r ' not in cmd and '--requirement' not in cmd:
+                fail(f'{workflow}:{job_name}: unpinned pip install is prohibited: {cmd.strip()}')
 
 # Review approval is intentionally prohibited while GitHub's combined
 # create/approve setting must remain enabled for bench-record's `gh pr create`.

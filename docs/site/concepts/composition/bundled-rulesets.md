@@ -55,7 +55,8 @@ Add the sets you want to `extends:`, then tune them in your own config. A rule y
 
 ## In practice
 
-Extend the OSS baseline and the Rust set, and downgrade one inherited rule to a warning while a repo catches up:
+<!-- alint:since=0.23.0 -->
+Extend the OSS baseline and the Rust set, and elevate one inherited rule to an error for this repository:
 
 ```yaml
 version: 1
@@ -63,16 +64,17 @@ extends:
   - alint://bundled/oss-baseline@v1
   - alint://bundled/rust@v1
 rules:
-  - id: readme-exists
-    level: warning
+  - id: oss-readme-exists
+    level: error
 ```
+<!-- /alint:since -->
 
 `alint list` shows the union of the inherited rules with your override applied; `alint check` runs the Rust rules only if the tree actually has Rust.
 
 <!-- alint:since=0.24.0 -->
 ### Version 2 bundled rulesets
 
-Starting in v0.24, bundled rulesets may also use `version: 2` (for example `alint://bundled/js/workspace-deps@v2` for JS/TS monorepo dependency range consistency). Adopting a `version: 2` bundled ruleset requires `version: 2` in your `.alint.yml` (a `version: 1` config cannot extend a `version: 2` source), and you can attach `as: <alias>` on the `extends:` entry to reference its exported selectors and relations (`<alias>.<name>`) from your own `constraint` rules.
+Starting in v0.24, bundled rulesets may also use `version: 2`, referenced as `alint://bundled/<name>@v2` (beginning with `alint://bundled/js/workspace-deps@v2` for JS/TS monorepo dependency range consistency, bringing the catalog from 24 `@v1` sets to 25 total). Adopting a `version: 2` bundled ruleset requires `version: 2` in your `.alint.yml` (a `version: 1` config cannot extend a `version: 2` source), and you can attach `as: <alias>` on the `extends:` entry to reference its exported selectors and relations (`<alias>.<name>`) from your own `constraint` rules.
 <!-- /alint:since -->
 
 ## Going deeper

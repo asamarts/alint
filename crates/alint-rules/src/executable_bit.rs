@@ -61,8 +61,12 @@ impl Rule for ExecutableBitRule {
                 continue;
             }
             let full = ctx.root.join(&entry.path);
-            let Ok(meta) = std::fs::metadata(&full) else {
-                continue;
+            let meta = match std::fs::metadata(&full) {
+                Ok(m) => m,
+                Err(e) => {
+                    violations.push(crate::io::io_error_violation(&entry.path, &e));
+                    continue;
+                }
             };
             let mode = meta.permissions().mode();
             let is_exec = mode & 0o111 != 0;

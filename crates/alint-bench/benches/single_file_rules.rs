@@ -29,12 +29,15 @@ fn make_tree(n_files: usize, content: &[u8]) -> tempfile::TempDir {
 fn build_engine(yaml: &str) -> Engine {
     let config = alint_dsl::parse(yaml).expect("bench config parses");
     let registry = alint_rules::builtin_registry();
-    let rules: Vec<Box<dyn Rule>> = config
+    let entries: Vec<alint_core::RuleEntry> = config
         .rules
-        .iter()
-        .map(|spec| registry.build(spec).expect("bench rule builds"))
+        .into_iter()
+        .map(|spec| {
+            let rule = registry.build(&spec).expect("bench rule builds");
+            alint_core::RuleEntry::new(rule).with_spec(std::sync::Arc::new(spec))
+        })
         .collect();
-    Engine::new(rules, alint_rules::builtin_registry())
+    Engine::from_entries(entries, registry)
 }
 
 const FIXTURE_RS: &[u8] =

@@ -407,7 +407,7 @@ rules:
     level: warning
     message: "golang/go's issue triage relies on this template set."
 
-  - id: go-no-AUTHORS-file
+  - id: go-no-authors-file
     kind: file_absent
     paths: ["AUTHORS", "CONTRIBUTORS"]
     level: warning

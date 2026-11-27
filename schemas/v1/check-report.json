@@ -69,9 +69,11 @@
           "description": "True when the rule produced neither policy violations nor analysis failures."
         },
         "policy_url": {
-          "type": "string",
-          "description": "Optional documentation URL provided by the rule.",
-          "format": "uri"
+          "description": "Optional documentation URL provided by the rule (or \"<redacted>\" when the URL carried a redacted environment value).",
+          "anyOf": [
+            { "type": "string", "format": "uri" },
+            { "const": "<redacted>" }
+          ]
         },
         "fixable": {
           "type": "boolean",

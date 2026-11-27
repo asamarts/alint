@@ -70,22 +70,57 @@ pub(crate) fn ensure_hyperfine() -> Result<()> {
 
 pub(crate) fn build_release_binary() -> Result<PathBuf> {
     eprintln!("[xtask] cargo build --release -p alint");
-    let status = Command::new(env!("CARGO"))
-        .args(["build", "--release", "-p", "alint"])
-        .status()
+    let out = Command::new(env!("CARGO"))
+        .args([
+            "build",
+            "--release",
+            "-p",
+            "alint",
+            "--message-format=json-render-diagnostics",
+        ])
+        .stderr(std::process::Stdio::inherit())
+        .output()
         .context("invoking cargo")?;
-    if !status.success() {
+    if !out.status.success() {
         bail!("release build failed");
     }
-    let workspace_root = workspace_root()?;
-    let bin = workspace_root
-        .join("target")
-        .join("release")
-        .join(if cfg!(windows) { "alint.exe" } else { "alint" });
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let bin = parse_cargo_artifact_executable(&stdout, "alint").with_context(
+        || "cargo build --release -p alint succeeded without emitting a binary artifact path",
+    )?;
     if !bin.is_file() {
         bail!("expected binary at {}", bin.display());
     }
     Ok(bin)
+}
+
+/// Extract the compiled binary executable path from `cargo build --message-format=json*`
+/// stdout so `CARGO_TARGET_DIR` and `.cargo/config.toml` `build.target-dir` are honored.
+pub(crate) fn parse_cargo_artifact_executable(stdout: &str, bin_name: &str) -> Option<PathBuf> {
+    let mut found = None;
+    for line in stdout.lines() {
+        let Ok(msg) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if msg.get("reason").and_then(|v| v.as_str()) != Some("compiler-artifact") {
+            continue;
+        }
+        let target = msg.get("target")?;
+        if target.get("name").and_then(|v| v.as_str()) != Some(bin_name) {
+            continue;
+        }
+        let is_bin = target
+            .get("kind")
+            .and_then(|v| v.as_array())
+            .is_some_and(|kinds| kinds.iter().any(|k| k.as_str() == Some("bin")));
+        if !is_bin {
+            continue;
+        }
+        if let Some(exe) = msg.get("executable").and_then(|v| v.as_str()) {
+            found = Some(PathBuf::from(exe));
+        }
+    }
+    found
 }
 
 pub(crate) fn workspace_root() -> Result<PathBuf> {
@@ -129,11 +164,7 @@ pub(crate) fn run_hyperfine(
 }
 
 pub(crate) fn shell_quote(s: &str) -> String {
-    if s.chars().any(|c| c == ' ' || c == '\t') {
-        format!("\"{s}\"")
-    } else {
-        s.to_string()
-    }
+    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 pub(crate) fn write_header(report: &mut String, quick: bool, seed: u64) -> Result<()> {
@@ -188,4 +219,33 @@ pub(crate) fn now_iso() -> String {
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
     format!("unix:{secs}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_cargo_artifact_executable_respects_custom_target_dir() {
+        let stdout = concat!(
+            r#"{"reason":"compiler-artifact","target":{"name":"alint","kind":["lib"]},"executable":null}"#,
+            "\n",
+            r#"{"reason":"compiler-artifact","target":{"name":"alint","kind":["bin"]},"executable":"/cargo-target/release/alint"}"#,
+            "\n",
+            r#"{"reason":"build-finished","success":true}"#,
+            "\n"
+        );
+        assert_eq!(
+            parse_cargo_artifact_executable(stdout, "alint"),
+            Some(PathBuf::from("/cargo-target/release/alint"))
+        );
+        assert_eq!(parse_cargo_artifact_executable(stdout, "other"), None);
+    }
+
+    #[test]
+    fn shell_quote_escapes_spaces_dollar_quotes_and_metacharacters() {
+        assert_eq!(shell_quote("/tmp/simple"), "'/tmp/simple'");
+        assert_eq!(shell_quote("/tmp/a b/$HOME;rm"), "'/tmp/a b/$HOME;rm'");
+        assert_eq!(shell_quote("it's \"quoted\""), "'it'\\''s \"quoted\"'");
+    }
 }

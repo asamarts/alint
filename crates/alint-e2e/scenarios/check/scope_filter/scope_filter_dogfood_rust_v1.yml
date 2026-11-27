@@ -17,10 +17,10 @@ tags: [check, extends, bundled, rust, scope_filter, polyglot]
 #
 # We deliberately do NOT put a `Cargo.toml` at the tree root
 # so the ancestor walk for `services/web/script.rs` yields
-# zero hits. As a result the workspace-shape rules
-# (`rust-cargo-toml-exists` + lockfile + toolchain) DO fire
-# at the root — those firings are part of the scenario's
-# expected-violations list and serve as the "the bundled
+# zero hits. `rust-cargo-toml-exists` is satisfied by
+# `crates/api/Cargo.toml`, while the root-level lockfile and
+# toolchain rules (`rust-cargo-lock-exists` + `rust-toolchain-pinned`)
+# still fire at the root — those firings serve as the "the bundled
 # ruleset is actually loaded" canary.
 
 given:
@@ -54,14 +54,13 @@ given:
 when: [check]
 
 expect:
-  # Five violations total: three workspace-shape rules at root
-  # (root_only file_exists rules) plus two per-file content
-  # rules on the in-scope `crates/api/src/main.rs`. If
-  # scope_filter regressed, two more would land on
-  # `services/web/script.rs` and the strict count would mismatch.
-  - exit: policy_failure
+  # Four violations total: two workspace-shape rules at root
+  # (warning + info) plus two per-file content rules on the in-scope
+  # `crates/api/src/main.rs` (`rust-cargo-toml-exists` passes because
+  # `crates/api/Cargo.toml` exists). If scope_filter regressed, two more
+  # would land on `services/web/script.rs` and the strict count would mismatch.
+  - exit: success
     violations:
-      - {rule: rust-cargo-toml-exists, level: error}
       - {rule: rust-cargo-lock-exists, level: warning}
       - {rule: rust-toolchain-pinned, level: info}
       - {rule: rust-sources-no-trailing-whitespace, level: info, path: crates/api/src/main.rs}

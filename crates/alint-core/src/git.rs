@@ -553,8 +553,10 @@ pub fn collect_changed_set(root: &Path, base: Option<&str>) -> Option<ChangedSet
             ])
             .output()
     });
-    let staged = staged.wait_with_output().ok()?;
-    let unstaged = unstaged?.wait_with_output().ok()?;
+    let staged_out = staged.wait_with_output().ok();
+    let unstaged_out = unstaged.and_then(|c| c.wait_with_output().ok());
+    let staged = staged_out?;
+    let unstaged = unstaged_out?;
     let working = working?.ok()?;
     if [&staged, &unstaged, &working]
         .iter()
@@ -969,7 +971,7 @@ pub fn verify_commit(root: &Path, sha: &str) -> Option<bool> {
     let output = git_command(root)?
         .arg("-C")
         .arg(root)
-        .args(["verify-commit", sha])
+        .args(["verify-commit", "--end-of-options", sha])
         .output()
         .ok()?;
     Some(output.status.success())
@@ -1255,7 +1257,12 @@ pub fn dir_has_tracked_files<S>(
 where
     S: std::hash::BuildHasher,
 {
-    tracked.iter().any(|p| p.starts_with(dir_rel))
+    if dir_rel.as_os_str().is_empty() {
+        return !tracked.is_empty();
+    }
+    tracked
+        .iter()
+        .any(|p| p != dir_rel && p.starts_with(dir_rel))
 }
 
 #[path = "git_repository.rs"]

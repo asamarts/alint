@@ -461,6 +461,7 @@ fn write_human_compact(
             // `path:line:col` an editor / grep jumps on.
             let loc = match (v.report_line(), v.report_column()) {
                 (Some(line), Some(col)) => format!("{path}:{line}:{col}"),
+                (Some(line), None) => format!("{path}:{line}"),
                 _ => path,
             };
             let (level_style, level_name) = match result.level {
@@ -724,6 +725,14 @@ pub fn write_fix_human(
         w,
         "\n{ok}{applied} applied{ok:#}, {skipped} skipped, {unfixable} unfixable{unresolved_part}{suggested_part}{failure_part}."
     )?;
+    if report.non_convergent {
+        let err = style::ERROR;
+        writeln!(
+            w,
+            "{err}{} fix did not converge; re-run `alint fix` or run `alint check` to see remaining violations.{err:#}",
+            opts.glyphs.error
+        )?;
+    }
     Ok(())
 }
 
@@ -1277,5 +1286,39 @@ mod tests {
         let out = String::from_utf8(buf).unwrap();
         assert!(!out.contains("other-secret.env"), "{out}");
         assert!(!out.contains("more related locations"), "{out}");
+    }
+
+    #[test]
+    fn compact_mode_preserves_line_only_violations() {
+        let mut v = Violation::new("bad line").with_path(std::path::PathBuf::from("src/app.rs"));
+        v.line = Some(12);
+        let report = Report {
+            results: vec![RuleResult::new(
+                "r1".into(),
+                Level::Error,
+                None,
+                vec![v],
+                false,
+            )],
+        };
+        let mut buf = Vec::new();
+        write_human_compact(&report, &mut buf, &HumanOptions::default()).unwrap();
+        let out = strip_sgr(&String::from_utf8(buf).unwrap());
+        assert!(out.contains("src/app.rs:12:"), "missing line number: {out}");
+    }
+
+    #[test]
+    fn fix_human_renders_non_convergent_warning() {
+        let report = FixReport {
+            results: Vec::new(),
+            non_convergent: true,
+        };
+        let mut buf = Vec::new();
+        write_fix_human(&report, &mut buf, HumanOptions::default()).unwrap();
+        let out = strip_sgr(&String::from_utf8(buf).unwrap());
+        assert!(
+            out.contains("fix did not converge"),
+            "missing non-convergence banner: {out}"
+        );
     }
 }

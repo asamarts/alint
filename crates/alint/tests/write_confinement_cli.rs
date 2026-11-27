@@ -184,3 +184,21 @@ fn baseline_regeneration_preserves_file_mode() {
     let mode = std::fs::metadata(&b).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o600, "mode {mode:o}");
 }
+
+#[test]
+fn export_agents_md_refuses_writing_into_git_directory() {
+    let (_tmp, repo, _out) = layout();
+    std::fs::create_dir(repo.join(".git")).unwrap();
+    std::fs::write(repo.join(".alint.yml"), CONFIG).unwrap();
+    for args in [
+        &["export-agents-md", "--output", ".git/AGENTS.md"][..],
+        &["export-agents-md", "--inline", "--output", ".git/AGENTS.md"][..],
+    ] {
+        let o = run(&repo, args);
+        assert_eq!(o.status.code(), Some(2), "{args:?}: {o:?}");
+        assert!(
+            !repo.join(".git/AGENTS.md").exists(),
+            "{args:?} wrote inside .git/"
+        );
+    }
+}

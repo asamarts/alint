@@ -9,31 +9,40 @@ Requires the `alint` binary on `PATH` (Homebrew, `cargo install alint`,
 
 ## Eglot (built into Emacs 29+)
 
-Manual registration — no package needed:
+Manual registration — no package needed (pass `t` to `add-to-list` so `alint`
+is appended after built-in per-language servers rather than shadowing them):
 
 ```elisp
 (with-eval-after-load 'eglot
   (add-to-list 'eglot-server-programs
                '((rust-mode python-mode js-mode typescript-mode go-mode
                   c-mode c++-mode ruby-mode json-mode yaml-mode markdown-mode)
-                 . ("alint" "lsp"))))
+                 . ("alint" "lsp"))
+               t))
 ```
 
-Then run `M-x eglot` in a buffer of a registered mode.
+Then run `M-x eglot` in a buffer of a registered mode. Note that Eglot runs at
+most one language server per major mode (the first match in
+`eglot-server-programs`). Appending keeps `rust-analyzer`, `pylsp`, `gopls`,
+etc. active for modes that already have a server; to run `alint lsp` alongside
+a language-specific server, use `lsp-mode` (`:add-on? t`) below or an LSP
+multiplexer.
 
-Or use the bundled package, which does the same registration plus a
-customizable mode/command list (see [`alint.el`](./alint.el)):
+Or use the bundled package, which provides `alint-setup` plus a customizable
+mode/command list (see [`alint.el`](./alint.el)):
 
 ```elisp
 (use-package alint
-  :load-path "path/to/alint/editors/emacs") ;; until it's on MELPA
+  :load-path "path/to/alint/editors/emacs" ;; until it's on MELPA
+  :config
+  (alint-setup))
 ```
 
 ## lsp-mode
 
 ```elisp
 (with-eval-after-load 'lsp-mode
-  (add-to-list 'lsp-language-id-configuration '(".*" . "alint-target"))
+  (add-to-list 'lsp-language-id-configuration '(".*" . "plaintext") t)
   (lsp-register-client
    (make-lsp-client
     :new-connection (lsp-stdio-connection '("alint" "lsp"))
@@ -42,7 +51,9 @@ customizable mode/command list (see [`alint.el`](./alint.el)):
     :add-on? t)))
 ```
 
-`:add-on? t` lets alint run alongside a language-specific server.
+Appending `(".*" . "plaintext")` with `t` acts purely as a fallback for
+unmapped modes without overriding `languageId` for Rust, Python, Go, etc.,
+and `:add-on? t` lets alint run alongside a language-specific server.
 
 ## Workspace trust
 

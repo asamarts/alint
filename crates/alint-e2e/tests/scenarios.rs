@@ -8,8 +8,8 @@ use dir_test::{Fixture, dir_test};
 
 use crate::support;
 
-const EXPECTED_GENERAL_SCENARIOS: usize = 618;
-const EXPECTED_BUNDLED_SCENARIOS: usize = 99;
+const EXPECTED_GENERAL_SCENARIOS: usize = 628;
+const EXPECTED_BUNDLED_SCENARIOS: usize = 109;
 
 #[test]
 fn every_migrated_document_uses_the_public_v1_parser() {

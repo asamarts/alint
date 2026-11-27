@@ -92,6 +92,13 @@ if not found:
 PY
 "$PY" ci/scripts/stage_npm_packages.py --tag "v$VER" --tarball-dir "$work/tarballs" --out "$work/dist" >/dev/null
 echo "==> staged $(find "$work/dist" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ') packages for host ${host}"
+for lic in LICENSE-APACHE LICENSE-MIT NOTICE; do
+  if cmp -s "$REPO_ROOT/$lic" "$work/dist/alint/$lic"; then
+    ok "shim ships $lic byte-identical to repo root"
+  else
+    bad "shim is missing or modified $lic"
+  fi
+done
 
 # ── tools and the local registry ─────────────────────────────────────────
 tools="$work/tools"

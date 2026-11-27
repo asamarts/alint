@@ -27,10 +27,21 @@ pub fn read_regular_capped(path: &Path, cap: u64) -> std::io::Result<Vec<u8>> {
     if metadata.len() > cap {
         return Err(too_large(cap));
     }
-    let mut bytes = Vec::with_capacity(usize::try_from(metadata.len()).unwrap_or(0));
-    std::fs::File::open(path)?
-        .take(cap.saturating_add(1))
-        .read_to_end(&mut bytes)?;
+    // Open with O_NONBLOCK on Unix and re-verify on the opened descriptor so a
+    // TOCTOU swap to a FIFO/device or growth past `cap` cannot block or OOM.
+    let file = crate::walker::open_nonblocking(path)?;
+    let open_meta = file.metadata()?;
+    if !open_meta.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "not a regular file",
+        ));
+    }
+    if open_meta.len() > cap {
+        return Err(too_large(cap));
+    }
+    let mut bytes = Vec::with_capacity(usize::try_from(open_meta.len()).unwrap_or(0));
+    file.take(cap.saturating_add(1)).read_to_end(&mut bytes)?;
     if u64::try_from(bytes.len()).is_ok_and(|len| len > cap) {
         return Err(too_large(cap));
     }
@@ -88,6 +99,22 @@ mod tests {
     #[test]
     fn refuses_a_device_without_reading_it() {
         let error = read_regular_capped(Path::new("/dev/zero"), 4).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_a_fifo_without_blocking() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fifo = tmp.path().join("pipe");
+        let ok = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .is_ok_and(|s| s.success());
+        if !ok || !fifo.exists() {
+            return;
+        }
+        let error = read_regular_capped(&fifo, 64).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
     }
 }

@@ -161,24 +161,23 @@ fn ceiling_below(start: &Path, ceilings: Option<&str>) -> Option<PathBuf> {
 
 /// The Git directory the gitfile `path` names, as Git reads one: its content
 /// is `gitdir: <path>`, without trailing line breaks, relative to the
-/// gitfile's directory unless absolute. `None` for any other content.
+/// gitfile's directory unless absolute. `None` for any other content or any
+/// file larger than [`MAX_GITFILE_BYTES`] or non-regular.
 fn read_gitfile(path: &Path) -> Option<PathBuf> {
-    use std::io::Read as _;
-    let mut text = String::new();
-    std::fs::File::open(path)
-        .ok()?
-        .take(MAX_GITFILE_BYTES)
-        .read_to_string(&mut text)
-        .ok()?;
-    let target = text
-        .strip_prefix("gitdir: ")?
-        .trim_end_matches(['\n', '\r']);
+    let bytes = crate::bounded_file::read_regular_capped(path, MAX_GITFILE_BYTES).ok()?;
+    let mut target = bytes.strip_prefix(b"gitdir: ")?;
+    while let Some(rest) = target
+        .strip_suffix(b"\n")
+        .or_else(|| target.strip_suffix(b"\r"))
+    {
+        target = rest;
+    }
     if target.is_empty() {
         return None;
     }
-    let target = Path::new(target);
+    let target = path_from_git_bytes(target)?;
     Some(if target.is_absolute() {
-        target.to_path_buf()
+        target
     } else {
         path.parent()?.join(target)
     })
@@ -269,9 +268,29 @@ fn git_accepts(
     if !output.status.success() {
         return false;
     }
-    let text = String::from_utf8_lossy(&output.stdout);
-    let found = Path::new(text.trim_end_matches(['\n', '\r']));
-    canonical(found).is_some_and(|found| found == repository.git_dir)
+    let mut stdout = output.stdout.as_slice();
+    while let Some(rest) = stdout
+        .strip_suffix(b"\n")
+        .or_else(|| stdout.strip_suffix(b"\r"))
+    {
+        stdout = rest;
+    }
+    let Some(found) = path_from_git_bytes(stdout) else {
+        return false;
+    };
+    canonical(&found).is_some_and(|found| found == repository.git_dir)
+}
+
+#[cfg(unix)]
+#[allow(clippy::unnecessary_wraps)] // non-Unix returns None on invalid UTF-8
+fn path_from_git_bytes(bytes: &[u8]) -> Option<PathBuf> {
+    use std::os::unix::ffi::OsStrExt as _;
+    Some(PathBuf::from(std::ffi::OsStr::from_bytes(bytes)))
+}
+
+#[cfg(not(unix))]
+fn path_from_git_bytes(bytes: &[u8]) -> Option<PathBuf> {
+    std::str::from_utf8(bytes).ok().map(PathBuf::from)
 }
 
 /// `path` resolved as the OS resolves it, in a form Git reads: on Windows,

@@ -41,7 +41,7 @@ use std::time::Duration;
 
 use alint_core::{
     AnalysisFailureKind, Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation,
-    WalkOptions, unreadable_file_violation, walk,
+    unreadable_file_violation, walk,
 };
 use serde::Deserialize;
 
@@ -228,14 +228,15 @@ impl GeneratedFileFreshRule {
         // kind is spawn-gated (an untrusted `extends:` can't introduce it),
         // so this is defense-in-depth keeping the "every config-derived
         // path read is confined" invariant total.
-        let Some(file_rel) = crate::pathsafe::normalize_confined(file) else {
-            return vec![self.violation(file, "escapes the repo root")];
+        let file_rel = match crate::pathsafe::confine_read(file, ctx.root, false) {
+            crate::pathsafe::Confined::In(p) | crate::pathsafe::Confined::AllowedEscape(p) => p,
+            crate::pathsafe::Confined::Denied => {
+                return vec![self.violation(file, "escapes the repo root")];
+            }
+            crate::pathsafe::Confined::GitDirectory => {
+                return vec![crate::pathsafe::git_directory_read_failure(file)];
+            }
         };
-        // A `file` naming a Git directory is refused at load; this one reaches
-        // one through a symlink.
-        if alint_core::reaches_git_directory(ctx.root, &file_rel) {
-            return vec![crate::pathsafe::git_directory_read_failure(file)];
-        }
         let (status, stdout, stderr) = match self.run(ctx) {
             crate::spawn::SpawnOutcome::Exited {
                 status,
@@ -385,7 +386,7 @@ impl GeneratedFileFreshRule {
         // `outputs`'s literal directory prefixes when available so a nested
         // `generated_file_fresh` rescans only its iterated subtree instead of
         // walking the whole repository per iteration (#584).
-        let walk_opts = WalkOptions::default();
+        let walk_opts = ctx.index.walk_options().cloned().unwrap_or_default();
         let rescan = match outputs.narrow_prefixes() {
             Some(prefixes) => alint_core::walk_subtrees(ctx.root, &prefixes, &walk_opts),
             None => walk(ctx.root, &walk_opts),
@@ -649,6 +650,12 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
             "generated_file_fresh requires a non-empty `command` argv (the generator)",
         ));
     }
+    if opts.timeout == Some(0) {
+        return Err(Error::rule_config(
+            &spec.id,
+            "generated_file_fresh `timeout` must be >= 1",
+        ));
+    }
     let mode = match (opts.file, opts.outputs) {
         (Some(f), None) => {
             if f.trim().is_empty() {
@@ -662,7 +669,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         }
         (None, Some(o)) => {
             let globs = o.into_vec();
-            if globs.iter().all(|g| g.trim().is_empty()) {
+            if globs.is_empty() || globs.iter().any(|g| g.trim().is_empty()) {
                 return Err(Error::rule_config(
                     &spec.id,
                     "generated_file_fresh `outputs` must not be empty",
@@ -1008,5 +1015,31 @@ mod tests {
     fn build_accepts_outputs_list() {
         let yaml = "id: t\nkind: generated_file_fresh\noutputs: [\"a/**\", \"b.txt\"]\ncommand: [\"make\"]\nlevel: error\n";
         assert!(build(&crate::test_support::spec_yaml(yaml)).is_ok());
+    }
+
+    #[test]
+    fn build_rejects_partial_empty_outputs_and_zero_timeout() {
+        let empty_entry = "id: t\nkind: generated_file_fresh\noutputs: [\"a.txt\", \"\"]\ncommand: [\"x\"]\nlevel: error\n";
+        assert!(build(&crate::test_support::spec_yaml(empty_entry)).is_err());
+        let zero_timeout = "id: t\nkind: generated_file_fresh\nfile: a.txt\ncommand: [\"x\"]\ntimeout: 0\nlevel: error\n";
+        assert!(build(&crate::test_support::spec_yaml(zero_timeout)).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stdout_symlink_escaping_root_is_refused_without_spawning() {
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret.txt"), "topsecret\n").unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("secret.txt"),
+            dir.path().join("out.txt"),
+        )
+        .unwrap();
+        let r = stdout_rule("out.txt", &["sh", "-c", "touch ran"], Normalize::None);
+        let v = eval_in(&r, dir.path());
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert!(v[0].message.contains("escapes the repo root"), "{v:?}");
+        assert!(!dir.path().join("ran").exists());
     }
 }

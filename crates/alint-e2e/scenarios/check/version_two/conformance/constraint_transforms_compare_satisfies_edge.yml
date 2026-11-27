@@ -1,0 +1,53 @@
+test_version: 1
+name: conformance transforms pipeline with compare literals and satisfies literals
+tags: [check, constraint, cross_file, version_two, conformance, passing]
+
+given:
+  tree:
+    releases.json: |
+      {
+        "items": [
+          { "tag": "  v1.10.0+build.5  ", "spec": "pkg:>=1.8.0" },
+          { "tag": "v2.0.0+meta", "spec": "pkg:^2.0" }
+        ]
+      }
+  config: |
+    version: 2
+    relations:
+      releases:
+        from: { paths: releases.json }
+        records: { format: json, at: "$.items[*]" }
+        fields:
+          ver: "record: $.tag"
+          range: "record: $.spec"
+        transform:
+          ver:
+            - trim
+            - { strip_prefix: "v" }
+          range:
+            - { split: { on: ":", part: 1, required: true } }
+    rules:
+      - id: min-semver-floor
+        kind: constraint
+        input: releases
+        assert:
+          compare: { field: ver, op: ge, to: { value: "1.10.0" }, order: semver }
+        level: error
+      - id: satisfies-own-range
+        kind: constraint
+        input: releases
+        assert:
+          satisfies: { version: ver, range: range, dialect: cargo }
+        level: error
+      - id: satisfies-floor-literal
+        kind: constraint
+        input: releases
+        assert:
+          satisfies: { version: ver, range_literal: ">=1.0.0", dialect: node }
+        level: error
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

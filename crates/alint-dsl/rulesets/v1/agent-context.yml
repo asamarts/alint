@@ -14,9 +14,10 @@
 #     extends:
 #       - alint://bundled/agent-context@v1
 #
-# The ruleset is gated by `facts.has_agent_context`, so it's a
-# safe no-op in repos that don't ship any agent-context file —
-# extend it unconditionally even from polyglot / mixed configs.
+# The content/hygiene rules are gated by `facts.has_agent_context`,
+# while `agent-context-recommended` is an unconditional `info`-level
+# nudge to adopt an agent-context file (disable it with `level: off`
+# if you don't want the reminder in repos without one).
 #
 # Defaults are non-blocking (`info` for the existence and bloat
 # checks, `warning` for the stub guard) so the ruleset nudges
@@ -51,11 +52,13 @@ rules:
       - AGENTS.md
       - CLAUDE.md
       - .cursorrules
-    root_only: true
+      - GEMINI.md
+      - .github/copilot-instructions.md
     level: info
     message: >-
-      Add AGENTS.md / CLAUDE.md / .cursorrules so coding
-      agents share versioned instructions.
+      Add AGENTS.md / CLAUDE.md / GEMINI.md / .cursorrules /
+      .github/copilot-instructions.md so coding agents share
+      versioned instructions.
     policy_url: "https://agents.md"
 
   # --- Stub guard --------------------------------------------------
@@ -112,6 +115,8 @@ rules:
     paths:
       - AGENTS.md
       - CLAUDE.md
+      - GEMINI.md
+      - .github/copilot-instructions.md
     prefixes: ["src/", "crates/", "packages/", "apps/", "services/", "docs/"]
     level: info
     message: >-

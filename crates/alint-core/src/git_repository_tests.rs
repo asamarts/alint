@@ -302,3 +302,33 @@ fn git_decides_on_a_repository_another_user_owns() {
         Some(&environment(&safe, &different))
     ));
 }
+
+#[test]
+fn oversize_dot_git_file_is_rejected_without_unbounded_read() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    // > 64 KiB `.git` pointer file must be rejected cleanly.
+    let big = format!("gitdir: {}\n", "a".repeat(80 * 1024));
+    std::fs::write(repo.join(".git"), big).unwrap();
+    assert!(read_gitfile(&repo.join(".git")).is_none());
+}
+
+#[cfg(unix)]
+#[test]
+fn gitfile_preserves_non_utf8_unix_path_bytes() {
+    use std::os::unix::ffi::OsStrExt as _;
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let target_name = std::ffi::OsStr::from_bytes(b"gitdir-\xff-store");
+    let target_dir = tmp.path().join(target_name);
+    // Do not create `target_dir` on disk: APFS on macOS rejects non-UTF-8
+    // directory names with EILSEQ, while `read_gitfile` parses the raw path
+    // bytes from `.git` directly without stat-ing the target.
+    let mut content = b"gitdir: ".to_vec();
+    content.extend_from_slice(target_dir.as_os_str().as_bytes());
+    content.push(b'\n');
+    std::fs::write(repo.join(".git"), &content).unwrap();
+    assert_eq!(read_gitfile(&repo.join(".git")), Some(target_dir));
+}

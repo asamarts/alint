@@ -150,7 +150,7 @@ pub(crate) fn resolve_existing_prefix(path: &Path) -> Option<PathBuf> {
         }
         end -= 1;
     };
-    let mut rest = &components[end..];
+    let rest = &components[end..];
     // A symlink met after a `..` can lead into a directory made before it,
     // so only then are the made directories worth keeping.
     let mut landing = Landing {
@@ -161,16 +161,20 @@ pub(crate) fn resolve_existing_prefix(path: &Path) -> Option<PathBuf> {
             .any(|c| matches!(c, Component::ParentDir))
             .then(Vec::new),
     };
-    // Unless the walk stopped at the first `..`, the next component is the
-    // one a longer prefix did not resolve through: it is missing.
-    if let Some((Component::Normal(name), after)) = rest.split_first() {
-        landing.make(name);
-        rest = after;
-    }
     for component in rest {
         landing.step(*component);
     }
     Some(landing.position())
+}
+
+/// Outcome of resolving a dangling symlink target.
+enum Dangling {
+    /// Target resolved (through existing dirs, `made` dirs, and/or uncreated names).
+    Resolved(PathBuf, Vec<std::ffi::OsString>),
+    /// The entry is not a symlink (a plain missing component).
+    NotALink,
+    /// Symlink recursion hit [`MAX_SYMLINKS`] (a cycle).
+    Loop,
 }
 
 /// A create's walk along its path, as `create_dir_all` then a write take it:
@@ -203,7 +207,7 @@ impl Landing {
                         self.real = real;
                         return;
                     }
-                    if let Some((real, pending)) = self.through_dangling(&next, 0) {
+                    if let Dangling::Resolved(real, pending) = Self::through_dangling(&next, 0) {
                         self.real = real;
                         self.pending = pending;
                         return;
@@ -230,25 +234,28 @@ impl Landing {
             .fold(self.real.clone(), |path, name| path.join(name))
     }
 
-    /// Where `link`, a symlink that does not resolve, leads now that the
-    /// directories this create made exist: a real directory and made names
-    /// below it. `None` when it is not a symlink or leads anywhere else.
-    fn through_dangling(
-        &self,
-        link: &Path,
-        followed: usize,
-    ) -> Option<(PathBuf, Vec<std::ffi::OsString>)> {
-        let made = self.made.as_deref().filter(|made| !made.is_empty())?;
+    /// Where `link`, a symlink that does not resolve, leads: either directly
+    /// (e.g. a dangling leaf symlink `g -> .git/hooks/pre-commit` or
+    /// `ext -> /outside/missing.txt` that `open(O_CREAT)` would follow) or once
+    /// the directories this path already made exist (`m/../dl/config` with
+    /// `dl -> m/../.git`). Returns [`Dangling::NotALink`] when `link` is not a
+    /// symlink and [`Dangling::Loop`] when symlink hops reach [`MAX_SYMLINKS`].
+    fn through_dangling(link: &Path, followed: usize) -> Dangling {
         if followed >= MAX_SYMLINKS {
-            return None;
+            return Dangling::Loop;
         }
-        let target = std::fs::read_link(link).ok()?;
+        let Ok(target) = std::fs::read_link(link) else {
+            return Dangling::NotALink;
+        };
         // `link` sits in a canonical directory, which a relative target
         // starts from.
         let mut real = if target.has_root() {
             PathBuf::new()
         } else {
-            link.parent()?.to_path_buf()
+            let Some(parent) = link.parent() else {
+                return Dangling::NotALink;
+            };
+            parent.to_path_buf()
         };
         let mut pending: Vec<std::ffi::OsString> = Vec::new();
         for component in target.components() {
@@ -267,20 +274,21 @@ impl Landing {
                             real = resolved;
                             continue;
                         }
-                        if let Some(inner) = self.through_dangling(&next, followed + 1) {
-                            (real, pending) = inner;
-                            continue;
+                        match Self::through_dangling(&next, followed + 1) {
+                            Dangling::Resolved(resolved, next_pending) => {
+                                real = resolved;
+                                pending = next_pending;
+                                continue;
+                            }
+                            Dangling::Loop => return Dangling::Loop,
+                            Dangling::NotALink => {}
                         }
                     }
                     pending.push(name.to_owned());
-                    let reached = pending.iter().fold(real.clone(), |path, n| path.join(n));
-                    if !made.contains(&reached) {
-                        return None;
-                    }
                 }
             }
         }
-        (!pending.is_empty()).then_some((real, pending))
+        Dangling::Resolved(real, pending)
     }
 }
 
@@ -1505,5 +1513,52 @@ mod tests {
             Path::new("/repo/sub:dir/POLICY~1.YML"),
             Path::new("/repo/sub:dir/policy.yml"),
         ));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn dangling_symlinks_resolve_targets_for_confinement_git_and_config_checks() {
+        use super::{
+            reaches_alint_config, reaches_git_directory, resolve_existing_prefix,
+            resolved_within_root,
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("repo");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::write(root.join(".alint.yml"), "version: 1\nrules: []\n").unwrap();
+        let real_root = root.canonicalize().unwrap();
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        let real_outside = outside.canonicalize().unwrap();
+
+        // Dangling symlinks whose targets traverse through missing dirs via `..`
+        // or directly point to missing files in `.git/`, outside root, or `.alint.yml`.
+        std::os::unix::fs::symlink("m/../.git", root.join("dl_git")).unwrap();
+        std::os::unix::fs::symlink("m/../../outside", root.join("dl_out")).unwrap();
+        std::os::unix::fs::symlink("m/../.git/hooks/pre-commit", root.join("dl_hook")).unwrap();
+        std::os::unix::fs::symlink(".git/hooks/pre-commit", root.join("g_hook")).unwrap();
+        std::os::unix::fs::symlink(real_outside.join("missing.txt"), root.join("ext_missing"))
+            .unwrap();
+        std::os::unix::fs::symlink("m/../.alint.yml", root.join("dl_cfg")).unwrap();
+
+        assert_eq!(
+            resolve_existing_prefix(&root.join("dl_git")),
+            Some(real_root.join(".git"))
+        );
+        assert!(reaches_git_directory(&root, Path::new("dl_git")));
+        assert!(reaches_git_directory(&root, Path::new("dl_git/config")));
+        assert!(reaches_git_directory(&root, Path::new("dl_hook")));
+        assert!(reaches_git_directory(&root, Path::new("g_hook")));
+
+        assert_eq!(
+            resolve_existing_prefix(&root.join("dl_out")),
+            Some(real_outside.clone())
+        );
+        assert!(!resolved_within_root(&root.join("dl_out"), &root));
+        assert!(!resolved_within_root(&root.join("dl_out/x.txt"), &root));
+        assert!(!resolved_within_root(&root.join("ext_missing"), &root));
+
+        let configs = vec![real_root.join(".alint.yml")];
+        assert!(reaches_alint_config(&root, Path::new("dl_cfg"), &configs));
     }
 }

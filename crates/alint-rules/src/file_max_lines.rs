@@ -132,7 +132,8 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
 
 #[cfg(test)]
 mod tests {
-    use super::count_lines;
+    use super::*;
+    use crate::test_support::{ctx, index, spec_yaml};
 
     #[test]
     fn empty_file_is_zero_lines() {
@@ -148,5 +149,53 @@ mod tests {
         assert_eq!(count_lines(b"a\nb"), 2);
         assert_eq!(count_lines(b"\n\n"), 2);
         assert_eq!(count_lines(b"a\n\nb\n"), 3);
+    }
+
+    #[test]
+    fn build_rejects_missing_paths_and_unknown_option() {
+        let no_paths = spec_yaml("id: t\nkind: file_max_lines\nmax_lines: 10\nlevel: warning\n");
+        let err = build(&no_paths).unwrap_err().to_string();
+        assert!(err.contains("paths"), "{err}");
+
+        let unknown = spec_yaml(
+            "id: t\nkind: file_max_lines\npaths: \"*.rs\"\nmax_lines: 10\nbogus: true\nlevel: warning\n",
+        );
+        let err = build(&unknown).unwrap_err().to_string();
+        assert!(err.contains("invalid options"), "{err}");
+    }
+
+    #[test]
+    fn evaluate_file_passes_at_limit_and_fires_above_with_default_and_custom_message() {
+        let spec = spec_yaml(
+            "id: t\nkind: file_max_lines\npaths: \"*.rs\"\nmax_lines: 2\nlevel: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let pf = rule.as_per_file().unwrap();
+        let idx = index(&["a.rs"]);
+        let c = ctx(Path::new("/fake"), &idx);
+
+        assert!(
+            pf.evaluate_file(&c, Path::new("a.rs"), b"1\n2\n")
+                .unwrap()
+                .is_empty()
+        );
+        let v = pf
+            .evaluate_file(&c, Path::new("a.rs"), b"1\n2\n3\n")
+            .unwrap();
+        assert_eq!(v.len(), 1);
+        assert!(v[0].message.contains("3 line(s)"), "{}", v[0].message);
+        assert!(v[0].message.contains("at most 2"), "{}", v[0].message);
+
+        let custom_spec = spec_yaml(
+            "id: t\nkind: file_max_lines\npaths: \"*.rs\"\nmax_lines: 1\nmessage: \"too long\"\nlevel: error\n",
+        );
+        let custom_rule = build(&custom_spec).unwrap();
+        let v = custom_rule
+            .as_per_file()
+            .unwrap()
+            .evaluate_file(&c, Path::new("a.rs"), b"1\n2\n")
+            .unwrap();
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].message, "too long");
     }
 }

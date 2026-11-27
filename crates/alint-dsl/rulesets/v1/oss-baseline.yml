@@ -180,9 +180,12 @@ rules:
     fix:
       file_append_final_newline: {}
 
+  # Markdown files are intentionally excluded here: two trailing spaces
+  # encode a hard line break in CommonMark, so auto-trimming Markdown
+  # silently alters rendered prose.
   - id: oss-no-trailing-whitespace
     kind: no_trailing_whitespace
-    paths: ["**/*.md", "**/*.txt", "**/*.toml", "**/*.yml", "**/*.yaml"]
+    paths: ["**/*.txt", "**/*.toml", "**/*.yml", "**/*.yaml"]
     level: info
     fix:
       file_trim_trailing_whitespace: {}

@@ -376,12 +376,31 @@ impl Engine {
             let mut stuck: Vec<&str> = last_applied_rules.iter().map(Arc::as_ref).collect();
             stuck.sort_unstable();
             stuck.dedup();
+            let safe_stuck: Vec<String> = stuck
+                .into_iter()
+                .map(|id| {
+                    let mut out = String::with_capacity(id.len());
+                    for c in id.chars() {
+                        let cp = c as u32;
+                        if c.is_control()
+                            || (0x80..=0x9f).contains(&cp)
+                            || crate::invisible::is_deceptive_on_display(c)
+                        {
+                            use std::fmt::Write as _;
+                            let _ = write!(out, "\\u{{{cp:x}}}");
+                        } else {
+                            out.push(c);
+                        }
+                    }
+                    out
+                })
+                .collect();
             eprintln!(
                 "alint: error: fix did not settle after {MAX_PASSES} passes; these rules were \
                  still applying (a non-convergent config whose fixes undo each other, or a very \
                  slow one): {}. re-run `alint fix` to continue if it is only slow, or `alint \
                  check` to see what remains.",
-                stuck.join(", ")
+                safe_stuck.join(", ")
             );
         }
         let mut report = FixReport {
@@ -1393,6 +1412,9 @@ impl Engine {
                 }
                 for (file, file_violations) in by_file {
                     let sensitive = file_violations.iter().any(Violation::is_sensitive);
+                    if file_violations.iter().any(Violation::path_is_sensitive) {
+                        hidden_paths.insert(Self::normalized_write_target(root, &file));
+                    }
                     let abs = root.join(&file);
                     let bytes = match read_for_fix(&abs, &file, &fix_ctx) {
                         Ok(ReadForFix::Bytes(b)) => b,
@@ -1514,13 +1536,21 @@ impl Engine {
                         // A withheld fix (its target is outside the --changed set) is
                         // a Suggestion carrying the proposed edit when the fixer has
                         // one; an editless op (`git_untrack`, no `fix_edit`) still
-                        // suggests with `edit: None`, not a decline.
-                        FixStatus::Suggested {
-                            summary: format!(
-                                "{} (outside --changed scope; not auto-applied)",
-                                f.describe()
-                            ),
-                            edit: f.fix_edit(&v, &[], fix_ctx.root),
+                        // suggests with `edit: None`, not a decline. Security write
+                        // refusals (`.git/`, extended-source config files) still win
+                        // and decline rather than surfacing a forbidden edit.
+                        let edit = f.fix_edit(&v, &[], fix_ctx.root);
+                        if let Some(reason) = edit.as_ref().and_then(|e| edit_refusal(&fix_ctx, e))
+                        {
+                            FixStatus::declined(reason)
+                        } else {
+                            FixStatus::Suggested {
+                                summary: format!(
+                                    "{} (outside --changed scope; not auto-applied)",
+                                    f.describe()
+                                ),
+                                edit,
+                            }
                         }
                     }
                     // Applied tier at the current threshold: run the fixer.
@@ -1545,14 +1575,20 @@ impl Engine {
                     // misleading "not applicable here" decline, since it IS
                     // applicable via `--unsafe-fixes` (F1 audit).
                     Some(f) if f.applicability().suggested_at(threshold) => {
-                        let hint = if f.applicability() == Applicability::Unsafe {
-                            " (requires --unsafe-fixes)"
+                        let edit = f.fix_edit(&v, &[], fix_ctx.root);
+                        if let Some(reason) = edit.as_ref().and_then(|e| edit_refusal(&fix_ctx, e))
+                        {
+                            FixStatus::declined(reason)
                         } else {
-                            " (suggestion only; not auto-applied)"
-                        };
-                        FixStatus::Suggested {
-                            summary: format!("{}{hint}", f.describe()),
-                            edit: f.fix_edit(&v, &[], fix_ctx.root),
+                            let hint = if f.applicability() == Applicability::Unsafe {
+                                " (requires --unsafe-fixes)"
+                            } else {
+                                " (suggestion only; not auto-applied)"
+                            };
+                            FixStatus::Suggested {
+                                summary: format!("{}{hint}", f.describe()),
+                                edit,
+                            }
                         }
                     }
                     // A fixer whose tier neither applies nor is suggested here
@@ -1614,12 +1650,15 @@ impl Engine {
         // not index.
         if !located_batches.is_empty() {
             // A file's batch mixes rules. Each rule's own read above already
-            // refused what its provenance may not edit, so the last rule's must
-            // not decide for the others here.
+            // refused what its provenance may not edit, so the last rule's
+            // flags must not leak across unrelated rules here.
             fix_ctx.extended_source = false;
+            fix_ctx.allow_out_of_root = false;
             let mut located_items: BTreeMap<usize, Vec<FixItem>> = BTreeMap::new();
             for (file, batch) in located_batches {
                 let abs = root.join(&file);
+                let is_hidden = hidden_paths.contains(&Self::normalized_write_target(root, &file));
+                fix_ctx.paths_sensitive = is_hidden;
                 let deferred = located_deferred.contains(&file);
                 let current = match read_for_fix(&abs, &file, &fix_ctx) {
                     Ok(ReadForFix::Bytes(b)) => Some(b),
@@ -1668,11 +1707,13 @@ impl Engine {
                 // `--dry-run` reports the outcomes but writes nothing: skip the
                 // stage entirely (commit_write in a dry run has no compose buffer
                 // and would write straight to disk, exactly what dry-run forbids).
-                if !dry_run
-                    && batch_changed
-                    && let Err(source) = fix_ctx.commit_write(&abs, &new_bytes)
-                {
-                    if hidden_paths.contains(&Self::normalized_write_target(root, &file)) {
+                let stage_err = if !dry_run && batch_changed {
+                    fix_ctx.commit_write(&abs, &new_bytes).err()
+                } else {
+                    None
+                };
+                if let Some(source) = &stage_err {
+                    if is_hidden {
                         // The I/O error names the file as well.
                         eprintln!(
                             "alint: could not stage {CONFIGURATION_MASK}: {}",
@@ -1716,20 +1757,35 @@ impl Engine {
                     // MIXED real+identity batch (Phase-2 pre-req 2); the per-edit
                     // check subsumes it -- disjoint edits cannot cancel, so an
                     // unchanged file means every edit was an identity.
+                    let shown_file = if is_hidden || edit.sensitive {
+                        CONFIGURATION_MASK.to_string()
+                    } else {
+                        file.display().to_string()
+                    };
                     let status = if is_identity && matches!(status, FixStatus::Applied(_)) {
                         FixStatus::declined(format!(
-                            "{}: located edit at {range_key} left its span unchanged",
-                            file.display()
+                            "{shown_file}: located edit at {range_key} left its span unchanged"
                         ))
+                    } else if let Some(source) = &stage_err
+                        && matches!(status, FixStatus::Applied(_))
+                    {
+                        if is_hidden || edit.sensitive {
+                            FixStatus::errored(format!(
+                                "{FIX_ERROR_PREFIX} file could not be written"
+                            ))
+                        } else {
+                            FixStatus::errored(format!("{FIX_ERROR_PREFIX} {source}"))
+                        }
                     } else {
                         status
                     };
-                    let mut violation = Violation::new(format!(
-                        "located edit at {range_key} in {}",
-                        file.display()
-                    ))
-                    .with_path(file.clone())
-                    .with_baseline_key(range_key.clone());
+                    let mut violation =
+                        Violation::new(format!("located edit at {range_key} in {shown_file}"))
+                            .with_path(file.clone())
+                            .with_baseline_key(range_key.clone());
+                    if is_hidden {
+                        violation.mark_path_sensitive();
+                    }
                     if edit.sensitive {
                         violation.mark_sensitive(&format!(
                             "fix\0{}\0{}\0{range_key}",
@@ -1870,14 +1926,38 @@ impl Engine {
                 .and_then(|entry| entry.spec.as_deref())
                 .is_some_and(|spec| spec.extended_source);
             for failure in &mut result.analysis_failures {
-                if sensitive_paths {
+                let hits_env_config = extended_source
+                    && !self.environment_config_files.is_empty()
+                    && failure.path.as_deref().is_some_and(|path| {
+                        crate::pathsafe::reaches_specific_config_walked(
+                            root,
+                            path,
+                            &self.environment_config_files,
+                            None,
+                        )
+                    });
+                if sensitive_paths || hits_env_config {
                     failure.mark_path_sensitive();
+                }
+                if hits_env_config && let Some(path) = failure.path.as_deref() {
+                    let raw = path.display().to_string();
+                    let slash = raw.replace('\\', "/");
+                    if raw.len() < 4 {
+                        failure.message = format!("analysis failed on {CONFIGURATION_MASK}").into();
+                    } else if failure.message.contains(&raw) || failure.message.contains(&slash) {
+                        failure.message = failure
+                            .message
+                            .replace(&raw, CONFIGURATION_MASK)
+                            .replace(&slash, CONFIGURATION_MASK)
+                            .into();
+                    }
                 }
                 if result_sensitive {
                     failure.redact_message(&result.rule_id);
                 }
             }
             for item in &mut result.items {
+                let path_was_sensitive = item.violation.path_is_sensitive();
                 let hits_env_config = extended_source
                     && !self.environment_config_files.is_empty()
                     && item.violation.path.as_deref().is_some_and(|path| {
@@ -1915,7 +1995,17 @@ impl Engine {
                 if result_sensitive {
                     item.violation.redact_message(&result.rule_id);
                 }
-                if item.violation.is_sensitive() {
+                let already_masked_config_refusal = hits_env_config
+                    && !sensitive_paths
+                    && !path_was_sensitive
+                    && matches!(
+                        &item.status,
+                        FixStatus::Skipped { reason, .. }
+                            if reason.contains("<redacted> is an alint configuration file")
+                    );
+                if item.violation.is_sensitive()
+                    || (item.violation.path_is_sensitive() && !already_masked_config_refusal)
+                {
                     let path = crate::rule::locator_path(
                         item.violation.path.as_deref(),
                         item.violation.path_is_sensitive(),
@@ -1937,5 +2027,18 @@ impl Engine {
             compose_buf.map_or_else(BTreeMap::new, RefCell::into_inner),
             sensitive_paths,
         ))
+    }
+}
+
+fn edit_refusal(fix_ctx: &FixContext<'_>, edit: &FixEdit) -> Option<String> {
+    match edit {
+        FixEdit::SetContent { path, .. }
+        | FixEdit::CreateFile { path, .. }
+        | FixEdit::DeleteFile { path }
+        | FixEdit::ReplaceRange { path, .. }
+        | FixEdit::SetMode { path, .. } => fix_ctx.write_refusal(&fix_ctx.root.join(path)),
+        FixEdit::RenameFile { from, to } => fix_ctx
+            .write_refusal(&fix_ctx.root.join(from))
+            .or_else(|| fix_ctx.write_refusal(&fix_ctx.root.join(to))),
     }
 }

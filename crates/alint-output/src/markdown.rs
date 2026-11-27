@@ -130,7 +130,8 @@ pub fn write_fix_markdown(report: &FixReport, w: &mut dyn Write) -> std::io::Res
         String::new()
     };
     let failure_part = if analysis_failures > 0 {
-        format!(", **{analysis_failures} analysis failures**")
+        let plural = if analysis_failures == 1 { "" } else { "s" };
+        format!(", **{analysis_failures} analysis failure{plural}**")
     } else {
         String::new()
     };
@@ -139,6 +140,13 @@ pub fn write_fix_markdown(report: &FixReport, w: &mut dyn Write) -> std::io::Res
         "**{applied} applied**, **{skipped} skipped**, **{unfixable} unfixable**{unresolved_part}{suggested_part}{failure_part}.",
     )?;
     writeln!(w)?;
+    if report.non_convergent {
+        writeln!(
+            w,
+            "> **Warning:** fix did not converge within the pass limit; re-run `alint fix` or run `alint check` to inspect remaining violations."
+        )?;
+        writeln!(w)?;
+    }
 
     for r in &report.results {
         if r.items.is_empty() && r.analysis_failures.is_empty() {
@@ -440,6 +448,7 @@ fn md_url(s: &str) -> String {
             '(' => out.push_str("%28"),
             ')' => out.push_str("%29"),
             ' ' => out.push_str("%20"),
+            '\\' => out.push_str("%5C"),
             c if c.is_ascii_control()
                 || (0x80..=0x9f).contains(&cp)
                 || alint_core::invisible::is_deceptive_on_display(c) =>
@@ -894,5 +903,40 @@ mod tests {
             "ZWSP leaked into md_url: {out:?}"
         );
         assert!(out.contains("https://example.com/a"), "{out}");
+    }
+
+    #[test]
+    fn md_url_percent_encodes_trailing_backslash() {
+        let out = md_url(r"https://example.com/a\");
+        assert_eq!(out, "https://example.com/a%5C");
+    }
+
+    #[test]
+    fn fix_markdown_renders_non_convergent_and_singular_analysis_failure() {
+        let report = FixReport {
+            results: vec![FixRuleResult {
+                rule_id: "r1".into(),
+                level: Level::Error,
+                items: Vec::new(),
+                analysis_failures: vec![alint_core::AnalysisFailure::new(
+                    alint_core::AnalysisFailureKind::ResourceRead,
+                    "boom",
+                )],
+            }],
+            non_convergent: true,
+        };
+        let out = render_fix(&report);
+        assert!(
+            out.contains("1 analysis failure"),
+            "expected singular analysis failure: {out}"
+        );
+        assert!(
+            !out.contains("1 analysis failures"),
+            "unexpected plural for 1 failure: {out}"
+        );
+        assert!(
+            out.contains("fix did not converge"),
+            "expected non-convergence blockquote: {out}"
+        );
     }
 }

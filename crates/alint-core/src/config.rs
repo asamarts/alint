@@ -397,11 +397,16 @@ impl AllowOutOfRoot {
         }
     }
 
-    /// `true` when nothing is permitted (the default). The `extends:`
-    /// trust gate rejects an inherited ruleset whose value is not this.
+    /// `true` when nothing is permitted (the default, or an empty `Selective`
+    /// map that grants neither kinds nor rules). The `extends:` trust gate
+    /// rejects an inherited ruleset whose value is not this.
     #[must_use]
     pub fn is_confined(&self) -> bool {
-        matches!(self, Self::Confined)
+        match self {
+            Self::Confined => true,
+            Self::All => false,
+            Self::Selective { kinds, rules } => kinds.is_empty() && rules.is_empty(),
+        }
     }
 }
 

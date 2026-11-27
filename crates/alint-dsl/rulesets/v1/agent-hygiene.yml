@@ -52,14 +52,23 @@ rules:
   - id: agent-no-versioned-duplicates
     kind: file_absent
     paths:
-      - "**/*_old.*"
-      - "**/*_old"
-      - "**/*_new.*"
-      - "**/*_final.*"
-      - "**/*_FINAL.*"
-      - "**/*_copy.*"
-      - "**/*_backup.*"
-      - "**/*.copy.*"
+      include:
+        - "**/*_old.*"
+        - "**/*_old"
+        - "**/*_new.*"
+        - "**/*_final.*"
+        - "**/*_FINAL.*"
+        - "**/*_copy.*"
+        - "**/*_backup.*"
+        - "**/*.copy.*"
+      exclude:
+        - "vendor/**"
+        - "**/vendor/**"
+        - "node_modules/**"
+        - "**/node_modules/**"
+        - "**/fixtures/**"
+        - "**/whats_new.*"
+        - "**/test_*.*"
     level: warning
     message: >-
       Filename looks like a versioned duplicate (e.g.

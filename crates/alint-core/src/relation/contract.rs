@@ -83,17 +83,11 @@ impl<A: ContractAdapterTrait> Adapter for ContractAdapter<A> {
                 bytes,
                 max_rows,
             })
-            .map_err(from_contract_error)?;
-        let output = from_contract_output(output, resource, &contract)?;
-        if output.rows.len() > max_rows {
-            return Err(AdapterError::Limit(super::limits::LimitExceeded {
-                kind: LimitKind::RowsPerExtractor,
-                limit: max_rows,
-                reached: output.rows.len(),
-                redacted: false,
-            }));
-        }
-        Ok(output)
+            .map_err(|err| from_contract_error(err, limits))?;
+        limits
+            .check(LimitKind::RowsPerExtractor, output.rows.len())
+            .map_err(AdapterError::Limit)?;
+        from_contract_output(output, resource, &contract, bytes.len())
     }
 }
 
@@ -295,10 +289,11 @@ fn to_violation(finding: ContractFinding, rule_id: &str) -> Violation {
     if !finding.related.is_empty() {
         violation.set_related_locations(finding.related.into_iter().map(|related| {
             let mut location = RelatedLocation::new(related.path, related.label);
-            if let (Some(line), Some(column)) = (related.line, related.column)
-                && let Some(range) = SourceRange::new(line, column, line, column)
-            {
-                location = location.with_range(range);
+            if let Some(line) = related.line {
+                let column = related.column.unwrap_or(1);
+                if let Some(range) = SourceRange::new(line, column, line, column) {
+                    location = location.with_range(range);
+                }
             }
             location
         }));
@@ -321,7 +316,7 @@ fn to_violation(finding: ContractFinding, rule_id: &str) -> Violation {
     violation
 }
 
-fn from_contract_error(error: ContractError) -> AdapterError {
+fn from_contract_error(error: ContractError, limits: &super::limits::Limits) -> AdapterError {
     match error {
         ContractError::Parse(message) => AdapterError::Parse(message),
         ContractError::Limit { limit, reached } => {
@@ -329,7 +324,7 @@ fn from_contract_error(error: ContractError) -> AdapterError {
                 kind: LimitKind::RowsPerExtractor,
                 limit,
                 reached,
-                redacted: false,
+                redacted: limits.is_redacted(LimitKind::RowsPerExtractor),
             })
         }
     }
@@ -347,11 +342,13 @@ fn to_contract_error(error: AdapterError) -> ContractError {
 
 /// The internal form of a contract adapter's output for `resource`, which the
 /// adapter received as `contract`. Every row must name that resource exactly
-/// (path, origin, and index position).
+/// (path, origin, and index position) and carry valid byte spans within
+/// `0..=bytes_len`.
 fn from_contract_output(
     output: ContractOutput,
     resource: &Resource,
     contract: &ContractResource,
+    bytes_len: usize,
 ) -> Result<AdapterOutput, AdapterError> {
     let mut rows = Vec::with_capacity(output.rows.len());
     for row in output.rows {
@@ -361,7 +358,7 @@ fn from_contract_output(
                 row.resource.path, contract.path
             )));
         }
-        rows.push(from_contract_row(row, resource)?);
+        rows.push(from_contract_row(row, resource, bytes_len)?);
     }
     let mut non_strings = Vec::with_capacity(output.non_strings.len());
     for kind in &output.non_strings {
@@ -390,7 +387,11 @@ fn from_contract_output(
     })
 }
 
-fn from_contract_row(row: ContractRow, resource: &Resource) -> Result<Row, AdapterError> {
+fn from_contract_row(
+    row: ContractRow,
+    resource: &Resource,
+    bytes_len: usize,
+) -> Result<Row, AdapterError> {
     let resource = resource.clone();
     let pointer = match row.pointer {
         Some(segments) => {
@@ -427,13 +428,24 @@ fn from_contract_row(row: ContractRow, resource: &Resource) -> Result<Row, Adapt
     let mut converted = Row::new(resource, pointer, row.ordinal, state);
     converted.label = row.label.map(Into::into);
     converted.span = match (row.start, row.end) {
-        (Some(start), Some(end)) => Some(crate::extract::ByteSpan::new(
-            usize::try_from(start)
-                .map_err(|_| AdapterError::Parse("span start is too large".into()))?,
-            usize::try_from(end)
-                .map_err(|_| AdapterError::Parse("span end is too large".into()))?,
-        )),
-        _ => None,
+        (Some(start), Some(end)) => {
+            let start = usize::try_from(start)
+                .map_err(|_| AdapterError::Parse("span start is too large".into()))?;
+            let end = usize::try_from(end)
+                .map_err(|_| AdapterError::Parse("span end is too large".into()))?;
+            if start > end || end > bytes_len {
+                return Err(AdapterError::Parse(format!(
+                    "invalid contract span {start}..{end} for {bytes_len}-byte input"
+                )));
+            }
+            Some(crate::extract::ByteSpan::new(start, end))
+        }
+        (None, None) => None,
+        _ => {
+            return Err(AdapterError::Parse(
+                "contract row has only one of span start/end".into(),
+            ));
+        }
     };
     converted.original = original;
     Ok(converted)
@@ -745,5 +757,91 @@ mod tests {
         let expected = direct.extract(&resource, bytes, &limits).unwrap();
         let actual = bridged.extract(&resource, bytes, &limits).unwrap();
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn contract_validates_row_spans_enforces_limits_and_keeps_line_only_related_locations() {
+        struct BadSpan(Option<u64>, Option<u64>);
+        impl crate::plugin_api::Adapter for BadSpan {
+            fn id(&self) -> &'static str {
+                "bad-span"
+            }
+            fn extract(
+                &self,
+                input: crate::plugin_api::AdapterInput<'_>,
+            ) -> Result<crate::plugin_api::AdapterOutput, crate::plugin_api::AdapterError>
+            {
+                Ok(crate::plugin_api::AdapterOutput {
+                    rows: vec![crate::plugin_api::Row {
+                        resource: input.resource.clone(),
+                        pointer: None,
+                        label: None,
+                        ordinal: 0,
+                        start: self.0,
+                        end: self.1,
+                        state: crate::plugin_api::RowState::Missing,
+                        original: None,
+                    }],
+                    non_strings: Vec::new(),
+                    notes: Vec::new(),
+                })
+            }
+        }
+        struct LimitErr;
+        impl crate::plugin_api::Adapter for LimitErr {
+            fn id(&self) -> &'static str {
+                "limit-err"
+            }
+            fn extract(
+                &self,
+                _: crate::plugin_api::AdapterInput<'_>,
+            ) -> Result<crate::plugin_api::AdapterOutput, crate::plugin_api::AdapterError>
+            {
+                Err(crate::plugin_api::AdapterError::Limit {
+                    limit: 2,
+                    reached: 3,
+                })
+            }
+        }
+        let resource = Resource::for_test(0, "a.json");
+        let limits = super::super::limits::Limits::default();
+        for (start, end) in [(Some(4), Some(2)), (Some(0), Some(99)), (Some(0), None)] {
+            let err = ContractAdapter::new(BadSpan(start, end))
+                .extract(&resource, b"abc", &limits)
+                .unwrap_err();
+            assert!(
+                matches!(err, AdapterError::Parse(_)),
+                "bad span ({start:?}, {end:?}) must be rejected: {err}"
+            );
+        }
+
+        // Row limit exceeded and redacted error respects `limits.is_redacted(RowsPerExtractor)`.
+        let redacted_limits = super::super::limits::Limits::default()
+            .with_redacted(super::super::limits::LimitKind::RowsPerExtractor, 2, true)
+            .unwrap();
+        let err = ContractAdapter::new(LimitErr)
+            .extract(&resource, b"", &redacted_limits)
+            .unwrap_err();
+        assert!(
+            matches!(err, AdapterError::Limit(ref e) if e.redacted),
+            "redacted flag must propagate into contract Limit error: {err:?}"
+        );
+
+        // Line-only related location preserves line number (column defaults to 1).
+        let mut with_rel = finding(Some("a.json"));
+        with_rel.related.push(crate::plugin_api::RelatedLocation {
+            path: "dir/b.json".into(),
+            label: "line-only".into(),
+            line: Some(7),
+            column: None,
+        });
+        let accepted = analyze(vec![with_rel]).unwrap();
+        assert_eq!(accepted[0].related_locations.len(), 1);
+        let rel_range = accepted[0].related_locations[0]
+            .range
+            .as_ref()
+            .expect("line-only related location keeps a SourceRange");
+        assert_eq!(rel_range.start_line(), 7);
+        assert_eq!(rel_range.start_column(), 1);
     }
 }

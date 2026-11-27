@@ -125,8 +125,13 @@ def check_staged(out: Path) -> None:
     assert shim["version"] == VER
     assert shim["optionalDependencies"] == {p["name"]: VER for p in PACKAGES}, shim["optionalDependencies"]
     assert "scripts" not in shim and "dependencies" not in shim, shim
+    shim_licenses = ("LICENSE-APACHE", "LICENSE-MIT", "NOTICE")
+    for lic in shim_licenses:
+        assert lic in shim["files"], f"shim package.json missing {lic}"
+        assert (out / "alint" / lic).read_bytes() == (REPO / lic).read_bytes(), lic
     for rel in shim["files"]:
-        assert (out / "alint" / rel).read_bytes() == (REPO / "npm" / rel).read_bytes(), rel
+        src = (REPO / rel) if rel in shim_licenses else (REPO / "npm" / rel)
+        assert (out / "alint" / rel).read_bytes() == src.read_bytes(), rel
     print(f"  OK staged {len(PACKAGES)} platform packages + the shim")
 
 
@@ -191,7 +196,26 @@ def main() -> int:
             tdp,
             "checksum mismatch",
             "sha256 mismatch",
-            lambda t: next(t.glob("*x86_64-apple-darwin.tar.gz.sha256")).write_text("0" * 64 + "  x\n"),
+            lambda t: (
+                lambda sc: sc.write_text("0" * 64 + f"  {sc.name[:-7]}\n")
+            )(next(t.glob("*x86_64-apple-darwin.tar.gz.sha256"))),
+        )
+        expect_fail(
+            tdp,
+            "sidecar filename mismatch",
+            "checksum names",
+            lambda t: next(t.glob("*x86_64-apple-darwin.tar.gz.sha256")).write_text("0" * 64 + "  wrong.tar.gz\n"),
+        )
+        expect_fail(
+            tdp,
+            "tag-mismatched tarball",
+            "no release tarball",
+            lambda t: (
+                lambda tb: (
+                    tb.rename(t / tb.name.replace(TAG, "v0.0.1")),
+                    (t / f"{tb.name}.sha256").unlink(),
+                )
+            )(next(t.glob("*x86_64-apple-darwin.tar.gz"))),
         )
         expect_fail(
             tdp,

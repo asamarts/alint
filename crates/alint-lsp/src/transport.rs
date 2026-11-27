@@ -574,14 +574,20 @@ fn handle_workspace_folders(core: &ServerCore, params: serde_json::Value) -> boo
                 .event
                 .removed
                 .iter()
-                .filter_map(|f| f.uri.to_file_path().ok())
+                .filter_map(|f| {
+                    f.uri
+                        .to_file_path()
+                        .ok()
+                        .map(|p| crate::diagnostics::normalize_path_key(&p))
+                })
                 .collect();
             state.folders.retain(|f| !removed.contains(f));
             for added in &params.event.added {
-                if let Ok(path) = added.uri.to_file_path()
-                    && !state.folders.contains(&path)
-                {
-                    state.folders.push(path);
+                if let Ok(raw_path) = added.uri.to_file_path() {
+                    let path = crate::diagnostics::normalize_path_key(&raw_path);
+                    if !state.folders.contains(&path) {
+                        state.folders.push(path);
+                    }
                 }
             }
             true
@@ -619,6 +625,11 @@ fn handle_notification(
                     let seq = core.next_doc_seq.fetch_add(1, Ordering::SeqCst);
                     {
                         let mut state = core.state.lock();
+                        if let Ok(abs) = uri.to_file_path() {
+                            state
+                                .open_uri_by_path
+                                .insert(crate::diagnostics::normalize_path_key(&abs), uri.clone());
+                        }
                         state.open.insert(uri.clone());
                         state
                             .versions

@@ -704,3 +704,27 @@ fn a_policy_test_config_may_not_set_allow_out_of_root() {
         "{text}"
     );
 }
+
+#[test]
+fn test_filter_ignores_unselected_invalid_policy_tests() {
+    let root = tempfile::tempdir().unwrap();
+    write(
+        root.path(),
+        "alint-tests/good.yml",
+        &passing_test("good", "fast", None),
+    );
+    write(
+        root.path(),
+        "alint-tests/wip.yml",
+        "test_version: 99\nname: wip\n",
+    );
+    let output = run(
+        root.path(),
+        &["test", "--filter", "good", "--format", "json"],
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(0), "{stdout}");
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["summary"]["passed"], 1);
+    assert_eq!(report["summary"]["invalid"], 0);
+}

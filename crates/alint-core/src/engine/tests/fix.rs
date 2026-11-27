@@ -1423,3 +1423,159 @@ fn a_writing_pass_stops_trusting_the_walk_at_the_first_op_that_may_move_a_file()
         );
     }
 }
+
+#[test]
+fn extended_source_create_config_is_refused_in_suggested_and_proposed_edits() {
+    #[derive(Debug)]
+    struct EvilCreateRule;
+    impl crate::rule::Fixer for EvilCreateRule {
+        fn describe(&self) -> String {
+            "create config".to_string()
+        }
+        fn applicability(&self) -> Applicability {
+            Applicability::Unsafe
+        }
+        fn apply(&self, _v: &Violation, _ctx: &FixContext<'_>) -> crate::error::Result<FixOutcome> {
+            Ok(FixOutcome::Applied("created".to_string()))
+        }
+        fn fix_edit(&self, _v: &Violation, _bytes: &[u8], _root: &Path) -> Option<FixEdit> {
+            Some(FixEdit::CreateFile {
+                path: PathBuf::from(".alint.d/evil.yml"),
+                content: b"version: 1\nrules: []\n".to_vec(),
+            })
+        }
+    }
+    impl Rule for EvilCreateRule {
+        fn id(&self) -> &'static str {
+            "evil-create"
+        }
+        fn level(&self) -> Level {
+            Level::Error
+        }
+        fn evaluate(&self, _ctx: &Context<'_>) -> crate::error::Result<Vec<Violation>> {
+            Ok(vec![Violation::new("missing")])
+        }
+        fn fixer(&self) -> Option<&dyn crate::rule::Fixer> {
+            Some(self)
+        }
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let mut spec: crate::RuleSpec =
+        crate::yaml::from_str("id: evil-create\nkind: file_exists\nlevel: error\n").unwrap();
+    spec.set_extended_source(true);
+    let entry = RuleEntry::new(Box::new(EvilCreateRule)).with_spec(Arc::new(spec));
+    let engine = Engine::from_entries(vec![entry], RuleRegistry::new());
+    let index = idx(&[]);
+
+    // Under Safe threshold (Suggested branch), extended_source config create must be Skipped, not Suggested.
+    let fix_report = engine
+        .fix(
+            tmp.path(),
+            &index,
+            &crate::WalkOptions::test_default(),
+            true,
+            Applicability::Safe,
+        )
+        .unwrap();
+    assert!(
+        matches!(
+            fix_report.results[0].items[0].status,
+            FixStatus::Skipped { .. }
+        ),
+        "expected Skipped refusal on Suggested branch, got {:?}",
+        fix_report.results[0].items[0].status
+    );
+
+    // `attach_proposed_edits` must not advertise the refused create either.
+    let mut check_report = engine.run(tmp.path(), &index).unwrap();
+    crate::proposed_fix::attach_proposed_edits(&engine, &mut check_report, tmp.path(), &index);
+    assert!(
+        check_report.results[0].violations[0]
+            .proposed_edits
+            .is_empty(),
+        "extended_source create targeting .alint.d/ must not be advertised in proposed_edits"
+    );
+}
+
+#[test]
+fn path_sensitive_finding_redacts_fix_status_and_suppresses_proposed_edits() {
+    #[derive(Debug)]
+    struct HiddenLocatedRule;
+    impl crate::rule::Fixer for HiddenLocatedRule {
+        fn describe(&self) -> String {
+            "replace canary-secret.txt".to_string()
+        }
+        fn collects_located_edits(&self) -> bool {
+            true
+        }
+        fn apply(&self, _v: &Violation, _ctx: &FixContext<'_>) -> crate::error::Result<FixOutcome> {
+            unreachable!("located edits bypass apply")
+        }
+        fn collect_edits(
+            &self,
+            violations: &[Violation],
+            path: &Path,
+            _bytes: &[u8],
+            _root: &Path,
+        ) -> Vec<crate::rule::CollectedEdit> {
+            violations
+                .iter()
+                .map(|_| crate::rule::CollectedEdit {
+                    edit: FixEdit::ReplaceRange {
+                        path: path.to_path_buf(),
+                        range: 0..1,
+                        content: b"X".to_vec(),
+                    },
+                    applicability: Applicability::Safe,
+                    verify: crate::rule::EditVerifier::None,
+                    isolation_group: None,
+                })
+                .collect()
+        }
+    }
+    impl Rule for HiddenLocatedRule {
+        fn id(&self) -> &'static str {
+            "hidden-loc"
+        }
+        fn level(&self) -> Level {
+            Level::Error
+        }
+        fn evaluate(&self, _ctx: &Context<'_>) -> crate::error::Result<Vec<Violation>> {
+            let mut v = Violation::new("found").with_path(PathBuf::from("canary-secret.txt"));
+            v.mark_path_sensitive();
+            Ok(vec![v])
+        }
+        fn fixer(&self) -> Option<&dyn crate::rule::Fixer> {
+            Some(self)
+        }
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(tmp.path().join("canary-secret.txt"), b"0123").unwrap();
+    let index = idx(&["canary-secret.txt"]);
+    let engine = Engine::new(vec![Box::new(HiddenLocatedRule)], RuleRegistry::new());
+
+    let fix_report = engine
+        .fix(
+            tmp.path(),
+            &index,
+            &crate::WalkOptions::test_default(),
+            true,
+            Applicability::Safe,
+        )
+        .unwrap();
+    let status = &fix_report.results[0].items[0].status;
+    let rendered = format!("{status:?}");
+    assert!(
+        !rendered.contains("canary-secret.txt"),
+        "path_is_sensitive fix status must not leak filename: {rendered}"
+    );
+
+    let mut check_report = engine.run(tmp.path(), &index).unwrap();
+    crate::proposed_fix::attach_proposed_edits(&engine, &mut check_report, tmp.path(), &index);
+    assert!(
+        check_report.results[0].violations[0]
+            .proposed_edits
+            .is_empty(),
+        "path_is_sensitive finding must not expose proposed_edits"
+    );
+}

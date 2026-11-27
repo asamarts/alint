@@ -18,6 +18,7 @@ use crate::progress::Progress;
 use crate::suggest::proposal::{Confidence, Evidence, Proposal, ProposalKind};
 use crate::suggest::scan::Scan;
 
+#[allow(clippy::too_many_lines)]
 pub fn propose(scan: &Scan, progress: &Progress) -> Vec<Proposal> {
     progress.status("Matching bundled rulesets");
     let mut out = Vec::new();
@@ -58,6 +59,16 @@ pub fn propose(scan: &Scan, progress: &Progress) -> Vec<Proposal> {
                 "alint://bundled/java@v1",
                 "Java project",
                 "pom.xml / build.gradle at root",
+            ),
+            crate::init::Language::Dotnet => (
+                "alint://bundled/dotnet@v1",
+                ".NET project",
+                ".csproj / .sln / Directory.Build.props at root",
+            ),
+            crate::init::Language::Php => (
+                "alint://bundled/php@v1",
+                "PHP project",
+                "composer.json at root",
             ),
         };
         out.push(Proposal {
@@ -142,13 +153,21 @@ mod tests {
     #[test]
     fn proposes_per_language_ruleset_when_detected() {
         let scan = scan_with(Detection {
-            languages: vec![Language::Rust, Language::Node],
+            languages: vec![
+                Language::Rust,
+                Language::Node,
+                Language::Dotnet,
+                Language::Php,
+            ],
             workspace: None,
+            monorepo_requested: false,
         });
         let proposals = propose(&scan, &Progress::null());
         let ids: Vec<&str> = proposals.iter().map(|p| p.id.as_str()).collect();
         assert!(ids.contains(&"alint://bundled/rust@v1"));
         assert!(ids.contains(&"alint://bundled/node@v1"));
+        assert!(ids.contains(&"alint://bundled/dotnet@v1"));
+        assert!(ids.contains(&"alint://bundled/php@v1"));
     }
 
     #[test]
@@ -156,6 +175,7 @@ mod tests {
         let scan = scan_with(Detection {
             languages: vec![Language::Rust],
             workspace: Some(WorkspaceFlavor::Cargo),
+            monorepo_requested: true,
         });
         let proposals = propose(&scan, &Progress::null());
         let ids: Vec<&str> = proposals.iter().map(|p| p.id.as_str()).collect();

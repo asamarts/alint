@@ -714,23 +714,7 @@ fn ensure_hyperfine() -> Result<()> {
 }
 
 fn build_release_binary() -> Result<PathBuf> {
-    eprintln!("[xtask] cargo build --release -p alint");
-    let status = Command::new(env!("CARGO"))
-        .args(["build", "--release", "-p", "alint"])
-        .status()
-        .context("invoking cargo")?;
-    if !status.success() {
-        bail!("release build failed");
-    }
-    let workspace_root = workspace_root()?;
-    let bin = workspace_root
-        .join("target")
-        .join("release")
-        .join(if cfg!(windows) { "alint.exe" } else { "alint" });
-    if !bin.is_file() {
-        bail!("expected binary at {}", bin.display());
-    }
-    Ok(bin)
+    crate::bench_release::build_release_binary()
 }
 
 fn workspace_root() -> Result<PathBuf> {
@@ -853,7 +837,7 @@ mod tests {
         let values = alint_core::facts::evaluate_facts(&config.facts, tree.root(), &index)
             .expect("evaluate S4 facts");
 
-        assert_eq!(values.len(), 24, "S4 fact count changed");
+        assert_eq!(values.len(), 25, "S4 fact count changed");
         let mut false_facts: Vec<&str> = values
             .as_map()
             .iter()
@@ -861,7 +845,7 @@ mod tests {
             .map(|(id, _)| id.as_str())
             .collect();
         false_facts.sort_unstable();
-        assert_eq!(false_facts, ["is_cargo_workspace"]);
+        assert_eq!(false_facts, ["is_cargo_root_package", "is_cargo_workspace"]);
 
         let when_env = alint_core::when::WhenEnv::new(&values, &config.vars);
         let mut inactive_rules: Vec<&str> = config

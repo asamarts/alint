@@ -463,21 +463,74 @@ fn sorted_numeric_comparator() {
 }
 
 #[test]
-fn leading_int_parses_beyond_i64() {
-    // F3: u64-range identifiers (snowflakes / ns timestamps) must parse, so
-    // they sort numerically rather than falling back to a wrong lexical order.
+fn leading_int_parses_arbitrary_precision_integers() {
+    // F3 + D4#12: u64-range and >i128 identifiers parse without overflowing, so
+    // `Comparator::Numeric` defines a strict total order across all integers.
     assert_eq!(
         leading_int("9999999999999999999"),
-        Some(9_999_999_999_999_999_999)
+        Some((false, "9999999999999999999"))
     );
     assert_eq!(
         leading_int("100000000000000000000"),
-        Some(100_000_000_000_000_000_000)
+        Some((false, "100000000000000000000"))
     );
-    assert_eq!(leading_int("-42x"), Some(-42));
+    assert_eq!(leading_int("-42x"), Some((true, "42")));
+    assert_eq!(leading_int("-0"), Some((false, "0")));
+    assert_eq!(leading_int("007"), Some((false, "7")));
     assert!(leading_int("abc").is_none());
-    // A 40-digit integer overflows even i128 -> None (lexical fallback).
-    assert!(leading_int(&"9".repeat(40)).is_none());
+    let forty_nines = "9".repeat(40);
+    assert_eq!(
+        leading_int(&forty_nines),
+        Some((false, forty_nines.as_str()))
+    );
+}
+
+#[test]
+fn numeric_comparator_is_a_strict_total_order_on_mixed_and_huge_inputs() {
+    let inputs = [
+        "-99999999999999999999999999999999999999999",
+        "-10",
+        "-2",
+        "-0",
+        "0",
+        "2",
+        "10",
+        "99999999999999999999999999999999999999998",
+        "99999999999999999999999999999999999999999",
+        "alpha",
+        "beta",
+    ];
+    for a in inputs {
+        for b in inputs {
+            let ab = Comparator::Numeric.order(a, b);
+            let ba = Comparator::Numeric.order(b, a);
+            assert_eq!(ab, ba.reverse(), "antisymmetry failed for {a:?} vs {b:?}");
+            for c in inputs {
+                let bc = Comparator::Numeric.order(b, c);
+                let ac = Comparator::Numeric.order(a, c);
+                if ab.is_le() && bc.is_le() {
+                    assert!(
+                        ac.is_le(),
+                        "transitivity failed for {a:?} <= {b:?} <= {c:?}"
+                    );
+                }
+            }
+        }
+    }
+    let unsorted = format!(
+        "# keep-sorted start\nalpha\n{0}9\n2\n{0}8\n-10\n# keep-sorted end\n",
+        "9".repeat(40)
+    );
+    let sorted = sort_fixer(Comparator::Numeric, false)
+        .sorted(&unsorted)
+        .unwrap();
+    assert_eq!(
+        sorted,
+        format!(
+            "# keep-sorted start\n-10\n2\n{0}8\n{0}9\nalpha\n# keep-sorted end\n",
+            "9".repeat(40)
+        )
+    );
 }
 
 #[test]

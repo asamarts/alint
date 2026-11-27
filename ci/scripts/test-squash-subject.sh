@@ -93,7 +93,7 @@ if grep -qE '^ +types: \[[^]]*\bedited\b' "$WORKFLOW" \
   && grep -qE '^ +PR_HEAD: \$\{\{ github\.event\.pull_request\.head\.sha \}\}$' "$WORKFLOW" \
   && grep -qE '^ +fetch-depth: 2$' "$WORKFLOW" \
   && grep -qE '^ +if \[\[ "\$PR_COMMITS" == 1 \]\]; then$' "$WORKFLOW" \
-  && grep -qE '^ +"\$\(git log -1 --format=%B "\$PR_HEAD" \| head -n 1\)"$' "$WORKFLOW" \
+  && grep -qE '^ +"\$\(git log -1 --format=%s "\$PR_HEAD"\)"$' "$WORKFLOW" \
   && grep -qE '^ +ci/scripts/squash-subject\.sh "\$PR_TITLE" "\$PR_NUMBER"$' "$WORKFLOW"; then
   ok "the workflow passes the title, and a one-commit pull request's head subject"
 else

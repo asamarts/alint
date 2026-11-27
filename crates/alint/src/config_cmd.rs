@@ -1,6 +1,6 @@
 //! Shared output setup and configuration loading commands.
 
-use std::io::{self, IsTerminal};
+use std::io::{self, IsTerminal, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -137,9 +137,11 @@ impl LoadedConfig {
 /// - `0` — config valid, all N rules built cleanly
 /// - `1` — config invalid (load / build / when-parse error). The
 ///   underlying error message includes the v0.9.15 Phase 3 +
+/// - `1` — config is invalid or not found (YAML syntax, unknown rule kind,
+///   bad regex/glob, invalid `when:`, missing config file, etc.), with
 ///   Phase 4 enrichments (did-you-mean, `JSONPath` dashed-key hints,
 ///   `&&` → `and` keyword hints, etc.)
-/// - `2` — invocation error (file missing, etc.) — propagated by
+/// - `2` — CLI invocation error (unsupported `--format`, etc.) — propagated by
 ///   `main`'s top-level error handler.
 /// - `3` — internal error (e.g. a bundled ruleset shipped inside the binary
 ///   fails to parse) — classified by `error_is_internal`, distinguishing an
@@ -170,45 +172,55 @@ pub(super) fn cmd_validate_config(
     //    config in this repo")
     // 2. `--config` global flag (carried via `cli.config`)
     // 3. discovery from the current directory (same as `check`)
-    let config_path: PathBuf = if let Some(p) = path {
+    let (config_path, repo_root): (PathBuf, Option<PathBuf>) = if let Some(p) = path {
         if p.is_dir() {
             if let Some(found) = discover_config(&p) {
-                found
+                let root = found.parent().map_or_else(|| p.clone(), Path::to_path_buf);
+                (found, Some(root))
             } else {
                 let err = anyhow::anyhow!(
                     "no .alint.yml found under directory {} \
                      (run `alint init` there to scaffold one)",
                     p.display()
                 );
-                return emit_validate_failure(&err, None, fmt);
+                return emit_validate_failure(&err, None, fmt, cli);
             }
         } else {
-            p
+            let root = p
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .map(Path::to_path_buf);
+            (p, root)
         }
     } else if let Some(first) = cli.config.first() {
-        first.clone()
+        let cwd = std::env::current_dir().ok();
+        (first.clone(), cwd)
     } else if let Some(p) = discover_config(Path::new(".")) {
-        p
+        let root = p
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .map(Path::to_path_buf);
+        (p, root)
     } else {
         let err = anyhow::anyhow!(
             "no .alint.yml found (searched from {}) \
              (run `alint init` to scaffold one)",
             Path::new(".").display()
         );
-        return emit_validate_failure(&err, None, fmt);
+        return emit_validate_failure(&err, None, fmt, cli);
     };
 
     if !config_path.exists() {
         let err = anyhow::anyhow!("config file not found: {}", config_path.display());
-        return emit_validate_failure(&err, Some(&config_path), fmt);
+        return emit_validate_failure(&err, Some(&config_path), fmt, cli);
     }
 
     // Same load + build + when-parse path as `check`, with the
     // failures plumbed back as a Result for the validate handler
     // rather than aborting the run.
-    match validate_config_inner(&config_path, cli) {
+    match validate_config_inner(&config_path, repo_root.as_deref(), cli) {
         Ok(validated) => emit_validate_success(&validated, &config_path, fmt, cli),
-        Err(e) => emit_validate_failure(&e, Some(&config_path), fmt),
+        Err(e) => emit_validate_failure(&e, Some(&config_path), fmt, cli),
     }
 }
 
@@ -219,11 +231,21 @@ struct Validated {
     config_version: u32,
 }
 
-fn validate_config_inner(config_path: &Path, cli: &Cli) -> Result<Validated> {
+fn validate_config_inner(
+    config_path: &Path,
+    repo_root: Option<&Path>,
+    cli: &Cli,
+) -> Result<Validated> {
     let registry = cli.registry();
-    let config = alint_dsl::load_with(config_path, &load_options(&registry, cli))?;
+    let mut options = load_options(&registry, cli);
+    if let Some(root) = repo_root {
+        options = options.with_repository_root(Some(root.to_path_buf()));
+    }
+    let config = alint_dsl::load_with(config_path, &options)?;
     remember_environment_values(&config);
     refuse_spawning(&config, &registry, None, cli)?;
+    alint_core::validate_ignore_patterns(&config.ignore).context("validating `ignore` patterns")?;
+    alint_core::validate_facts(&config.facts).context("validating `facts`")?;
     let mut count = 0usize;
     let mut hints = Vec::new();
     for spec in &config.rules {
@@ -312,10 +334,15 @@ fn emit_validate_success(
         } else {
             String::new()
         };
-        print_stdout_line(&format!(
-            "✓ Config valid: {rule_count} rule(s) loaded from {}{version}",
+        let (mut out, opts) = crate::render_env(cli)?;
+        let ok = alint_output::style::SUCCESS;
+        let line = format!(
+            "{ok}{}{ok:#} Config valid: {rule_count} rule(s) loaded from {}{version}",
+            opts.glyphs.success,
             term(&config_path.display().to_string())
-        ))?;
+        );
+        crate::tolerate_broken_pipe(writeln!(out, "{line}"))?;
+        let _ = out.flush();
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -356,6 +383,7 @@ fn emit_validate_failure(
     err: &anyhow::Error,
     config_path: Option<&Path>,
     format: Format,
+    cli: &Cli,
 ) -> Result<ExitCode> {
     if format == Format::Json {
         // Render the error chain as a single string so editors get
@@ -373,7 +401,14 @@ fn emit_validate_failure(
         // stdout consumers, then a one-line summary on stdout so
         // terminals show something either way.
         eprintln!("alint: {}", terminal_error(&format!("{err:#}")));
-        print_stdout_line("✗ Config invalid")?;
+        let (mut out, opts) = crate::render_env(cli)?;
+        let err_style = alint_output::style::ERROR;
+        crate::tolerate_broken_pipe(writeln!(
+            out,
+            "{err_style}{}{err_style:#} Config invalid",
+            opts.glyphs.error
+        ))?;
+        let _ = out.flush();
     }
     // An internal error (an alint bug — e.g. a shipped bundled ruleset that
     // fails to parse) is not the user's config being "invalid"; surface it as
@@ -416,10 +451,13 @@ pub(super) fn report_pattern_hints(
 /// `--untrusted` refuse as `list` does, though it runs nothing.
 pub(super) fn load_for_export(
     config_path: &Path,
+    repository_root: &Path,
     registry: &RuleRegistry,
     cli: &Cli,
 ) -> Result<alint_core::Config> {
-    let config = alint_dsl::load_with(config_path, &load_options(registry, cli))?;
+    let options =
+        load_options(registry, cli).with_repository_root(Some(repository_root.to_path_buf()));
+    let config = alint_dsl::load_with(config_path, &options)?;
     remember_environment_values(&config);
     refuse_spawning(&config, registry, None, cli)?;
     Ok(config)
@@ -564,7 +602,8 @@ pub(super) fn load_rules_for_explain(
     };
     tracing::debug!(?config_path, "loading config");
     let registry = cli.registry();
-    let config = alint_dsl::load_with(&config_path, &load_options(&registry, cli))?;
+    let options = load_options(&registry, cli).with_repository_root(Some(root.clone()));
+    let config = alint_dsl::load_with(&config_path, &options)?;
     remember_environment_values(&config);
     warn_if_experimental(&config, &config_path);
     refuse_spawning(&config, &registry, include_off_rule, cli)?;

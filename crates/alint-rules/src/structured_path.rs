@@ -86,11 +86,18 @@ fn extract_literal_paths(spec: &PathsSpec) -> Option<Vec<PathBuf>> {
     };
     // `literal_glob_path` resolves escapes (a rendered `a\\b` names the
     // directory `a\b`); a raw metacharacter scan looked such a path up verbatim
-    // and silently found nothing.
-    patterns
-        .iter()
-        .map(|p| alint_core::template::literal_glob_path(p).map(PathBuf::from))
-        .collect()
+    // and silently found nothing. Deduplicate while preserving order so
+    // `paths: ["a.json", "a.json"]` visits each file once in rule-major
+    // `evaluate` (matching file-major `evaluate_file`).
+    let mut out = Vec::with_capacity(patterns.len());
+    let mut seen = std::collections::HashSet::with_capacity(patterns.len());
+    for p in patterns {
+        let path = PathBuf::from(alint_core::template::literal_glob_path(p)?);
+        if seen.insert(path.clone()) {
+            out.push(path);
+        }
+    }
+    Some(out)
 }
 
 /// Comparison op - keeps the rule builders thin.

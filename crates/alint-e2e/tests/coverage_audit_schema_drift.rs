@@ -370,3 +370,47 @@ fn schema_rejects_unknown_field_in_set_value() {
         "schema must reject an unknown field in `set_value` (additionalProperties:false)",
     );
 }
+
+#[test]
+fn schema_accepts_extends_field_level_overrides_and_demo_fixture() {
+    let override_doc = serde_json::json!({
+        "version": 1,
+        "extends": ["alint://bundled/oss-baseline@v1"],
+        "rules": [
+            { "id": "oss-readme-exists", "level": "off" },
+            { "id": "oss-license-exists", "level": "error", "message": "Required." }
+        ],
+    });
+    assert!(
+        validate_against_schema(&override_doc).is_ok(),
+        "schema must accept field-level overrides when `extends:` is non-empty: {:?}",
+        validate_against_schema(&override_doc),
+    );
+
+    // Real demo/fixture/.alint.yml uses an extends override with `fix:` and no `kind:`.
+    let demo_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("demo/fixture/.alint.yml");
+    let demo_yaml = fs::read_to_string(&demo_path).expect("read demo/fixture/.alint.yml");
+    let demo_json: serde_json::Value = alint_core::yaml::from_str(&demo_yaml).expect("parse yaml");
+    assert!(
+        validate_against_schema(&demo_json).is_ok(),
+        "demo/fixture/.alint.yml must validate against schemas/v1/config.json: {:?}",
+        validate_against_schema(&demo_json),
+    );
+
+    // Without `extends:`, omitting `kind:` / `extends_template:` MUST still be rejected.
+    let no_extends_missing_kind = serde_json::json!({
+        "version": 1,
+        "rules": [
+            { "id": "oss-readme-exists", "level": "off" }
+        ],
+    });
+    assert!(
+        validate_against_schema(&no_extends_missing_kind).is_err(),
+        "without `extends:`, a rule omitting `kind:` must fail schema validation",
+    );
+}

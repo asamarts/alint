@@ -1534,5 +1534,183 @@ fn connection_logs_parent_ignore_walk_warnings_dedups_and_relogs_after_config_re
     assert_eq!(server.join().unwrap().unwrap(), 0);
 }
 
+#[test]
+fn initialize_advertises_text_document_sync_options_with_save() {
+    use lsp_types::{
+        TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncSaveOptions,
+    };
+
+    let (server_conn, client_conn) = Connection::memory();
+    let server = std::thread::spawn(move || run_connection(&server_conn, LspOptions::default()));
+    send_request::<Initialize>(&client_conn, 1, &InitializeParams::default());
+    let resp = recv_response(&client_conn, 1);
+    let init: InitializeResult = serde_json::from_value(resp.response_result.unwrap()).unwrap();
+    let Some(TextDocumentSyncCapability::Options(opts)) = init.capabilities.text_document_sync
+    else {
+        panic!(
+            "expected TextDocumentSyncCapability::Options, got: {:?}",
+            init.capabilities.text_document_sync
+        );
+    };
+    assert_eq!(opts.open_close, Some(true));
+    assert_eq!(opts.change, Some(TextDocumentSyncKind::FULL));
+    assert_eq!(
+        opts.save,
+        Some(TextDocumentSyncSaveOptions::Supported(true))
+    );
+
+    send_request::<Shutdown>(&client_conn, 2, &());
+    let _ = recv_response(&client_conn, 2);
+    send_notification::<Exit>(&client_conn, &());
+    assert_eq!(server.join().unwrap().unwrap(), 0);
+}
+
+#[cfg(unix)]
+#[test]
+#[allow(clippy::too_many_lines)]
+fn percent_encoded_client_uri_preserves_config_diagnostics_hover_did_close_and_edits() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().join("dir:1");
+    std::fs::create_dir(&repo).unwrap();
+    let cfg_path = repo.join(".alint.yml");
+    let cfg_text = "version: 1\nrules:\n  - id: need-readme\n    kind: file_exists\n    \
+         paths: README.md\n    level: error\n  - id: no-todo\n    kind: file_content_forbidden\n    \
+         paths: '*.txt'\n    pattern: 'TODO'\n    level: error\n    \
+         fix: { replace: { replacement: 'DONE' } }\n";
+    std::fs::write(&cfg_path, cfg_text).unwrap();
+    let txt_path = repo.join("a:b.txt");
+    std::fs::write(&txt_path, "x TODO\n").unwrap();
+
+    // Construct non-canonical percent-encoded URIs (`:` -> `%3A`), modeling
+    // VS Code on Windows (`file:///c%3A/...`) and clients that percent-encode `:`.
+    let canonical_cfg_uri = Url::from_file_path(&cfg_path).unwrap();
+    let encoded_cfg_uri =
+        Url::parse(&canonical_cfg_uri.as_str().replace("dir:1", "dir%3A1")).unwrap();
+    assert_ne!(canonical_cfg_uri, encoded_cfg_uri);
+    let canonical_txt_uri = Url::from_file_path(&txt_path).unwrap();
+    let encoded_txt_uri = Url::parse(
+        &canonical_txt_uri
+            .as_str()
+            .replace("dir:1", "dir%3A1")
+            .replace("a:b.txt", "a%3Ab.txt"),
+    )
+    .unwrap();
+    assert_ne!(canonical_txt_uri, encoded_txt_uri);
+
+    let (server_conn, client_conn) = Connection::memory();
+    let server = std::thread::spawn(move || run_connection(&server_conn, LspOptions::default()));
+    send_request::<Initialize>(
+        &client_conn,
+        1,
+        &InitializeParams {
+            workspace_folders: Some(vec![WorkspaceFolder {
+                uri: Url::from_file_path(&repo).unwrap(),
+                name: "repo".to_string(),
+            }]),
+            ..InitializeParams::default()
+        },
+    );
+    assert!(recv_response(&client_conn, 1).response_result.is_ok());
+    send_notification::<Initialized>(&client_conn, &InitializedParams {});
+
+    // Open `.alint.yml` under its percent-encoded client URI.
+    send_notification::<DidOpenTextDocument>(
+        &client_conn,
+        &DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: encoded_cfg_uri.clone(),
+                language_id: "yaml".to_string(),
+                version: 1,
+                text: cfg_text.to_string(),
+            },
+        },
+    );
+    let cfg_diags = recv_diagnostics(&client_conn, &encoded_cfg_uri);
+    assert_eq!(cfg_diags.diagnostics.len(), 1, "{cfg_diags:?}");
+
+    // Hover on the config-anchored finding works under the client's exact URI.
+    send_request::<HoverRequest>(
+        &client_conn,
+        2,
+        &HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: encoded_cfg_uri.clone(),
+                },
+                position: Position::new(0, 0),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        },
+    );
+    let hover_resp = recv_response(&client_conn, 2);
+    let hover: Option<Hover> = serde_json::from_value(hover_resp.response_result.unwrap()).unwrap();
+    assert!(
+        hover.is_some(),
+        "hover must resolve under percent-encoded config URI"
+    );
+
+    // Open `a:b.txt` under its percent-encoded URI and check WorkspaceEdit key.
+    send_notification::<DidOpenTextDocument>(
+        &client_conn,
+        &DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: encoded_txt_uri.clone(),
+                language_id: "plaintext".to_string(),
+                version: 1,
+                text: "x TODO\n".to_string(),
+            },
+        },
+    );
+    let txt_diags = recv_diagnostics(&client_conn, &encoded_txt_uri);
+    assert_eq!(txt_diags.diagnostics.len(), 1, "{txt_diags:?}");
+    send_request::<CodeActionRequest>(
+        &client_conn,
+        3,
+        &CodeActionParams {
+            text_document: TextDocumentIdentifier {
+                uri: encoded_txt_uri.clone(),
+            },
+            range: txt_diags.diagnostics[0].range,
+            context: CodeActionContext::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        },
+    );
+    let ca_resp = recv_response(&client_conn, 3);
+    let actions: Option<CodeActionResponse> =
+        serde_json::from_value(ca_resp.response_result.unwrap()).unwrap();
+    let lsp_types::CodeActionOrCommand::CodeAction(action) = &actions.unwrap()[0] else {
+        panic!("expected CodeAction");
+    };
+    let changes = action.edit.as_ref().unwrap().changes.as_ref().unwrap();
+    assert!(
+        changes.contains_key(&encoded_txt_uri),
+        "WorkspaceEdit.changes must be keyed by client's exact URI {encoded_txt_uri}, got: {:?}",
+        changes.keys().collect::<Vec<_>>()
+    );
+
+    // Closing `.alint.yml` under the percent-encoded URI must preserve config
+    // diagnostics (republishing from disk to canonical URI, clearing old open URI).
+    send_notification::<DidCloseTextDocument>(
+        &client_conn,
+        &DidCloseTextDocumentParams {
+            text_document: TextDocumentIdentifier {
+                uri: encoded_cfg_uri.clone(),
+            },
+        },
+    );
+    let after_close = recv_diagnostics(&client_conn, &canonical_cfg_uri);
+    assert_eq!(
+        after_close.diagnostics.len(),
+        1,
+        "closing percent-encoded config URI must preserve on-disk config diagnostics"
+    );
+
+    send_request::<Shutdown>(&client_conn, 4, &());
+    let _ = recv_response(&client_conn, 4);
+    send_notification::<Exit>(&client_conn, &());
+    assert_eq!(server.join().unwrap().unwrap(), 0);
+}
+
 #[path = "protocol_tests_audit.rs"]
 mod audit;

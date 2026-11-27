@@ -72,10 +72,11 @@ impl PerFileRule for FileShebangRule {
         path: &Path,
         bytes: &[u8],
     ) -> Result<Vec<Violation>> {
-        let first_line = match std::str::from_utf8(bytes) {
-            Ok(text) => text.split('\n').next().unwrap_or(""),
-            Err(_) => "",
-        };
+        let first_line_bytes = bytes.split(|&b| b == b'\n').next().unwrap_or(&[]);
+        let first_line_bytes = first_line_bytes
+            .strip_suffix(b"\r")
+            .unwrap_or(first_line_bytes);
+        let first_line = std::str::from_utf8(first_line_bytes).unwrap_or("");
         if self.pattern.is_match(first_line) {
             return Ok(Vec::new());
         }
@@ -208,5 +209,23 @@ mod tests {
         let (tmp, idx) = tempdir_with_files(&[("a.sh", b"echo first\n#!/bin/sh\n")]);
         let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
         assert_eq!(v.len(), 1, "shebang on line 2 shouldn't satisfy");
+    }
+
+    #[test]
+    fn evaluate_accepts_valid_shebang_with_non_utf8_body_and_crlf() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_shebang\n\
+             paths: \"**/*.sh\"\n\
+             shebang: \"^#!/bin/sh$\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[
+            ("self_extract.sh", b"#!/bin/sh\necho ok\n\xff\xfe\x00"),
+            ("crlf.sh", b"#!/bin/sh\r\necho ok\r\n"),
+        ]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert!(v.is_empty(), "{v:?}");
     }
 }

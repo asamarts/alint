@@ -865,3 +865,141 @@ fn per_file_reeval_panic_recovers_and_rapid_did_change_burst_coalesces_without_s
     send_notification::<Exit>(&client_conn, &());
     assert_eq!(server.join().unwrap().unwrap(), 0);
 }
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn multi_root_shared_config_preserves_broken_diags_across_in_flight_edit_reeval() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root_a = tmp.path().join("a");
+    let root_b = tmp.path().join("b");
+    std::fs::create_dir(&root_a).unwrap();
+    std::fs::create_dir(&root_b).unwrap();
+    // Place the shared config inside root_a so root_a's session can re-evaluate
+    // it per-file on in-flight edit while root_b fails to load `baseline:`.
+    let shared_cfg = root_a.join(".alint.yml");
+    std::fs::write(
+        root_a.join(".alint-baseline.json"),
+        alint_core::baseline::Baseline::from_fingerprints(None, std::iter::empty()).to_jsonl(),
+    )
+    .unwrap();
+
+    let hook = CheckHookGuard::register(
+        "shared-cfg-broken-reeval",
+        CheckHook {
+            calls: Arc::new(AtomicUsize::new(0)),
+            block_on_call: 2,
+            gate: Arc::new(Gate::default()),
+        },
+    );
+    let cfg_text = format!(
+        "version: 1\nbaseline: .alint-baseline.json\nrules:\n  - id: {}\n    kind: gated_check\n    level: error\n  - id: no-todo\n    kind: file_content_forbidden\n    paths: '*.yml'\n    pattern: 'TODO'\n    level: warning\n",
+        hook.key
+    );
+    std::fs::write(&shared_cfg, &cfg_text).unwrap();
+    let cfg_uri = Url::from_file_path(&shared_cfg).unwrap();
+
+    let mut registry = alint_rules::builtin_registry();
+    registry.register("gated_check", &TEST_RULE_META, build_gated_check);
+    let options = LspOptions::default()
+        .with_registry(Some(registry))
+        .with_config(Some(shared_cfg.clone()));
+
+    let (server_conn, client_conn) = Connection::memory();
+    let server = std::thread::spawn(move || run_connection(&server_conn, options));
+    send_request::<Initialize>(
+        &client_conn,
+        1,
+        &InitializeParams {
+            workspace_folders: Some(vec![
+                WorkspaceFolder {
+                    uri: Url::from_file_path(&root_a).unwrap(),
+                    name: "a".to_string(),
+                },
+                WorkspaceFolder {
+                    uri: Url::from_file_path(&root_b).unwrap(),
+                    name: "b".to_string(),
+                },
+            ]),
+            ..InitializeParams::default()
+        },
+    );
+    assert!(recv_response(&client_conn, 1).response_result.is_ok());
+    send_notification::<Initialized>(&client_conn, &InitializedParams {});
+
+    // Open shared config: root_a succeeds (call #1), root_b fails (missing baseline).
+    send_notification::<DidOpenTextDocument>(
+        &client_conn,
+        &DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: cfg_uri.clone(),
+                language_id: "yaml".to_string(),
+                version: 1,
+                text: cfg_text.clone(),
+            },
+        },
+    );
+    let first = recv_diagnostics(&client_conn, &cfg_uri);
+    assert!(
+        first
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("baseline")),
+        "expected root_b baseline error on shared config: {:?}",
+        first.diagnostics
+    );
+
+    // Trigger a second check (blocks on call #2 in root_a), edit the open shared
+    // config mid-check so `reeval_file_seq` runs afterwards under root_a's session.
+    send_notification::<DidSaveTextDocument>(
+        &client_conn,
+        &DidSaveTextDocumentParams {
+            text_document: TextDocumentIdentifier {
+                uri: cfg_uri.clone(),
+            },
+            text: None,
+        },
+    );
+    hook.gate.wait_entered();
+    send_notification::<DidChangeTextDocument>(
+        &client_conn,
+        &DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: cfg_uri.clone(),
+                version: 2,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                range: None,
+                range_length: None,
+                text: format!("{cfg_text}# TODO\n"),
+            }],
+        },
+    );
+    hook.gate.release();
+
+    // Wait for the version-2 reeval publication and verify root_b's broken_diag survived.
+    let v2 = loop {
+        let p = recv_diagnostics(&client_conn, &cfg_uri);
+        if p.version == Some(2) {
+            break p;
+        }
+    };
+    assert!(
+        v2.diagnostics
+            .iter()
+            .any(|d| d.message.contains("baseline")),
+        "follow-up reeval_file_seq must preserve root_b broken_diags: {:?}",
+        v2.diagnostics
+    );
+    assert!(
+        v2.diagnostics
+            .iter()
+            .any(|d| d.code == Some(NumberOrString::String("no-todo".to_string()))),
+        "follow-up reeval_file_seq must also publish fresh per-file finding: {:?}",
+        v2.diagnostics
+    );
+
+    send_request::<Shutdown>(&client_conn, 2, &());
+    assert!(recv_response(&client_conn, 2).response_result.is_ok());
+    send_notification::<Exit>(&client_conn, &());
+    assert_eq!(server.join().unwrap().unwrap(), 0);
+}

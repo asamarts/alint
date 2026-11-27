@@ -531,7 +531,7 @@ fn fix_schema_matches_every_fix_op() {
         let base = match *op {
             "replace" => "replacement: x\n",
             "command" => "run: [x]\n",
-            "file_create" | "file_prepend" | "file_append" => "content: x\n",
+            "file_create" | "file_prepend" | "file_append" | "insert_header" => "content: x\n",
             _ => "",
         };
         for (extra, label) in [
@@ -556,4 +556,92 @@ fn indent(s: &str) -> String {
         let _ = writeln!(out, "  {l}");
         out
     })
+}
+
+#[test]
+fn extends_rule_overrides_and_schema_parity_constraints() {
+    let validator = compile_schema();
+
+    // Valid partial overrides when `extends:` is non-empty (including clearing
+    // `fix: null` / `scope_filter: null` and overriding kind-specific options).
+    assert_valid(
+        &validator,
+        &yaml_to_json(
+            "version: 1\nextends:\n  - alint://bundled/rust@v1\nrules:\n  - id: rust-max-lines\n    level: off\n  - id: oss-no-trailing-whitespace\n    fix: null\n    scope_filter: null\n  - id: rust-max-lines\n    max_lines: 600\n",
+        ),
+        "extends with partial rule overrides",
+    );
+
+    // Without `extends:`, partial overrides without `kind:` remain rejected.
+    assert_invalid(
+        &validator,
+        &yaml_to_json("version: 1\nrules:\n  - id: rust-max-lines\n    level: off\n"),
+        "standalone partial rule without kind",
+    );
+
+    // Full rules inside an `extends:` config still reject unknown options.
+    assert_invalid(
+        &validator,
+        &yaml_to_json(
+            "version: 1\nextends:\n  - alint://bundled/rust@v1\nrules:\n  - id: bad\n    kind: file_exists\n    paths: a\n    level: error\n    bogus_opt: true\n",
+        ),
+        "extends with full rule carrying unknown option",
+    );
+
+    // Fact IDs match `when:` lexer grammar (`[A-Za-z_][A-Za-z0-9_]*`, no hyphens).
+    assert_valid(
+        &validator,
+        &yaml_to_json(
+            "version: 1\nfacts:\n  - id: _hasRust_1\n    any_file_exists: Cargo.toml\nrules: []\n",
+        ),
+        "valid fact id with leading underscore and uppercase",
+    );
+    assert_invalid(
+        &validator,
+        &yaml_to_json(
+            "version: 1\nfacts:\n  - id: has-rust\n    any_file_exists: Cargo.toml\nrules: []\n",
+        ),
+        "hyphenated fact id rejected by schema",
+    );
+
+    // `insert_header` requires exactly one of `content` / `content_from`.
+    assert_invalid(
+        &validator,
+        &yaml_to_json(
+            "version: 1\nrules:\n  - id: h\n    kind: file_header\n    paths: '*.rs'\n    pattern: '//'\n    level: error\n    fix: { insert_header: {} }\n",
+        ),
+        "insert_header empty body",
+    );
+    assert_invalid(
+        &validator,
+        &yaml_to_json(
+            "version: 1\nrules:\n  - id: h\n    kind: file_header\n    paths: '*.rs'\n    pattern: '//'\n    level: error\n    fix: { insert_header: { content: '//', content_from: h.txt } }\n",
+        ),
+        "insert_header both content and content_from",
+    );
+
+    // `create_and_register` forbids setting both `content` and `content_from`.
+    assert_invalid(
+        &validator,
+        &yaml_to_json(
+            "version: 1\nrules:\n  - id: reg\n    kind: cross_file\n    source: { files: 'a.txt' }\n    targets: [{ file: Cargo.toml, extract: { toml: '$.workspace.members[*]' } }]\n    relation: registered\n    level: error\n    fix: { create_and_register: { content: x, content_from: y } }\n",
+        ),
+        "create_and_register both content and content_from",
+    );
+
+    // `command` fix `timeout: 0` is rejected (matches runtime `timeout >= 1`).
+    assert_invalid(
+        &validator,
+        &yaml_to_json(
+            "version: 1\nrules:\n  - id: cmd\n    kind: command\n    paths: '*.rs'\n    command: ['true']\n    level: error\n    fix: { command: { run: ['true'], timeout: 0 } }\n",
+        ),
+        "command fix timeout 0",
+    );
+
+    // Empty `allow_out_of_root: {}` is rejected (matches runtime `AllowOutOfRoot`).
+    assert_invalid(
+        &validator,
+        &yaml_to_json("version: 1\nallow_out_of_root: {}\nrules: []\n"),
+        "empty allow_out_of_root map",
+    );
 }

@@ -217,7 +217,10 @@ impl CompiledRedactor {
     fn redact<'a>(&self, text: &'a str) -> std::borrow::Cow<'a, str> {
         let ac = match &self.matcher {
             Matcher::Empty => return std::borrow::Cow::Borrowed(text),
-            Matcher::Failed => return std::borrow::Cow::Borrowed(CONFIGURATION_MASK),
+            // Return `Cow::Owned` so callers distinguishing "changed/masked"
+            // from "unchanged" (`redact_error`, `environment_fact_hints_with`)
+            // fail closed rather than treating the mask as an unredacted hit.
+            Matcher::Failed => return std::borrow::Cow::Owned(CONFIGURATION_MASK.to_string()),
             Matcher::Ready(ac) => ac,
         };
         // Collect overlapping matches in monotonic `end` order, coalescing
@@ -421,6 +424,16 @@ impl EnvironmentRedactor {
     #[must_use]
     pub fn values(&self) -> &[String] {
         &self.values
+    }
+
+    #[cfg(test)]
+    pub(crate) fn failed_for_test(value: &str) -> Self {
+        let mut redactor = Self::new();
+        redactor.insert(value);
+        redactor.compiled = Some(CompiledRedactor {
+            matcher: Matcher::Failed,
+        });
+        redactor
     }
 
     /// `text` with every recorded environment value replaced by

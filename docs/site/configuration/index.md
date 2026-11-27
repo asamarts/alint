@@ -89,6 +89,38 @@ A scheme matches in any case (`HTTPS://` is an HTTPS entry). Plain `http://` is 
 any other `<scheme>://` (`ftp://`, `file://`, `ssh://`, `git+https://`): it is a load error
 naming the scheme, never a local path. Errors show a URL without its userinfo, query and fragment.
 
+### `trusted_extends`
+
+Optional list of SRI-pinned `https://` URLs from `extends:` that are explicitly permitted to declare `ignore:` patterns and read `env.*` (or environment-derived `vars.*`) inside `when:` / `when_iter:` or templates. Top-level only (accepted in the root `.alint.yml` and `.alint.d/` drop-ins; rejected inside `extends:` and nested configs).
+
+```yaml
+trusted_extends:
+  - "https://example.com/rules.yml#sha256-abc123..."
+```
+
+Each entry must match an `https://...#sha256-...` entry in `extends:`. Listing a URL under `trusted_extends:` never allows process-spawning rules/fixes, `custom:` facts, `allow_out_of_root:`, `baseline:`, `limits:`, or fixes writing alint's own configuration files. See [Composition and trust](/docs/concepts/composition/composition-and-trust/).
+
+### `templates`
+
+Optional list of reusable rule templates that rules instantiate with `extends_template: <template-id>` and optional `vars:`. Templates factor out repeated rule shapes without duplicating every field; `{{vars.X}}` placeholders expand at template instantiation time.
+
+```yaml
+templates:
+  - id: sources-need-headers
+    kind: pair
+    primary: "{{vars.dir}}/**/*.c"
+    partner: "{dir}/{stem}.h"
+    level: error
+
+rules:
+  - id: lib-headers
+    extends_template: sources-need-headers
+    vars:
+      dir: src
+```
+
+See [Rule templates](/docs/configuration/templates/) for full expansion and scoping semantics.
+
 ### `ignore`
 
 Extra glob patterns to exclude from the walk, on top of `.gitignore`. Same gitignore-style syntax. Use this for repo-specific exclusions you don't want in `.gitignore` itself (because they're an alint concern, not a git concern):
@@ -333,7 +365,7 @@ rules:
     level: warning
 ```
 
-Each predicate takes a **`source:`** (the manifest file, always repo-root-confined; its declared paths resolve relative to its own directory), an **`extract:`** (the shared `{ json | toml | yaml: <JSONPath> }` / `{ lines }` / `{ regex }` extractor `registry_paths_resolve` and `file_graph` also use), an optional **`derive_target: { from, to }`** regex mapping applied to each extracted path (a string that does not match `from` is dropped), and, for `include_manifest_paths:` only, **`expect_nonempty:`** (default `true`) to warn when a successfully resolved set is empty. A missing, unreadable, malformed, or over-limit source and a structured query selecting a non-string node are typed analysis failures for every active owning rule; they never become an empty set or a fallback to full scope. Non-literal string entries are dropped with an informational note. This guards the *declared* set; `expect_matches: true` separately asserts that the final effective scope contains a file.
+Each predicate takes a **`source:`** (the manifest file, always repo-root-confined; its declared paths resolve relative to its own directory), an **`extract:`** (the shared `{ json | toml | yaml | xml | dotenv | properties | ini | hcl: <JSONPath> }` / `{ lines }` / `{ regex }` / `{ whole_file }` extractor `registry_paths_resolve` and `file_graph` also use), an optional **`derive_target: { from, to }`** regex mapping applied to each extracted path (a string that does not match `from` is dropped), and, for `include_manifest_paths:` only, **`expect_nonempty:`** (default `true`) to warn when a successfully resolved set is empty. A missing, unreadable, malformed, or over-limit source and a structured query selecting a non-string node are typed analysis failures for every active owning rule; they never become an empty set or a fallback to full scope. Non-literal string entries are dropped with an informational note. This guards the *declared* set; `expect_matches: true` separately asserts that the final effective scope contains a file.
 
 Membership is **directory-aware**: a declared file matches itself; a declared directory (a workspace member) matches every file under it, respecting component boundaries (`crates/a` does not match `crates/ab`). A **glob** member is expanded, so `members = ["crates/*"]` scopes every file under each matching `crates/<x>` directory. A **negated** member (`!packages/internal`, the pnpm / npm workspaces exclusion form) excludes what it matches; members are applied in declared order and the last one matching a file decides. This ordered reading matches npm workspaces. pnpm applies `!` entries as excludes regardless of position, so the two agree when exclusions come last, the usual style. Cargo has no `!` form in `members`; its separate `exclude` list is a second extraction, for example an `exclude_manifest_paths` predicate over `$.workspace.exclude[*]`. The set is extracted once per run and cached, like `changed_since:`. A manifest **value** gates *which* files a rule sees, never *what* it decides about a file: content rules never read the manifest, extraction is pure parsing (no spawn, safe inside an `extends:`-provided rule), and `alint explain <rule>` prints the resolved set.
 
@@ -376,7 +408,7 @@ rules:
     level: error
 ```
 
-Guardrails: nested configs may only declare `version:` and `rules:`; every nested rule must have at least one scope field; absolute paths and `..`-prefixed globs are rejected; rule-id collisions across configs error with a clear message.
+Guardrails: nested configs may only declare `version:`, optional `requires:`, and `rules:` (every other top-level key is rejected at load time); every nested rule must have at least one scope field; absolute paths and `..`-prefixed globs are rejected; rule-id collisions across configs error with a clear message.
 
 Only the user's top-level config may set `nested_configs: true`. Nested configs themselves cannot spawn further nested discovery (one level of opt-in, intentionally).
 

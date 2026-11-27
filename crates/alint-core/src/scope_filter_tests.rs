@@ -1029,3 +1029,83 @@ fn changed_since_diff_copies_onto_the_filtered_changed_index() {
         "the changed_since diff is visible on the filtered index after the copy"
     );
 }
+
+#[test]
+fn derive_target_resolves_sibling_paths_relative_to_manifest_dir() {
+    let f = manifest_filter(
+        "include_manifest_paths:\n  source: packages/web/manifest.json\n  extract: { json: \"$.deps[*]\" }\n  derive_target: { from: \"^@local/(.+)$\", to: \"../$1\" }",
+    );
+    let set = f.manifest_predicates()[0]
+        .resolve_set(r#"{"deps": ["@local/shared", "@local/../../escape"]}"#)
+        .unwrap();
+    assert!(
+        set.contains(&PathBuf::from("packages/shared")),
+        "relative sibling target derived from regex must resolve under manifest dir: {set:?}"
+    );
+    assert_eq!(
+        set.len(),
+        1,
+        "escaping derived path must be dropped: {set:?}"
+    );
+}
+
+#[test]
+fn literal_leading_bang_entry_after_dot_slash_is_not_treated_as_negation() {
+    let f = manifest_filter(
+        "include_manifest_paths:\n  source: manifest.json\n  extract: { json: \"$.paths[*]\" }",
+    );
+    let entries = f.manifest_predicates()[0]
+        .resolve_entries_with_context(None, r#"{"paths": ["./!important", "!ignored"]}"#)
+        .unwrap();
+    let set = ManifestSet::from_entries(entries);
+    assert!(
+        set.contains_file(Path::new("!important/file.txt")),
+        "literal `./!important` must be positive, not a negation"
+    );
+    assert!(!set.contains_file(Path::new("ignored/file.txt")));
+}
+
+#[test]
+fn resolve_set_extracts_from_dotenv_properties_ini_hcl_and_xml() {
+    let dotenv = manifest_filter(
+        "include_manifest_paths:\n  source: .env\n  extract: { dotenv: \"$.SRC_DIR\" }",
+    );
+    let set = dotenv.manifest_predicates()[0]
+        .resolve_set("SRC_DIR=packages/api\n")
+        .unwrap();
+    assert!(set.contains(&PathBuf::from("packages/api")), "{set:?}");
+
+    let props = manifest_filter(
+        "include_manifest_paths:\n  source: app.properties\n  extract: { properties: \"$['src.dir']\" }",
+    );
+    let set = props.manifest_predicates()[0]
+        .resolve_set("src.dir=services/auth\n")
+        .unwrap();
+    assert!(set.contains(&PathBuf::from("services/auth")), "{set:?}");
+
+    let ini = manifest_filter(
+        "include_manifest_paths:\n  source: setup.ini\n  extract: { ini: \"$['paths']['include']\" }",
+    );
+    let set = ini.manifest_predicates()[0]
+        .resolve_set("[paths]\ninclude = libs/core\n")
+        .unwrap();
+    assert!(set.contains(&PathBuf::from("libs/core")), "{set:?}");
+
+    let hcl = manifest_filter(
+        "include_manifest_paths:\n  source: modules.hcl\n  extract: { hcl: \"$.modules[*]\" }",
+    );
+    let set = hcl.manifest_predicates()[0]
+        .resolve_set("modules = [\"infra/net\", \"infra/db\"]\n")
+        .unwrap();
+    assert!(set.contains(&PathBuf::from("infra/net")), "{set:?}");
+    assert!(set.contains(&PathBuf::from("infra/db")), "{set:?}");
+
+    let xml = manifest_filter(
+        "include_manifest_paths:\n  source: App.csproj\n  extract: { xml: \"$.Project.ItemGroup.Compile..['@Include']\" }",
+    );
+    let set = xml.manifest_predicates()[0]
+        .resolve_set("<Project><ItemGroup><Compile Include=\"src/A.cs\"/><Compile Include=\"src/B.cs\"/></ItemGroup></Project>")
+        .unwrap();
+    assert!(set.contains(&PathBuf::from("src/A.cs")), "{set:?}");
+    assert!(set.contains(&PathBuf::from("src/B.cs")), "{set:?}");
+}

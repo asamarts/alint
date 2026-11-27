@@ -87,6 +87,23 @@ ci/scripts/check-secrets-inventory.sh      # workflow secrets match documented i
 ci/scripts/dogfood.sh                      # cargo build --release + alint check on this repo
 ```
 
+All preflight checks must pass before opening a PR. The wrapper falls through on
+failure (rather than fast-exiting on the first one) so a single run shows
+the full set of things to fix instead of fix-rerun-fix-rerun. Skip a
+specific check while debugging: `PREFLIGHT_SKIP=clippy bash ci/scripts/preflight.sh`.
+
+To wire preflight into a `git push` hook so an unformatted block bounces
+locally instead of consuming a CI minute:
+
+```sh
+git config core.hooksPath ci/githooks
+```
+
+Skip the hook for one push (e.g. WIP branch): `git push --no-verify`.
+
+If clippy gates seem aggressive, that's intentional. `-D warnings` plus
+pedantic clippy keeps the codebase quiet by default.
+
 Not in `preflight.sh`: the release preflight (`release.yml`) runs these as well, and CI runs
 all but the release-only ones. Each is slower, needs the network or a tool a laptop may lack, or
 checks a release. `ci/scripts/test-release-preflight-parity.sh` fails when the release preflight
@@ -176,23 +193,6 @@ alint.org bump fails CI there.
 rule (`install-snippets-match-workspace-version` in `.alint.yml`), so any
 drift fails CI before publish.
 
-All ten must pass before opening a PR. The wrapper falls through on
-failure (rather than fast-exiting on the first one) so a single run shows
-the full set of things to fix instead of fix-rerun-fix-rerun. Skip a
-specific check while debugging: `PREFLIGHT_SKIP=clippy bash ci/scripts/preflight.sh`.
-
-To wire preflight into a `git push` hook so an unformatted block bounces
-locally instead of consuming a CI minute:
-
-```sh
-git config core.hooksPath ci/githooks
-```
-
-Skip the hook for one push (e.g. WIP branch): `git push --no-verify`.
-
-If clippy gates seem aggressive, that's intentional. `-D warnings` plus
-pedantic clippy keeps the codebase quiet by default.
-
 ### Editing the roadmap
 
 `docs/design/ROADMAP.md` is the canonical roadmap. The generated public
@@ -235,7 +235,7 @@ there before alint.org rebuilds.
 - `crates/alint/`: the CLI binary.
 - `crates/alint-bench/`: synthetic-tree generator + criterion micro-benches.
 - `crates/alint-e2e/`: full end-to-end scenarios in `scenarios/check/<family>/`.
-- `crates/alint-testkit/`: proptest strategies + shared test fixtures.
+- `crates/alint-testkit/`: versioned policy-test document model, validating hermetic runner, and fixture utilities.
 - `crates/alint-witforge-consumer/`: generated WIT plugin-contract consumer.
 - `xtask/`: meta-tooling (bench-scale, docs-export, publish-benches).
 

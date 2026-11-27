@@ -40,17 +40,17 @@ manifest, then check any downloaded asset against it:
 
 ```
 cosign verify-blob --bundle SHA256SUMS.cosign.bundle \
-  --certificate-identity-regexp '^https://github\.com/asamarts/alint/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-identity "https://github.com/asamarts/alint/.github/workflows/release.yml@refs/tags/v<version>" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   SHA256SUMS
 sha256sum --check --ignore-missing SHA256SUMS   # macOS: shasum -a 256 --check --ignore-missing SHA256SUMS
 ```
 
-**Container image signature.** cosign resolves the tag to the digest it signed:
+**Container image signature.** cosign resolves the tag to the digest it signed (pin `<version>` in `--certificate-identity` so an older signed tag cannot be replayed):
 
 ```
 cosign verify ghcr.io/asamarts/alint:<version> \
-  --certificate-identity-regexp '^https://github\.com/asamarts/alint/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-identity "https://github.com/asamarts/alint/.github/workflows/release.yml@refs/tags/v<version>" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 

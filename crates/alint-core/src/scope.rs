@@ -125,13 +125,64 @@ impl Scope {
             PathsSpec::Single(s) => Self::from_patterns(std::slice::from_ref(s)),
             PathsSpec::Many(v) => Self::from_patterns(v),
             PathsSpec::IncludeExclude { include, exclude } => {
-                let mut combined = include.clone();
-                for e in exclude {
-                    combined.push(format!("!{e}"));
-                }
-                Self::from_patterns(&combined)
+                Self::from_include_exclude(include, exclude)
             }
         }
+    }
+
+    /// Build a `Scope` from explicit `include` and `exclude` lists without
+    /// treating a leading `!` in `include` as a negation prefix.
+    fn from_include_exclude(
+        include_patterns: &[String],
+        exclude_patterns: &[String],
+    ) -> Result<Self> {
+        if exclude_patterns.is_empty()
+            && let [only] = include_patterns
+            && !only.starts_with('!')
+            && let Some(literal) = literal_pattern(only, std::path::is_separator('\\'))
+        {
+            return Ok(Self {
+                include: GlobSet::empty(),
+                exclude: GlobSet::empty(),
+                has_include: true,
+                literal: Some(literal.into_bytes().into_boxed_slice()),
+                within: None,
+                depths: None,
+                scope_filter: None,
+            });
+        }
+        let mut include = GlobSetBuilder::new();
+        let mut exclude = GlobSetBuilder::new();
+        for pattern in include_patterns {
+            include.add(compile(pattern)?);
+        }
+        for pattern in exclude_patterns {
+            exclude.add(compile(pattern)?);
+        }
+        let has_include = !include_patterns.is_empty();
+        // `include_dirs` / `include_depths` skip `!`-prefixed elements; only
+        // run them when no include pattern begins with `!` (a leading `!` in
+        // `include` is literal, so conservatively fall back to full scan).
+        let safe_for_hints = include_patterns.iter().all(|p| !p.starts_with('!'));
+        Ok(Self {
+            include: include.build().map_err(|source| Error::Glob {
+                pattern: include_patterns.join(","),
+                source,
+            })?,
+            exclude: exclude.build().map_err(|source| Error::Glob {
+                pattern: exclude_patterns.join(","),
+                source,
+            })?,
+            has_include,
+            literal: None,
+            within: safe_for_hints
+                .then(|| include_dirs(include_patterns))
+                .flatten(),
+            depths: safe_for_hints
+                .then(|| include_depths(include_patterns))
+                .flatten(),
+            scope_filter: None,
+        })
     }
 
     /// Build a `Scope` from a [`RuleSpec`] — bundles the rule's
@@ -1017,6 +1068,24 @@ mod tests {
         let idx = empty_index();
         assert!(scope.matches(Path::new("src/main.rs"), &idx));
         assert!(!scope.matches(Path::new("src/test_x.rs"), &idx));
+    }
+
+    #[test]
+    fn from_paths_spec_include_exclude_keeps_leading_bang_literal_in_include() {
+        let scope = Scope::from_paths_spec(&PathsSpec::IncludeExclude {
+            include: vec!["!README.md".into()],
+            exclude: vec![],
+        })
+        .unwrap();
+        let idx = empty_index();
+        assert!(
+            scope.matches(Path::new("!README.md"), &idx),
+            "leading `!` in `include:` must match literally, not negate"
+        );
+        assert!(
+            !scope.matches(Path::new("other.md"), &idx),
+            "leading `!` in `include:` must not turn into a match-all exclude-only scope"
+        );
     }
 
     #[test]

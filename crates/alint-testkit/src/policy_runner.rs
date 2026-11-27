@@ -552,6 +552,7 @@ pub enum TestStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct StepObservation {
     pub exit: ExpectedExit,
     pub violations: Vec<ObservedViolation>,
@@ -587,13 +588,18 @@ impl StepObservation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ObservedViolation {
     pub rule: String,
     pub level: String,
     pub path: Option<String>,
+    #[schemars(range(min = 1))]
     pub line: Option<usize>,
+    #[schemars(range(min = 1))]
     pub column: Option<usize>,
+    #[schemars(range(min = 1))]
     pub end_line: Option<usize>,
+    #[schemars(range(min = 1))]
     pub end_column: Option<usize>,
     pub message: String,
     pub is_fixable: bool,
@@ -603,39 +609,55 @@ pub struct ObservedViolation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ObservedAnalysisFailure {
     pub rule: String,
     pub kind: String,
     pub path: Option<String>,
+    #[schemars(range(min = 1))]
     pub line: Option<usize>,
+    #[schemars(range(min = 1))]
     pub column: Option<usize>,
+    #[schemars(range(min = 1))]
     pub end_line: Option<usize>,
+    #[schemars(range(min = 1))]
     pub end_column: Option<usize>,
     pub message: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ObservedNote {
     pub kind: String,
     pub path: Option<String>,
+    #[schemars(range(min = 1))]
     pub line: Option<usize>,
+    #[schemars(range(min = 1))]
     pub column: Option<usize>,
+    #[schemars(range(min = 1))]
     pub end_line: Option<usize>,
+    #[schemars(range(min = 1))]
     pub end_column: Option<usize>,
     pub message: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ObservedRelatedLocation {
     pub label: String,
     pub path: String,
+    #[schemars(range(min = 1))]
     pub line: Option<usize>,
+    #[schemars(range(min = 1))]
     pub column: Option<usize>,
+    #[schemars(range(min = 1))]
     pub end_line: Option<usize>,
+    #[schemars(range(min = 1))]
     pub end_column: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct Mismatch {
     pub step: Option<usize>,
     pub channel: MismatchChannel,

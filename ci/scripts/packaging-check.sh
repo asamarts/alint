@@ -33,8 +33,11 @@ if have node; then
   for f in npm/bin/alint.js ci/scripts/test-npm-shim.js; do
     node --check "$f" || bad "$f: node --check"
   done
-  node -e 'JSON.parse(require("fs").readFileSync("npm/package.json","utf8"))' \
-    || bad "npm/package.json: invalid JSON"
+  node -e '
+    const pkg = JSON.parse(require("fs").readFileSync("npm/package.json","utf8"));
+    if (pkg.dependencies && Object.keys(pkg.dependencies).length > 0) process.exit(1);
+    if (pkg.devDependencies && Object.keys(pkg.devDependencies).length > 0) process.exit(1);
+  ' || bad "npm/package.json: invalid JSON or unexpected dependencies/devDependencies"
   bash ci/scripts/test-npm-shim.sh || bad "npm: platform table, optionalDependencies and shim"
 fi
 
@@ -58,6 +61,8 @@ for block in blocks[1:]:
     hooks.append(hook)
 if not hooks:
     sys.exit('.pre-commit-hooks.yaml must be a non-empty list of hooks')
+cargo_toml = open('Cargo.toml', encoding='utf-8').read()
+is_virtual_workspace = '[workspace]' in cargo_toml and not re.search(r'(?m)^\[package\]\s*$', cargo_toml)
 ids = set()
 for hook in hooks:
     for key in ('id', 'name', 'entry', 'language'):
@@ -68,8 +73,19 @@ for hook in hooks:
     ids.add(hook['id'])
     if not hook['entry'].startswith('alint '):
         sys.exit(f'hook {hook["id"]!r}: entry must invoke the alint binary')
+    if is_virtual_workspace and hook['language'] == 'rust':
+        sys.exit(f'hook {hook["id"]!r}: language: rust fails on a virtual Cargo workspace (no root [package])')
+    if hook.get('always_run') == 'true' and 'types' in hook:
+        sys.exit(f'hook {hook["id"]!r}: types: is redundant when always_run: true is set')
 print(f'[packaging] .pre-commit-hooks.yaml OK ({len(hooks)} hooks)')
 PY
+fi
+
+# ── bench/Dockerfile hygiene ──────────────────────────────────────────
+if [[ -f bench/Dockerfile ]]; then
+  if ! grep -Eq '^[[:space:]]*USER[[:space:]]+[^[:space:]#]+' bench/Dockerfile || grep -Eq '^[[:space:]]*USER[[:space:]]+(root|0)\b' bench/Dockerfile; then
+    bad "bench/Dockerfile: must declare a non-root USER"
+  fi
 fi
 
 # ── Dockerfile ────────────────────────────────────────────────────────

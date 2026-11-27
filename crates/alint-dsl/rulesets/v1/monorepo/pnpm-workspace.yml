@@ -4,7 +4,8 @@
 # of `monorepo@v1` and `node@v1`. Adopt with:
 #
 #     extends:
-#       - alint://bundled/monorepo@v1
+#       - url: alint://bundled/monorepo@v1
+#         except: [monorepo-packages-have-readme]
 #       - alint://bundled/node@v1
 #       - alint://bundled/monorepo/pnpm-workspace@v1
 #

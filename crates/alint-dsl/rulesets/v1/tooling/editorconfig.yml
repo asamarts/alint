@@ -37,9 +37,9 @@ rules:
     # value beyond the file's existence.
     kind: file_content_matches
     paths: .gitattributes
-    pattern: '(?m)^\s*\*\s+text='
+    pattern: '(?m)^\s*\*\s+text(?:=|\s|$)'
     level: info
     message: >-
-      `.gitattributes` exists but has no `* text=...` line;
+      `.gitattributes` exists but has no `* text` / `* text=...` line;
       line-ending normalization is the main reason to ship a
       `.gitattributes` in the first place.

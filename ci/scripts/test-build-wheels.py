@@ -14,6 +14,7 @@ import base64
 import hashlib
 import io
 import re
+import struct
 import subprocess
 import sys
 import tarfile
@@ -37,18 +38,41 @@ CASES = [
     ("x86_64-pc-windows-msvc", True, "win_amd64", ["py3-none-win_amd64"]),
     ("aarch64-pc-windows-msvc", True, "win_arm64", ["py3-none-win_arm64"]),
 ]
+
+
+def fake_binary(os_name: str, cpu: str, tail: bytes = b"") -> bytes:
+    if os_name == "linux":
+        head = b"\x7fELF\x02\x01\x01" + b"\x00" * 11 + struct.pack("<H", {"x64": 0x3E, "arm64": 0xB7}[cpu])
+    elif os_name == "darwin":
+        head = b"\xcf\xfa\xed\xfe" + struct.pack("<I", {"x64": 0x01000007, "arm64": 0x0100000C}[cpu])
+    else:
+        head = b"MZ" + b"\x00" * 0x3A + struct.pack("<I", 0x40)
+        head += b"PE\0\0" + struct.pack("<H", {"x64": 0x8664, "arm64": 0xAA64}[cpu])
+    return head + b"\x00" * (80 - len(head)) + tail
+
+
 BINARIES = {
-    "x86_64-unknown-linux-musl": b"\x7fELF-fake-linux-" + b"\x00" * 61,
-    "x86_64-pc-windows-msvc": b"MZ-fake-windows-" + b"\x00" * 64,
-    "aarch64-pc-windows-msvc": b"MZ-fake-windows-arm64-" + b"\x00" * 58,
+    "x86_64-unknown-linux-musl": fake_binary("linux", "x64", b"-linux-x64"),
+    "x86_64-pc-windows-msvc": fake_binary("win32", "x64", b"-win-x64"),
+    "aarch64-pc-windows-msvc": fake_binary("win32", "arm64", b"-win-arm64"),
 }
 LICENSES = ("LICENSE-MIT", "LICENSE-APACHE", "NOTICE", "THIRD-PARTY-LICENSES.html")
 
 
-def make_tarball(tarball_dir: Path, target: str, is_windows: bool) -> None:
-    top = f"alint-{TAG}-{target}"
+def make_tarball(
+    tarball_dir: Path,
+    target: str,
+    is_windows: bool,
+    *,
+    tag: str = TAG,
+    binary: bytes | None = None,
+    sidecar: bool = True,
+    bin_relpath: str | None = None,
+) -> Path:
+    top = f"alint-{tag}-{target}"
     bin_leaf = "alint.exe" if is_windows else "alint"
-    tarball = tarball_dir / f"alint-{TAG}-{target}.tar.gz"
+    tarball = tarball_dir / f"alint-{tag}-{target}.tar.gz"
+    payload = BINARIES[target] if binary is None else binary
     with tarfile.open(tarball, "w:gz") as tf:
 
         def add(name: str, data: bytes, mode: int) -> None:
@@ -57,13 +81,15 @@ def make_tarball(tarball_dir: Path, target: str, is_windows: bool) -> None:
             ti.mode = mode
             tf.addfile(ti, io.BytesIO(data))
 
-        add(bin_leaf, BINARIES[target], 0o755)
+        add(bin_relpath or bin_leaf, payload, 0o755)
         for name in LICENSES:
             add(name, f"{name} text\n".encode(), 0o644)
         add("README.md", b"# alint\n\nLint repository **structure**.\n", 0o644)
         add("docs/ARCHITECTURE.md", b"arch\n", 0o644)  # non-payload member: must be ignored
-    digest = hashlib.sha256(tarball.read_bytes()).hexdigest()
-    (tarball_dir / f"{tarball.name}.sha256").write_text(f"{digest}  {tarball.name}\n")
+    if sidecar:
+        digest = hashlib.sha256(tarball.read_bytes()).hexdigest()
+        (tarball_dir / f"{tarball.name}.sha256").write_text(f"{digest}  {tarball.name}\n")
+    return tarball
 
 
 def run(tarball_dir: Path, out: Path) -> None:
@@ -147,6 +173,48 @@ def main() -> int:
             b = (out2 / f"alint-{VER}-py3-none-{compound}.whl").read_bytes()
             assert a == b, f"non-deterministic wheel: {compound}"
         print("  OK determinism: rebuilds are byte-identical")
+
+        # Fail-closed hardening tests (H4):
+        def run_one(tb_dir: Path, out_dir: Path, target: str, extra: list[str] = ()) -> subprocess.CompletedProcess:
+            return subprocess.run(
+                [sys.executable, str(SCRIPT), "--tag", TAG, "--tarball-dir", str(tb_dir),
+                 "--out", str(out_dir), "--targets", target, *extra],
+                capture_output=True, text=True,
+            )
+
+        # 1. Missing .sha256 sidecar must fail closed unless --allow-unsigned is passed.
+        t_nosha = tdp / "nosha"
+        t_nosha.mkdir()
+        make_tarball(t_nosha, "x86_64-unknown-linux-musl", False, sidecar=False)
+        r = run_one(t_nosha, tdp / "nosha-out", "x86_64-unknown-linux-musl")
+        assert r.returncode != 0 and "no .sha256 sidecar" in r.stderr, r.stderr
+        r_ok = run_one(t_nosha, tdp / "nosha-ok", "x86_64-unknown-linux-musl", ["--allow-unsigned"])
+        assert r_ok.returncode == 0, r_ok.stderr
+        print("  OK refuses missing .sha256 sidecar (unless --allow-unsigned)")
+
+        # 2. Tag-mismatched tarball is rejected.
+        t_tag = tdp / "wrongtag"
+        t_tag.mkdir()
+        make_tarball(t_tag, "x86_64-unknown-linux-musl", False, tag="v0.0.1")
+        r = run_one(t_tag, tdp / "wrongtag-out", "x86_64-unknown-linux-musl")
+        assert r.returncode != 0 and "no release tarball" in r.stderr, r.stderr
+        print("  OK refuses tag-mismatched tarball")
+
+        # 3. Wrong-arch binary header is rejected.
+        t_arch = tdp / "wrongarch"
+        t_arch.mkdir()
+        make_tarball(t_arch, "x86_64-unknown-linux-musl", False, binary=fake_binary("linux", "arm64"))
+        r = run_one(t_arch, tdp / "wrongarch-out", "x86_64-unknown-linux-musl")
+        assert r.returncode != 0 and "binary header is" in r.stderr, r.stderr
+        print("  OK refuses mismatched binary architecture header")
+
+        # 4. Nested decoy `sub/alint` without top-level binary is rejected.
+        t_decoy = tdp / "decoy"
+        t_decoy.mkdir()
+        make_tarball(t_decoy, "x86_64-unknown-linux-musl", False, bin_relpath="sub/alint")
+        r = run_one(t_decoy, tdp / "decoy-out", "x86_64-unknown-linux-musl")
+        assert r.returncode != 0 and "found inside the archive" in r.stderr, r.stderr
+        print("  OK refuses nested decoy archive member")
     print("[test-build-wheels] PASS")
     return 0
 

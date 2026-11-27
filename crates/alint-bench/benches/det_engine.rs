@@ -167,8 +167,19 @@ fn run_git(root: &Path, args: &[&str]) {
 }
 
 fn analysis_time_fixture() -> Fixture {
-    let root =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/det-trees/analysis-time");
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let target_dir = match std::env::var_os("CARGO_TARGET_DIR") {
+        Some(dir) if !dir.is_empty() => {
+            let path = PathBuf::from(dir);
+            if path.is_absolute() {
+                path
+            } else {
+                workspace_root.join(path)
+            }
+        }
+        _ => workspace_root.join("target"),
+    };
+    let root = target_dir.join("det-trees/analysis-time");
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     run_git(&root, &["init", "-q", "-b", "main"]);

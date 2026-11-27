@@ -1,0 +1,29 @@
+test_version: 1
+name: yarn-workspace accepts object-form workspaces.packages declaration
+tags: [check, bundled, yarn-workspace]
+
+given:
+  tree:
+    package.json: |
+      {
+        "name": "monorepo",
+        "private": true,
+        "workspaces": {
+          "packages": ["packages/*"],
+          "nohoist": ["**/react"]
+        }
+      }
+    packages:
+      core:
+        package.json: '{"name": "@demo/core"}'
+        README.md: "# core\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/monorepo/yarn-workspace@v1
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

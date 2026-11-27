@@ -206,7 +206,7 @@ impl<'r> Run<'r> {
                 }
             }
             CompareOrder::Numeric => {
-                if parse_finite_number(&expected).is_none() {
+                if parse_exact_decimal(&expected).is_none() {
                     let message = format!(
                         "`assert.compare.to.row`: `{}` holds {} at {}, but `order: numeric` \
                          compares finite numbers",
@@ -374,7 +374,7 @@ impl<'r> Run<'r> {
                 Some(op.matches(a.cmp(b)))
             }
             CompareOrder::Numeric => {
-                let Some(a) = parse_finite_number(lhs) else {
+                let Some(a) = parse_exact_decimal(lhs) else {
                     let cell = self.cell(lhs_row, lhs_pos);
                     let message = format!(
                         "`{lhs_opt}`: `{}` holds {} at {}, but `order: numeric` compares finite \
@@ -386,7 +386,7 @@ impl<'r> Run<'r> {
                     self.fail(Some(cell.at.resource.path().as_path()), message);
                     return None;
                 };
-                let Some(b) = parse_finite_number(rhs) else {
+                let Some(b) = parse_exact_decimal(rhs) else {
                     let (path, desc) = self.rhs_type_desc(rhs_site);
                     let message = format!(
                         "`{rhs_opt}`: {desc}, but `order: numeric` compares finite numbers"
@@ -394,8 +394,7 @@ impl<'r> Run<'r> {
                     self.fail(path, message);
                     return None;
                 };
-                let ord = a.partial_cmp(&b).unwrap_or(Ordering::Equal);
-                Some(op.matches(ord))
+                Some(op.matches(a.cmp(&b)))
             }
             CompareOrder::Semver => self.eval_compare_semver(
                 op,
@@ -518,10 +517,89 @@ impl<'r> Run<'r> {
     }
 }
 
-/// Parse a JSON/YAML/TOML numeric lexeme into a finite `f64`, supporting TOML
-/// underscore separators (`1_000`, `1_000.5`) and TOML/YAML radix integers
-/// (`0x10`, `0o755`, `0b1010`), while rejecting non-finite values (`inf`, `NaN`).
-fn parse_finite_number(scalar: &Scalar) -> Option<f64> {
+/// Canonical exact decimal representation of a finite numeric lexeme.
+/// Zero is uniquely represented as `negative: false, digits: "", exp10: 0`.
+/// Non-zero numbers store significant base-10 digits (no leading/trailing `'0'`)
+/// and `exp10` such that the value equals `(-1)^negative * 0.<digits> * 10^exp10`
+/// (i.e. `exp10` is the 1-based scientific order of magnitude: `1` -> `"1", 1`,
+/// `10` -> `"1", 2`, `0.5` -> `"5", 0`, `0.05` -> `"5", -1`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExactDecimal {
+    negative: bool,
+    digits: String,
+    exp10: i128,
+}
+
+impl ExactDecimal {
+    fn from_decimal_parts(negative: bool, sig: &str, exp10: i128) -> Self {
+        let trimmed_lead = sig.trim_start_matches('0');
+        let leading_zeros = i128::try_from(sig.len() - trimmed_lead.len()).unwrap_or(0);
+        let digits = trimmed_lead.trim_end_matches('0');
+        if digits.is_empty() {
+            Self {
+                negative: false,
+                digits: String::new(),
+                exp10: 0,
+            }
+        } else {
+            Self {
+                negative,
+                digits: digits.to_owned(),
+                exp10: exp10.saturating_sub(leading_zeros),
+            }
+        }
+    }
+}
+
+impl Ord for ExactDecimal {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let self_zero = self.digits.is_empty();
+        let other_zero = other.digits.is_empty();
+        match (self_zero, other_zero) {
+            (true, true) => return Ordering::Equal,
+            (true, false) => {
+                return if other.negative {
+                    Ordering::Greater
+                } else {
+                    Ordering::Less
+                };
+            }
+            (false, true) => {
+                return if self.negative {
+                    Ordering::Less
+                } else {
+                    Ordering::Greater
+                };
+            }
+            (false, false) => {}
+        }
+        match (self.negative, other.negative) {
+            (true, false) => Ordering::Less,
+            (false, true) => Ordering::Greater,
+            (false, false) => self
+                .exp10
+                .cmp(&other.exp10)
+                .then_with(|| self.digits.cmp(&other.digits)),
+            (true, true) => other
+                .exp10
+                .cmp(&self.exp10)
+                .then_with(|| other.digits.cmp(&self.digits)),
+        }
+    }
+}
+
+impl PartialOrd for ExactDecimal {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// Parse a JSON/YAML/TOML numeric lexeme into an exact finite [`ExactDecimal`],
+/// supporting TOML underscore separators (`1_000`, `1_000.5`) and TOML/YAML
+/// radix integers (`0x10`, `0o755`, `0b1010`), preserving full precision for
+/// integers `> 2^53` and finite exponents `>= 1e309` while rejecting non-finite
+/// values (`inf`, `NaN`).
+fn parse_exact_decimal(scalar: &Scalar) -> Option<ExactDecimal> {
     let Scalar::Number(lexeme) = scalar else {
         return None;
     };
@@ -550,16 +628,50 @@ fn parse_finite_number(scalar: &Scalar) -> Option<f64> {
                 .map(|d| (2, d))
         })
     {
-        let unsigned = u128::from_str_radix(digits, radix).ok()?;
-        #[allow(clippy::cast_precision_loss)]
-        let mut value = unsigned as f64;
-        if negative {
-            value = -value;
+        if digits.is_empty() || digits.starts_with('+') || digits.starts_with('-') {
+            return None;
         }
-        return value.is_finite().then_some(value);
+        let unsigned = u128::from_str_radix(digits, radix).ok()?;
+        let dec = unsigned.to_string();
+        let exp10 = i128::try_from(dec.len()).ok()?;
+        return Some(ExactDecimal::from_decimal_parts(negative, &dec, exp10));
     }
-    let parsed: f64 = clean.parse().ok()?;
-    parsed.is_finite().then_some(parsed)
+    let (mantissa, exp_part) = match rest.find(['e', 'E']) {
+        Some(idx) => (&rest[..idx], Some(&rest[idx + 1..])),
+        None => (rest, None),
+    };
+    let (int_part, frac_part) = match mantissa.find('.') {
+        Some(idx) => (&mantissa[..idx], &mantissa[idx + 1..]),
+        None => (mantissa, ""),
+    };
+    if (int_part.is_empty() && frac_part.is_empty())
+        || !int_part.bytes().all(|b| b.is_ascii_digit())
+        || !frac_part.bytes().all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+    let exp_offset: i128 = match exp_part {
+        Some(exp) => {
+            let (exp_neg, exp_digits) = match exp.as_bytes().first() {
+                Some(b'-') => (true, &exp[1..]),
+                Some(b'+') => (false, &exp[1..]),
+                _ => (false, exp),
+            };
+            if exp_digits.is_empty() || !exp_digits.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            let mag: i128 = exp_digits.parse().ok()?;
+            if exp_neg { mag.checked_neg()? } else { mag }
+        }
+        None => 0,
+    };
+    let mut sig = String::with_capacity(int_part.len() + frac_part.len());
+    sig.push_str(int_part);
+    sig.push_str(frac_part);
+    let exp10 = i128::try_from(int_part.len())
+        .ok()?
+        .checked_add(exp_offset)?;
+    Some(ExactDecimal::from_decimal_parts(negative, &sig, exp10))
 }
 
 fn show_operand(scalar: &Scalar, sensitive: bool, typed: bool) -> String {
@@ -567,5 +679,41 @@ fn show_operand(scalar: &Scalar, sensitive: bool, typed: bool) -> String {
         scalar.show_typed(sensitive)
     } else {
         scalar.show(sensitive)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn num(s: &str) -> ExactDecimal {
+        parse_exact_decimal(&Scalar::Number(s.into())).expect("valid finite number")
+    }
+
+    #[test]
+    fn exact_decimal_preserves_precision_above_f64_and_supports_radixes_and_large_exponents() {
+        // Integers > 2^53 (9007199254740992) must not collapse under f64 rounding.
+        assert!(num("9007199254740992") < num("9007199254740993"));
+        assert_eq!(num("0x20000000000000"), num("9007199254740992"));
+        assert_eq!(num("0o755"), num("493"));
+        assert_eq!(num("0b1010"), num("10"));
+        assert_eq!(num("1_000.5"), num("1000.50"));
+
+        // Huge finite decimals beyond f64::MAX (~1.8e308) compare accurately.
+        assert!(num("1e309") < num("2e309"));
+        assert!(num("-2e309") < num("-1e309"));
+        assert_eq!(num("-0.0"), num("0"));
+        assert_eq!(num("+0e100"), num("0.000"));
+        assert!(num("-0.001") < num("0"));
+        assert!(num("0") < num("0.001"));
+
+        // Non-finite and non-numeric forms are rejected.
+        for bad in ["inf", "+inf", "-inf", "NaN", "nan", "0x", "0x-1", "1e", ""] {
+            assert!(
+                parse_exact_decimal(&Scalar::Number(bad.into())).is_none(),
+                "{bad:?} must be rejected"
+            );
+        }
+        assert!(parse_exact_decimal(&Scalar::String("42".into())).is_none());
     }
 }

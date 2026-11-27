@@ -25,10 +25,9 @@ rules:
   - id: rust-cargo-toml-exists
     when: facts.has_rust
     kind: file_exists
-    paths: Cargo.toml
-    root_only: true
+    paths: ["Cargo.toml", "**/Cargo.toml"]
     level: error
-    message: "Rust project: Cargo.toml at the repo root is required."
+    message: "Rust project: a Cargo.toml manifest is required."
 
   - id: rust-cargo-lock-exists
     when: facts.has_rust
@@ -55,6 +54,8 @@ rules:
     when: facts.has_rust
     kind: dir_absent
     paths: "**/target"
+    scope_filter:
+      has_ancestor: Cargo.toml
     level: error
     message: "`target/` is Cargo's build dir and must never be committed."
 

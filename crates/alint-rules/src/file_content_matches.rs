@@ -90,7 +90,8 @@ impl PerFileRule for FileContentMatchesRule {
         let Ok(text) = std::str::from_utf8(bytes) else {
             return Ok(vec![
                 Violation::new("file is not valid UTF-8; cannot match regex")
-                    .with_path(std::sync::Arc::<Path>::from(path)),
+                    .with_path(std::sync::Arc::<Path>::from(path))
+                    .with_not_fixable(),
             ]);
         };
         if self.pattern.is_match(text) {
@@ -103,7 +104,9 @@ impl PerFileRule for FileContentMatchesRule {
             )
         });
         Ok(vec![
-            Violation::new(msg).with_path(std::sync::Arc::<Path>::from(path)),
+            Violation::new(msg)
+                .with_path(std::sync::Arc::<Path>::from(path))
+                .with_not_fixable_if(crate::io::looks_binary(bytes)),
         ])
     }
 }
@@ -274,5 +277,28 @@ mod tests {
             "message should mention UTF-8: {}",
             v[0].message
         );
+        assert!(
+            v[0].not_fixable,
+            "non-UTF-8 finding must be marked not_fixable"
+        );
+    }
+
+    #[test]
+    fn binary_utf8_finding_is_marked_not_fixable_when_fixer_attached() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_content_matches\n\
+             paths: \"a.bin\"\n\
+             pattern: \"HEADER\"\n\
+             fix:\n  \
+               file_append:\n    \
+                 content: \"HEADER\\n\"\n\
+             level: error\n",
+        );
+        let rule = build(&spec).unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("a.bin", b"valid utf8\0with nul")]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(v.len(), 1);
+        assert!(v[0].not_fixable, "binary file must be marked not_fixable");
     }
 }

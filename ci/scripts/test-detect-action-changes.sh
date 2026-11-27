@@ -101,6 +101,23 @@ expect_routes "the plugin contract WIT reaches the rust and shell pipelines" wit
 expect_routes "the plugin contract README reaches the rust pipeline" wit/README.md rust=true
 expect_routes "a crate change reaches shell tests" crates/alint/src/main.rs shell=true
 
+# M6: when git diff fails (missing/invalid base SHA), ALL 9 pipelines must enable.
+: > "$TMP_ROOT/github_output"
+GH_EVENT=pull_request PR_BASE_SHA="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" \
+  GITHUB_OUTPUT="$TMP_ROOT/github_output" bash ci/scripts/detect-changes.sh >/dev/null
+fallback_missing=()
+for flag in rust docs bench examples editors supply_chain packaging shell relation; do
+  grep -qxF "${flag}=true" "$TMP_ROOT/github_output" || fallback_missing+=("$flag")
+done
+if [[ ${#fallback_missing[@]} -eq 0 ]]; then
+  echo "  ok: diff failure fallback enables all 9 pipelines"
+  pass=$((pass + 1))
+else
+  echo "  FAIL: diff failure fallback missed pipelines: ${fallback_missing[*]}" >&2
+  cat "$TMP_ROOT/github_output" >&2
+  fail=$((fail + 1))
+fi
+
 # Static half: the jobs those flags feed must gate on them.
 python3 - "$REPO_ROOT/.github/workflows/ci.yml" <<'PY' || fail=$((fail + 1))
 import re

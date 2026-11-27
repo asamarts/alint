@@ -130,6 +130,7 @@ fn glob_has_path_separator(pattern: &str) -> bool {
     false
 }
 
+#[allow(clippy::too_many_lines)]
 fn translate_glob(
     pattern: &str,
     output: &mut String,
@@ -206,10 +207,40 @@ fn translate_glob(
                 };
                 let whole = &rest[..=end];
                 let inner = &rest[1..end];
-                if let Some((start, finish)) = parse_numeric_range(inner) {
-                    let capture = numeric_ranges.len() + 1;
-                    output.push_str("([+-]?(?:0|[1-9][0-9]*))");
-                    numeric_ranges.push((capture, start.min(finish)..=start.max(finish)));
+                if let Some((start, finish, pad_width)) = parse_numeric_range(inner) {
+                    let lo = start.min(finish);
+                    let hi = start.max(finish);
+                    // Expand bounded ranges directly into an alternation so
+                    // adjacent wildcards (e.g. `[file{1..3}*.txt]` vs
+                    // `file25.txt`) backtrack cleanly instead of greedily
+                    // consuming trailing digits, and zero-padded endpoints
+                    // (`{01..10}`) match padded numbers (`02`).
+                    if hi.saturating_sub(lo) <= 1000 {
+                        output.push_str("(?:");
+                        let mut first = true;
+                        for n in lo..=hi {
+                            let plain = n.to_string();
+                            if !first {
+                                output.push('|');
+                            }
+                            first = false;
+                            output.push_str(&regex::escape(&plain));
+                            if let Some(width) = pad_width
+                                && n >= 0
+                            {
+                                let padded = format!("{n:0width$}");
+                                if padded != plain {
+                                    output.push('|');
+                                    output.push_str(&regex::escape(&padded));
+                                }
+                            }
+                        }
+                        output.push(')');
+                    } else {
+                        let capture = numeric_ranges.len() + 1;
+                        output.push_str("([+-]?[0-9]+?)");
+                        numeric_ranges.push((capture, lo..=hi));
+                    }
                 } else {
                     let alternatives = split_alternatives(inner);
                     if alternatives.len() == 1 {
@@ -295,13 +326,28 @@ fn split_alternatives(text: &str) -> Vec<&str> {
     parts
 }
 
-fn parse_numeric_range(text: &str) -> Option<(i64, i64)> {
-    let (start, end) = text.split_once("..")?;
-    if end.contains("..") {
+fn parse_numeric_range(text: &str) -> Option<(i64, i64, Option<usize>)> {
+    let (start_str, end_str) = text.split_once("..")?;
+    if end_str.contains("..") {
         return None;
     }
-    let (start, end) = (start.parse().ok()?, end.parse().ok()?);
-    (start < end).then_some((start, end))
+    let (start, end): (i64, i64) = (start_str.parse().ok()?, end_str.parse().ok()?);
+    if start >= end {
+        return None;
+    }
+    let has_leading_zero = |s: &str| {
+        let digits = s.strip_prefix(['+', '-']).unwrap_or(s);
+        digits.len() > 1 && digits.starts_with('0')
+    };
+    let pad_width = (has_leading_zero(start_str) || has_leading_zero(end_str)).then(|| {
+        let a = start_str
+            .strip_prefix(['+', '-'])
+            .unwrap_or(start_str)
+            .len();
+        let b = end_str.strip_prefix(['+', '-']).unwrap_or(end_str).len();
+        a.max(b)
+    });
+    Some((start, end, pad_width))
 }
 
 #[derive(Debug)]
@@ -315,6 +361,10 @@ pub struct EditorconfigConformsRule {
 
 impl Rule for EditorconfigConformsRule {
     alint_core::rule_common_impl!();
+
+    fn path_scope(&self) -> Option<&Scope> {
+        Some(&self.scope)
+    }
 
     fn requires_full_index(&self) -> bool {
         // A policy change can invalidate every unchanged selected file.
@@ -1261,7 +1311,7 @@ fn final_newline_range(text: &str) -> Option<SourceRange> {
 }
 
 pub static META: alint_core::KindMeta = alint_core::KindMeta {
-    dispatch: alint_core::DispatchClass::FullIndex { path_scope: false },
+    dispatch: alint_core::DispatchClass::FullIndex { path_scope: true },
     paths: alint_core::PathsSupport::Required,
     scope_filter: alint_core::ScopeFilterSupport::Full,
     git_tracked_only: alint_core::GitTrackedSupport::None,
@@ -1634,6 +1684,49 @@ mod tests {
         assert_eq!(
             violations[0].analysis_failure_kind(),
             Some(AnalysisFailureKind::ResourceRead)
+        );
+    }
+
+    #[test]
+    fn numeric_range_backtracks_and_supports_zero_padding() {
+        let policy = "root = true\n\
+                      [file{1..3}*.txt]\n\
+                      indent_style = space\n\
+                      [pad{01..10}.txt]\n\
+                      indent_style = space\n";
+        let (tmp, index) = tempdir_with_files(&[
+            (".editorconfig", policy.as_bytes()),
+            ("file25.txt", b"\tbad\n"),
+            ("pad02.txt", b"\tbad\n"),
+            ("pad11.txt", b"\tignored\n"),
+        ]);
+        let violations = rule().evaluate(&ctx(tmp.path(), &index)).unwrap();
+        let paths: Vec<_> = violations
+            .iter()
+            .filter_map(|v| v.path.as_deref())
+            .collect();
+        assert_eq!(
+            paths,
+            vec![Path::new("file25.txt"), Path::new("pad02.txt")],
+            "{violations:?}"
+        );
+    }
+
+    #[test]
+    fn exposes_path_scope_for_engine_manifest_and_changed_resolution() {
+        let r = build(&spec_yaml(
+            "id: ec\n\
+             kind: editorconfig_conforms\n\
+             paths: \"src/**/*.txt\"\n\
+             scope_filter:\n  \
+               has_ancestor: Cargo.toml\n\
+             level: error\n",
+        ))
+        .unwrap();
+        assert!(r.path_scope().is_some());
+        assert_eq!(
+            META.dispatch,
+            alint_core::DispatchClass::FullIndex { path_scope: true }
         );
     }
 }

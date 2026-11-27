@@ -69,9 +69,14 @@ fn render_human(proposals: &[Proposal], opts: &RunOptions, out: &mut dyn Write) 
         // semantics); medium maps to the cyan `info` style; low
         // is dimmed since it's the most uncertain.
         let (glyph, conf_style) = match p.confidence {
-            Confidence::High => ("✓", style::SUCCESS),
-            Confidence::Medium => ("·", style::INFO),
+            Confidence::High => (opts.glyphs.success, style::SUCCESS),
+            Confidence::Medium => (opts.glyphs.bullet, style::INFO),
             Confidence::Low => ("?", style::DIM),
+        };
+        let tree_marker = if opts.glyphs.bullet.is_ascii() {
+            "|-"
+        } else {
+            "└─"
         };
         writeln!(
             out,
@@ -92,7 +97,7 @@ fn render_human(proposals: &[Proposal], opts: &RunOptions, out: &mut dyn Write) 
                 let (first, rest) = ev_lines
                     .split_first()
                     .map_or(("", &[][..]), |(f, r)| (f.as_str(), r));
-                writeln!(out, "      {dim}└─{dim:#} {first}")?;
+                writeln!(out, "      {dim}{tree_marker}{dim:#} {first}")?;
                 for line in rest {
                     writeln!(out, "         {line}")?;
                 }
@@ -294,6 +299,9 @@ mod tests {
             explain,
             quiet: false,
             width: None,
+            no_gitignore: false,
+            config_path: None,
+            glyphs: alint_output::GlyphSet::UNICODE,
         }
     }
 

@@ -135,19 +135,35 @@ fn run_bounded_in(
     // `None`: the timeout is too large to represent, i.e. no deadline.
     let deadline = Instant::now().checked_add(timeout);
     loop {
+        // On Unix in grouped mode, probe exit WITHOUT reaping (`WNOWAIT`) first
+        // so the child stays a zombie and pins its PID/PGID in the kernel while
+        // we wait up to `LEFTOVER_PROBE` for pipe EOF and (if needed) kill the
+        // process group. Reaping before `kill_group` would release the PGID and
+        // risk signalling an unrelated recycled process group.
+        if grouped && child_exited_unreaped(child.id()) {
+            let probe = Instant::now() + LEFTOVER_PROBE;
+            if !(out.wait_eof(probe) && err.wait_eof(probe)) {
+                kill_group(child.id());
+            }
+            match child.wait() {
+                Ok(status) => {
+                    let grace = Instant::now() + READER_GRACE;
+                    return RunOutcome::Exited {
+                        status,
+                        stdout: out.finish(grace),
+                        stderr: err.finish(grace),
+                    };
+                }
+                Err(e) => {
+                    let grace = Instant::now() + READER_GRACE;
+                    let _ = out.finish(grace);
+                    let _ = err.finish(grace);
+                    return RunOutcome::SpawnError(e);
+                }
+            }
+        }
         match child.try_wait() {
             Ok(Some(status)) => {
-                if grouped {
-                    // A leftover descendant (`sh -c "sleep 100 & echo hi"`)
-                    // holds a pipe open: kill the rest of the group so it
-                    // neither outlives the run nor pins the reader threads.
-                    // The pgid cannot have been recycled: the live pipe holder
-                    // keeps the group (and so the id) allocated.
-                    let probe = Instant::now() + LEFTOVER_PROBE;
-                    if !(out.wait_eof(probe) && err.wait_eof(probe)) {
-                        kill_group(child.id());
-                    }
-                }
                 let grace = Instant::now() + READER_GRACE;
                 return RunOutcome::Exited {
                     status,
@@ -176,6 +192,30 @@ fn run_bounded_in(
     }
 }
 
+/// Whether child `pid` has exited while still un-reaped (Unix; always `false`
+/// elsewhere so the caller falls through to `child.try_wait()`).
+#[cfg(unix)]
+fn child_exited_unreaped(pid: u32) -> bool {
+    let Ok(raw) = i32::try_from(pid) else {
+        return false;
+    };
+    let Some(pid) = rustix::process::Pid::from_raw(raw) else {
+        return false;
+    };
+    rustix::process::waitid(
+        rustix::process::WaitId::Pid(pid),
+        rustix::process::WaitIdOptions::EXITED
+            | rustix::process::WaitIdOptions::NOHANG
+            | rustix::process::WaitIdOptions::NOWAIT,
+    )
+    .is_ok_and(|status| status.is_some())
+}
+
+#[cfg(not(unix))]
+fn child_exited_unreaped(_pid: u32) -> bool {
+    false
+}
+
 /// Kill the child (with its whole process group in grouped mode), then reap it.
 fn kill_tree(child: &mut Child, grouped: bool) {
     if grouped {
@@ -189,17 +229,14 @@ fn kill_tree(child: &mut Child, grouped: bool) {
 fn kill_group(pgid: u32) {
     #[cfg(unix)]
     {
-        // `process_group(0)` made the pgid equal to the child's pid. std has no
-        // killpg and the workspace forbids `unsafe`, so signal the group through
-        // the POSIX `kill` utility. Best-effort: if it is unavailable the direct
-        // child is still killed by `kill_tree` and the bounded reader join still
-        // caps the wait.
-        let _ = Command::new("kill")
-            .args(["-s", "KILL", "--", &format!("-{pgid}")])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+        // `process_group(0)` made the pgid equal to the child's pid. Signal the
+        // group directly via `rustix` (zero unsafe, no `/bin/kill` subprocess
+        // exec latency or PATH dependence).
+        if let Ok(raw) = i32::try_from(pgid)
+            && let Some(pid) = rustix::process::Pid::from_raw(raw)
+        {
+            let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+        }
     }
     #[cfg(not(unix))]
     let _ = pgid;

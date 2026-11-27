@@ -1228,7 +1228,7 @@ pub(crate) fn load_recursive(
     enter_extends_chain(&mut state.visiting, &canonical, chain_display)?;
 
     let mut config = read_local_config(&canonical, &display, state, opts, context)?;
-    refuse_out_of_root(is_top, &config.allow_out_of_root, &display, opts)?;
+    refuse_out_of_root(is_top, config.allow_out_of_root.as_ref(), &display, opts)?;
 
     // W2 (auto-fix.md 5.5): `trusted_extends:` is a top-level authority. An is_top
     // config (the user's own `.alint.yml` or a `.alint.d/` drop-in) owns the
@@ -1275,8 +1275,8 @@ pub(crate) fn load_recursive(
     // hangs, a big file is slurped, host paths become an existence oracle)
     // before the rejection can fire. Without `is_top` the reject is one level
     // too late.
-    let confine = match (&config.allow_out_of_root, is_top) {
-        (AllowOutOfRoot::All, true) => None,
+    let confine = match (config.allow_out_of_root.as_ref(), is_top) {
+        (Some(AllowOutOfRoot::All), true) => None,
         _ => confine,
     };
 
@@ -1506,6 +1506,7 @@ fn read_local_config(
         &context.origin(display),
     );
     if let Ok(config) = &mut parsed {
+        reject_duplicate_ids_in_source(config, display)?;
         state.environment_values.extend(&config.environment_values);
         validate_source_compatibility(
             config,
@@ -1533,11 +1534,14 @@ fn read_local_config(
 /// and write outside the repository.
 fn refuse_out_of_root(
     is_top: bool,
-    allow: &alint_core::AllowOutOfRoot,
+    allow: Option<&alint_core::AllowOutOfRoot>,
     display: &str,
     opts: &LoadOptions<'_>,
 ) -> Result<()> {
-    if is_top && opts.out_of_root_policy == crate::OutOfRootPolicy::Deny && !allow.is_confined() {
+    if is_top
+        && opts.out_of_root_policy == crate::OutOfRootPolicy::Deny
+        && allow.is_some_and(|a| !a.is_confined())
+    {
         return Err(Error::Other(format!(
             "{display}: `allow_out_of_root:` lets a config read and write outside the \
              repository; an untrusted load (`--untrusted`, an editor workspace that is not \
@@ -1885,8 +1889,8 @@ fn load_remote(
         )));
     };
     let source = display_override.map_or_else(|| remote_source_display(&url), str::to_owned);
-    state.remote_source(&sri.encoded(), |state| {
-        parse_remote(&url, &sri, &source, opts, &mut state.visiting)
+    state.remote_source(&sri.encoded(), |_state| {
+        parse_remote(&url, &sri, &source, opts)
     })
 }
 
@@ -1895,7 +1899,6 @@ fn parse_remote(
     sri: &extends::Sri,
     source: &str,
     opts: &LoadOptions<'_>,
-    visiting: &mut std::collections::HashSet<PathBuf>,
 ) -> Result<RawConfig> {
     let cache = match opts.cache.clone() {
         Some(c) => c,
@@ -1953,14 +1956,80 @@ fn parse_remote(
         other => other,
     })?;
     crate::reject_ambiguous_yaml_in(&config, source)?;
+    reject_duplicate_ids_in_source(&config, source)?;
     config.source_size = source_size(body_str, expanded);
-    // Cycle guard token for the URL itself so a self-referencing
-    // fetched config can't loop.
-    let token = std::path::PathBuf::from(format!("remote://{}", sri.encoded()));
-    if !visiting.insert(token.clone()) {
-        return Err(Error::Other(format!("cycle on remote extends: {source}")));
+    Ok(config)
+}
+
+/// Reject duplicate `rule.id`, `template.id`, or `fact.id` declared twice in
+/// the same config file before cross-file `Merger::push` can silently merge
+/// them.
+pub(crate) fn reject_duplicate_ids_in_source(config: &RawConfig, source: &str) -> Result<()> {
+    let mut seen_rules = std::collections::HashSet::with_capacity(config.rules.len());
+    for rule in &config.rules {
+        if let Some(id) = rule.get("id").and_then(ayaml::Value::as_str)
+            && !seen_rules.insert(id)
+        {
+            return Err(Error::rule_config(
+                id,
+                format!("duplicate rule id in config ({source})"),
+            ));
+        }
     }
-    visiting.remove(&token);
+    let mut seen_templates = std::collections::HashSet::with_capacity(config.templates.len());
+    for template in &config.templates {
+        if let Some(id) = template.get("id").and_then(ayaml::Value::as_str)
+            && !seen_templates.insert(id)
+        {
+            return Err(Error::Other(format!(
+                "{source}: duplicate template id {id:?} in config"
+            )));
+        }
+    }
+    let mut seen_facts = std::collections::HashSet::with_capacity(config.facts.len());
+    for fact in &config.facts {
+        if !seen_facts.insert(fact.id.as_str()) {
+            return Err(Error::Other(format!(
+                "{source}: duplicate fact id {:?} in config",
+                fact.id
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Parse a nested `.alint.yml` without interpolating host environment values.
+/// Any `{{env.*}}` reference is refused because nested configs are untrusted.
+pub(crate) fn parse_nested_config_without_environment(
+    contents: &str,
+    source_path: &Path,
+    origin: &crate::v2::Origin<'_>,
+) -> Result<RawConfig> {
+    let source = origin.display;
+    let text = crate::config_text(contents, source)?;
+    let expanded = reject_yaml_bombs(text, source)?;
+    let document = crate::v2::read_document(text, origin)?;
+    if let Some(doc) = &document {
+        if value_reads_environment(doc) {
+            return Err(Error::Other(format!(
+                "nested config {source} uses environment interpolation (`{{{{env.*}}}}`); \
+                 nested configs are untrusted and may not read the environment"
+            )));
+        }
+        reject_nonliteral_requirement_in_value(text, source, doc)?;
+    }
+    crate::v2::dispatch(document.as_ref(), text, origin)?;
+    let decoded = deserialize_raw_config(text, source);
+    let mut config = decoded.map_err(|error| match error {
+        Error::Yaml(error) => Error::Other(format!(
+            "{}: YAML parse error: {error}",
+            display_path(source_path)
+        )),
+        other => other,
+    })?;
+    crate::reject_ambiguous_yaml_in(&config, source)?;
+    reject_duplicate_ids_in_source(&config, source)?;
+    config.source_size = source_size(text, expanded);
     Ok(config)
 }
 
@@ -1985,7 +2054,13 @@ fn gate_extended_source(
     reject_spawning_templates_in(&parent.templates, url, catalog)?;
     crate::reject_spawning_fix_op_templates_in(&parent.templates, url, catalog)?;
     crate::reject_fix_promotion_templates_in(&parent.templates, url)?;
-    reject_allow_out_of_root_in(&parent.allow_out_of_root, url)?;
+    reject_allow_out_of_root_in(
+        parent
+            .allow_out_of_root
+            .as_ref()
+            .unwrap_or(&AllowOutOfRoot::Confined),
+        url,
+    )?;
     reject_baseline_in(&parent.baseline, url)?;
     reject_limits_in(&parent.limits, url)?;
     // A ruleset may not allowlist ITSELF into auto-applying content fixers;

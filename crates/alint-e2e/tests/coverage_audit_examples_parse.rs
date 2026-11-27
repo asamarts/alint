@@ -102,13 +102,9 @@ fn every_examples_alint_yml_parses_and_builds() {
             }
         };
 
-        // Step 2: build every rule via the registry. This is where
-        // the schema-level pitfalls in `CONFIG-AUTHORING.md` surface
-        // — `unknown field`, `missing field`, type mismatches, etc.
+        // Step 2: build every rule via the registry (including `level: off`
+        // rules so disabled example rules cannot hide schema or option errors).
         for spec in &config.rules {
-            if matches!(spec.level, alint_core::Level::Off) {
-                continue;
-            }
             if let Err(e) = registry.build(spec) {
                 failures.push(format!(
                     "{case_study}: building rule {:?} failed — {e}\n  \
@@ -380,5 +376,101 @@ fn known_misfiring_example_rules_stay_retired() {
         found.is_empty(),
         "known-misfiring example rules were reintroduced without repaired semantics: {}",
         found.join(", "),
+    );
+}
+
+#[test]
+fn every_shipped_config_and_bundled_ruleset_validates_against_json_schema() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    let v1_schema: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(root.join("schemas/v1/config.json")).unwrap())
+            .unwrap();
+    let v2_schema: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(root.join("schemas/v2/config.json")).unwrap())
+            .unwrap();
+    let v1_validator = jsonschema::validator_for(&v1_schema).expect("v1 schema compiles");
+    let v2_validator = jsonschema::validator_for(&v2_schema).expect("v2 schema compiles");
+
+    let mut targets: Vec<PathBuf> = vec![
+        root.join(".alint.yml"),
+        root.join("demo/fixture/.alint.yml"),
+    ];
+    for entry in fs::read_dir(root.join("examples")).unwrap().flatten() {
+        let cfg = entry.path().join(".alint.yml");
+        if cfg.is_file() {
+            targets.push(cfg);
+        }
+    }
+    let mut stack = vec![root.join("crates/alint-dsl/rulesets")];
+    while let Some(dir) = stack.pop() {
+        for entry in fs::read_dir(&dir).unwrap().flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if p.extension().and_then(|e| e.to_str()) == Some("yml") {
+                targets.push(p);
+            }
+        }
+    }
+    targets.sort();
+
+    let mut failures = Vec::new();
+    for path in &targets {
+        let text = fs::read_to_string(path).unwrap();
+        let json: serde_json::Value = alint_core::yaml::from_str(&text)
+            .unwrap_or_else(|e| panic!("parse {}: {e}", path.display()));
+        let version = json
+            .get("version")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(1);
+        let validator = if version == 2 {
+            &v2_validator
+        } else {
+            &v1_validator
+        };
+        for err in validator.iter_errors(&json) {
+            failures.push(format!(
+                "{}: {err} at {}",
+                path.strip_prefix(root).unwrap_or(path).display(),
+                err.instance_path()
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} JSON Schema validation failure(s) across shipped configs/rulesets:\n  - {}",
+        failures.len(),
+        failures.join("\n  - "),
+    );
+}
+
+#[test]
+fn examples_readme_rule_counts_match_facts_json() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    let facts: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(root.join("facts.json")).unwrap()).unwrap();
+    let expected = facts["example_rule_counts"].as_object().unwrap();
+    let readme = fs::read_to_string(root.join("examples/README.md")).unwrap();
+
+    let mut mismatches = Vec::new();
+    for (name, count) in expected {
+        let want = count.as_u64().unwrap();
+        let needle = format!("[`{name}/`]({name}/) ({want} rules)");
+        if !readme.contains(&needle) {
+            mismatches.push(format!("{name}: expected `{needle}` in examples/README.md"));
+        }
+    }
+    assert!(
+        mismatches.is_empty(),
+        "examples/README.md rule counts drifted from facts.json:\n  - {}",
+        mismatches.join("\n  - "),
     );
 }

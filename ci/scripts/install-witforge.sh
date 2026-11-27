@@ -19,7 +19,7 @@ fi
 root=$1
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 version="$(bash "$REPO_ROOT/ci/scripts/witforge-consumer.sh" --print-version)"
-cargo install witforge-cli --version "$version" --locked --root "$root"
+RUSTFLAGS='' cargo install witforge-cli --version "$version" --locked --root "$root"
 installed="$("$root/bin/witforge" --version)"
 if [[ "$installed" != "witforge ${version}" ]]; then
   echo "::error title=witforge install::expected witforge ${version}, installed: ${installed}" >&2

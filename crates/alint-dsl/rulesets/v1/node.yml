@@ -26,10 +26,9 @@ rules:
   - id: node-package-json-exists
     when: facts.has_node
     kind: file_exists
-    paths: package.json
-    root_only: true
+    paths: ["package.json", "**/package.json"]
     level: error
-    message: "Node project: package.json at the root is required."
+    message: "Node project: a package.json manifest is required."
 
   - id: node-has-lockfile
     when: facts.has_node
@@ -90,7 +89,11 @@ rules:
   - id: node-sources-final-newline
     when: facts.has_node
     kind: final_newline
-    paths: ["src/**/*.{js,jsx,ts,tsx,mjs,cjs}", "lib/**/*.{js,jsx,ts,tsx,mjs,cjs}"]
+    paths:
+      - "src/**/*.{js,jsx,ts,tsx,mjs,cjs}"
+      - "lib/**/*.{js,jsx,ts,tsx,mjs,cjs}"
+      - "**/src/**/*.{js,jsx,ts,tsx,mjs,cjs}"
+      - "**/lib/**/*.{js,jsx,ts,tsx,mjs,cjs}"
     scope_filter:
       has_ancestor: package.json
     level: info
@@ -100,7 +103,11 @@ rules:
   - id: node-sources-no-trailing-whitespace
     when: facts.has_node
     kind: no_trailing_whitespace
-    paths: ["src/**/*.{js,jsx,ts,tsx,mjs,cjs}", "lib/**/*.{js,jsx,ts,tsx,mjs,cjs}"]
+    paths:
+      - "src/**/*.{js,jsx,ts,tsx,mjs,cjs}"
+      - "lib/**/*.{js,jsx,ts,tsx,mjs,cjs}"
+      - "**/src/**/*.{js,jsx,ts,tsx,mjs,cjs}"
+      - "**/lib/**/*.{js,jsx,ts,tsx,mjs,cjs}"
     scope_filter:
       has_ancestor: package.json
     level: info
@@ -110,7 +117,11 @@ rules:
   - id: node-sources-no-bidi
     when: facts.has_node
     kind: no_bidi_controls
-    paths: ["src/**/*.{js,jsx,ts,tsx,mjs,cjs}", "lib/**/*.{js,jsx,ts,tsx,mjs,cjs}"]
+    paths:
+      - "src/**/*.{js,jsx,ts,tsx,mjs,cjs}"
+      - "lib/**/*.{js,jsx,ts,tsx,mjs,cjs}"
+      - "**/src/**/*.{js,jsx,ts,tsx,mjs,cjs}"
+      - "**/lib/**/*.{js,jsx,ts,tsx,mjs,cjs}"
     scope_filter:
       has_ancestor: package.json
     level: error

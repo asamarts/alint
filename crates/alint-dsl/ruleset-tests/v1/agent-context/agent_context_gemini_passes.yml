@@ -1,0 +1,30 @@
+test_version: 1
+name: agent-context ruleset accepts GEMINI.md without recommending another context file
+tags: [check, extends, bundled, agent-context, passing]
+
+given:
+  tree:
+    GEMINI.md: |
+      # Project agent context
+
+      Build: cargo build
+      Test: cargo test
+      Lint: cargo clippy
+
+      ## Layout
+
+      Sources live under `src/main.rs`.
+      Keep modules small and focused.
+      Write deterministic unit tests.
+    src:
+      main.rs: "fn main() {}\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/agent-context@v1
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

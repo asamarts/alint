@@ -99,7 +99,11 @@ pub(crate) fn run(options: &RunOptions<'_>, cli: &Cli) -> Result<ExitCode> {
                 test,
                 snapshot_target: None,
             }),
-            Err(record) => invalid.push(*record),
+            Err((record, tags)) => {
+                if invalid_selected(&record, tags.as_deref(), options.tags, options.filter) {
+                    invalid.push(*record);
+                }
+            }
         }
     }
 
@@ -520,38 +524,71 @@ fn read_policy_test_yaml(path: &Path) -> std::io::Result<String> {
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
 }
 
-fn parse_test(source: &DiscoveredTest) -> Result<PolicyTest, Box<PolicyTestRecord>> {
+fn parse_test(
+    source: &DiscoveredTest,
+) -> Result<PolicyTest, (Box<PolicyTestRecord>, Option<Vec<String>>)> {
     let owned;
     let yaml = if let Some(yaml) = source.yaml.as_deref() {
         yaml
     } else {
         owned = read_policy_test_yaml(&source.path).map_err(|error| {
-            Box::new(PolicyTestRecord::invalid(
-                source.source.clone(),
+            (
+                Box::new(PolicyTestRecord::invalid(
+                    source.source.clone(),
+                    None,
+                    vec![PolicyTestIssue::new("read_error", error.to_string())],
+                )),
                 None,
-                vec![PolicyTestIssue::new("read_error", error.to_string())],
-            ))
+            )
         })?;
         &owned
     };
     let test = PolicyTest::from_yaml(yaml).map_err(|error| {
-        Box::new(PolicyTestRecord::invalid(
-            source.source.clone(),
+        (
+            Box::new(PolicyTestRecord::invalid(
+                source.source.clone(),
+                None,
+                vec![PolicyTestIssue::new("parse_error", error.to_string())],
+            )),
             None,
-            vec![PolicyTestIssue::new("parse_error", error.to_string())],
-        ))
+        )
     })?;
     if let Err(diagnostics) = test.validate() {
-        return Err(Box::new(PolicyTestRecord::invalid(
-            source.source.clone(),
-            Some(&test),
-            diagnostics
-                .iter()
-                .map(PolicyTestIssue::from_diagnostic)
-                .collect(),
-        )));
+        let tags = test.tags.clone();
+        return Err((
+            Box::new(PolicyTestRecord::invalid(
+                source.source.clone(),
+                Some(&test),
+                diagnostics
+                    .iter()
+                    .map(PolicyTestIssue::from_diagnostic)
+                    .collect(),
+            )),
+            Some(tags),
+        ));
     }
     Ok(test)
+}
+
+fn invalid_selected(
+    record: &PolicyTestRecord,
+    parsed_tags: Option<&[String]>,
+    tags: &[String],
+    filter: Option<&str>,
+) -> bool {
+    let tag_ok = if tags.is_empty() {
+        true
+    } else if let Some(parsed_tags) = parsed_tags {
+        tags.iter()
+            .all(|tag| parsed_tags.iter().any(|candidate| candidate == tag))
+    } else {
+        // An unparseable test could not declare any tags; skip it when `--tag`
+        // narrows selection to tagged tests.
+        false
+    };
+    let filter_ok =
+        filter.is_none_or(|filter| record.source.contains(filter) || record.name.contains(filter));
+    tag_ok && filter_ok
 }
 
 fn selected(candidate: &SelectedTest, tags: &[String], filter: Option<&str>) -> bool {

@@ -112,10 +112,50 @@ fn local_extends_target_is_interpolated() {
 }
 
 #[test]
-fn nested_config_is_interpolated() {
-    // Regression for the nested-config bypass: a sub-config discovered
-    // via `nested_configs: true` must get the same interpolation as
-    // the root config.
+fn nested_config_template_vars_expand_while_env_interpolation_is_rejected() {
+    // Nested configs are untrusted and must NOT read the host environment
+    // (`{{env.*}}`, tested in `nested_config_rejects_env_interpolation`),
+    // while non-env template variable expansion (`extends_template:` +
+    // `{{vars.*}}`) still works cleanly inside a nested config.
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join(".alint.yml"),
+        "version: 1\n\
+         nested_configs: true\n\
+         templates:\n  \
+         - id: dir-file\n    \
+           kind: file_exists\n    \
+           paths: \"{{vars.nested_dir}}/Y\"\n    \
+           level: error\n\
+         rules: []\n",
+    )
+    .unwrap();
+    let sub = tmp.path().join("pkg");
+    std::fs::create_dir_all(&sub).unwrap();
+    std::fs::write(
+        sub.join(".alint.yml"),
+        "version: 1\n\
+         rules:\n  \
+         - id: nested-spdx\n    \
+           extends_template: dir-file\n    \
+           vars:\n      \
+             nested_dir: nested-src\n",
+    )
+    .unwrap();
+    let config = support::load(&tmp.path().join(".alint.yml")).expect("load");
+    let expanded = config
+        .rules
+        .iter()
+        .any(|r| format!("{:?}", r.paths).contains("pkg/nested-src/Y"));
+    assert!(
+        expanded,
+        "nested config template `{{vars.nested_dir}}` was not expanded and re-rooted: {:?}",
+        config.rules
+    );
+}
+
+#[test]
+fn nested_config_rejects_env_interpolation() {
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(
         tmp.path().join(".alint.yml"),
@@ -128,20 +168,18 @@ fn nested_config_is_interpolated() {
         sub.join(".alint.yml"),
         "version: 1\n\
          rules:\n  \
-         - id: nested-spdx\n    \
+         - id: nested-env\n    \
            kind: file_exists\n    \
            paths: \"{{env.ALINT_TEST_DIR | default('nested-src')}}/Y\"\n    \
            level: error\n",
     )
     .unwrap();
-    let config = support::load(&tmp.path().join(".alint.yml")).expect("load");
-    let interpolated = config
-        .rules
-        .iter()
-        .any(|r| format!("{:?}", r.paths).contains("nested-src"));
+    let err = support::load(&tmp.path().join(".alint.yml"))
+        .expect_err("nested config must reject {{env.*}}")
+        .to_string();
     assert!(
-        interpolated,
-        "nested config `{{env.X}}` was not interpolated"
+        err.contains("environment interpolation") || err.contains("{{env.*}}"),
+        "unexpected error: {err}"
     );
 }
 

@@ -1,0 +1,29 @@
+test_version: 1
+name: dotnet ruleset flags Nullable disable in multi-PropertyGroup csproj
+tags: [check, extends, bundled, dotnet]
+
+given:
+  tree:
+    global.json: '{"sdk": {"version": "8.0.100"}}'
+    .editorconfig: "root = true\n"
+    src:
+      App.csproj: |
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net8.0</TargetFramework>
+          </PropertyGroup>
+          <PropertyGroup>
+            <Nullable>disable</Nullable>
+          </PropertyGroup>
+        </Project>
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/dotnet@v1
+
+when: [check]
+
+expect:
+  - exit: success
+    violations:
+      - {rule: dotnet-csproj-nullable-enabled, level: info, path: src/App.csproj}

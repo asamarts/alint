@@ -1206,6 +1206,9 @@ fn dir_has_tracked_files_walks_prefix() {
     // match `target/foo` because no tracked path is under
     // `tar/`.
     assert!(!dir_has_tracked_files(Path::new("tar"), &set));
+    // An exact file path is not a directory containing tracked files.
+    assert!(!dir_has_tracked_files(Path::new("README.md"), &set));
+    assert!(!dir_has_tracked_files(Path::new("src/main.rs"), &set));
 }
 
 // ----- commit_messages_in_range -----------------------------
@@ -1535,6 +1538,9 @@ fn verify_commit_returns_false_for_unsigned_commit() {
     .trim()
     .to_string();
     assert_eq!(verify_commit(repo.path(), &head), Some(false));
+    // A dash-prefixed commit argument must not be interpreted as an option
+    // (such as `--help`, which would exit 0 and falsely look like a valid signature).
+    assert_eq!(verify_commit(repo.path(), "--help"), Some(false));
 }
 
 #[test]

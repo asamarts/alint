@@ -80,8 +80,11 @@ check "a major tag that moved on accepts a release in its series" ok "uses: acme
 check "a minor series" ok "uses: acme/tagged@$c1 # v1.0"
 check "a sub-path Action resolves its repository" ok "uses: acme/tagged/sub/dir@$c3 # v2.0.0"
 check "a commit in the named branch's history" ok "uses: acme/branchy@$b1 # master"
-check "local and docker references are skipped" ok "uses: ./" "uses: docker://alpine:3.20" \
+check "local and digest-pinned docker references are accepted" ok "uses: ./" \
+  "uses: docker://alpine@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" \
   "uses: acme/tagged@$c3 # v2.0.0"
+check "an unpinned docker reference" rejected "uses: docker://alpine:latest"
+check "a short docker sha256 digest" rejected "uses: docker://alpine@sha256:deadbeef"
 
 check "a tag naming another commit" rejected "uses: acme/tagged@$c2 # v1.0.0"
 check "a commit outside the named series" rejected "uses: acme/tagged@$c3 # v1"

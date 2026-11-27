@@ -1913,3 +1913,46 @@ fn global_excludes_need_ignore_files() {
         assert_eq!(opts.uses_global_git_excludes(), uses, "{respect} {global}");
     }
 }
+
+#[test]
+fn walk_skips_rejects_alternate_git_spellings() {
+    let tmp = td();
+    let root = tmp.path();
+    let opts = WalkOptions::test_default().with_respect_gitignore(false);
+    let skips = WalkSkips::new(root, &opts, &[]);
+    for rel in [
+        ".GIT/HEAD",
+        "sub/GIT~1/config",
+        ".g\u{200c}it/index",
+        ".git./hooks/pre-commit",
+    ] {
+        assert!(
+            skips.skips(Path::new(rel), false),
+            "WalkSkips must reject alternate .git spelling {rel:?}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn walk_records_dangling_and_cyclic_symlinks_on_escaping_symlinks() {
+    use std::os::unix::fs::symlink;
+    let tmp = td();
+    let root = tmp.path();
+    touch(root, "real.txt", b"ok\n");
+    symlink("does_not_exist", root.join("dangling")).unwrap();
+    symlink("self_cyc", root.join("self_cyc")).unwrap();
+    std::fs::create_dir(root.join("sub")).unwrap();
+    symlink("..", root.join("sub/up")).unwrap();
+
+    let idx = walk(root, &WalkOptions::test_default()).unwrap();
+    for expected in ["dangling", "self_cyc", "sub/up"] {
+        assert!(
+            idx.escaping_symlinks
+                .iter()
+                .any(|p| p.as_ref() == Path::new(expected)),
+            "expected {expected:?} in escaping_symlinks: {:?}",
+            idx.escaping_symlinks
+        );
+    }
+}

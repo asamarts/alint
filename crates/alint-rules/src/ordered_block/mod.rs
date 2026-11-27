@@ -65,9 +65,9 @@ enum Comparator {
     Lexical,
     /// ASCII-case-insensitive lexical.
     LexicalCi,
-    /// Leading-integer order; entries without a leading integer (or with one too
-    /// large even for `i128` -- 39+ digits) fall back to `lexical` so a mixed
-    /// block degrades predictably rather than panicking.
+    /// Leading-integer order over arbitrary-length signed integers; entries
+    /// with a leading integer always sort before non-numeric entries (which
+    /// sort lexically), guaranteeing a strict total order on any input.
     Numeric,
 }
 
@@ -77,19 +77,18 @@ impl Comparator {
             Self::Lexical => a.cmp(b),
             Self::LexicalCi => a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()),
             Self::Numeric => match (leading_int(a), leading_int(b)) {
-                (Some(x), Some(y)) => x.cmp(&y).then_with(|| a.cmp(b)),
-                _ => a.cmp(b),
+                (Some(x), Some(y)) => compare_bigint(x, y).then_with(|| a.cmp(b)),
+                (Some(_), None) => Ordering::Less,
+                (None, Some(_)) => Ordering::Greater,
+                (None, None) => a.cmp(b),
             },
         }
     }
 }
 
-/// The leading (optionally negative) integer of `s`, or `None` when it doesn't
-/// start with one. Parsed as `i128`, so u64-range identifiers (Discord/Twitter
-/// snowflakes ~1.8e19, nanosecond timestamps) and u128 values sort NUMERICALLY
-/// rather than falling back to a wrong byte-wise order; only a 39+-digit integer
-/// (over `i128::MAX`) still degrades to lexical.
-fn leading_int(s: &str) -> Option<i128> {
+/// Normalized leading (optionally negative) integer of `s`, supporting
+/// arbitrary digit counts without fixed-width overflow.
+fn leading_int(s: &str) -> Option<(bool, &str)> {
     let s = s.trim_start();
     let b = s.as_bytes();
     let neg = b.first() == Some(&b'-');
@@ -101,7 +100,26 @@ fn leading_int(s: &str) -> Option<i128> {
     if digits_end == digits_start {
         return None;
     }
-    s[..digits_end].parse::<i128>().ok()
+    let digits = s[digits_start..digits_end].trim_start_matches('0');
+    // Normalize `-0` and `0` identically so `-0 == 0`.
+    let neg = neg && !digits.is_empty();
+    let digits = if digits.is_empty() { "0" } else { digits };
+    Some((neg, digits))
+}
+
+fn compare_bigint((neg_a, digits_a): (bool, &str), (neg_b, digits_b): (bool, &str)) -> Ordering {
+    match (neg_a, neg_b) {
+        (true, false) => Ordering::Less,
+        (false, true) => Ordering::Greater,
+        (false, false) => digits_a
+            .len()
+            .cmp(&digits_b.len())
+            .then_with(|| digits_a.cmp(digits_b)),
+        (true, true) => digits_b
+            .len()
+            .cmp(&digits_a.len())
+            .then_with(|| digits_b.cmp(digits_a)),
+    }
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]

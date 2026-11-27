@@ -177,7 +177,7 @@ impl<'de> Deserialize<'de> for CaseConvention {
             "camel" | "camelcase" | "lowercamel" | "lowercamelcase" => Ok(Self::Camel),
             "snake" | "snakecase" => Ok(Self::Snake),
             "kebab" | "kebabcase" | "dash" | "dashcase" => Ok(Self::Kebab),
-            "screamingsnake" | "screamingsnakecase" | "upper_snake" | "uppersnakecase" => {
+            "screamingsnake" | "screamingsnakecase" | "uppersnake" | "uppersnakecase" => {
                 Ok(Self::ScreamingSnake)
             }
             "flat" | "flatcase" => Ok(Self::Flat),
@@ -420,6 +420,7 @@ mod tests {
             ("KEBAB", CaseConvention::Kebab),
             ("snake_case", CaseConvention::Snake),
             ("SCREAMING_SNAKE_CASE", CaseConvention::ScreamingSnake),
+            ("upper_snake", CaseConvention::ScreamingSnake),
             ("flatcase", CaseConvention::Flat),
         ];
         for (input, expected) in cases {

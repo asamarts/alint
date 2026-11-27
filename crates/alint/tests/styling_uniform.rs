@@ -119,7 +119,32 @@ fn human_output_subcommands() -> Vec<(&'static str, Vec<&'static str>)> {
         // the bundled suggester emit even if the fixture already
         // extends one ruleset.
         ("suggest", vec!["suggest", "--quiet", "--include-bundled"]),
+        ("validate-config", vec!["validate-config"]),
     ]
+}
+
+#[test]
+fn validate_config_and_suggest_honor_ascii_glyphs() {
+    let tmp = fixture_repo();
+    for args in [
+        &["validate-config", "--ascii", "--color", "never"][..],
+        &[
+            "suggest",
+            "--quiet",
+            "--include-bundled",
+            "--explain",
+            "--ascii",
+            "--color",
+            "never",
+        ][..],
+    ] {
+        let (stdout, _stderr) = run(args, tmp.path());
+        let text = std::str::from_utf8(&stdout).unwrap();
+        assert!(
+            !text.contains('✓') && !text.contains('✗') && !text.contains("└─"),
+            "{args:?} emitted Unicode glyphs under --ascii:\n{text}"
+        );
+    }
 }
 
 #[test]

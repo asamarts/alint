@@ -41,6 +41,8 @@ const DOC_FILES: &[&str] = &[
     "docs/rules.md",
     "docs/development/CONFIG-AUTHORING.md",
     "docs/development/rule-authoring.md",
+    "docs/site/cookbook/index.md",
+    "docs/site/concepts/composition/bundled-rulesets.md",
 ];
 
 fn repo_root() -> PathBuf {

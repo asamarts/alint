@@ -29,6 +29,10 @@ const SUBCOMMANDS: &[&str] = &[
     "suggest",
     "export-agents-md",
     "test",
+    "baseline",
+    "validate-config",
+    "lsp",
+    "rules",
 ];
 
 fn alint_bin() -> PathBuf {

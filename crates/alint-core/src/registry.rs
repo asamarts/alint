@@ -777,7 +777,7 @@ fn assert_dispatch_and_content(kind: &str, meta: &KindMeta, rule: &dyn Rule) {
     if let Some(per_file_rule) = rule.as_per_file() {
         let bounded_read = per_file_rule.max_bytes_needed();
         match meta.content {
-            ContentAccess::Prefix { max_bytes, .. } | ContentAccess::Suffix { max_bytes, .. } => {
+            ContentAccess::Prefix { max_bytes, .. } => {
                 assert!(
                     bounded_read.is_some(),
                     "{kind}: bounded content metadata disagrees with an unbounded per-file rule"
@@ -790,9 +790,9 @@ fn assert_dispatch_and_content(kind: &str, meta: &KindMeta, rule: &dyn Rule) {
                     );
                 }
             }
-            ContentAccess::WholeFile => assert!(
+            ContentAccess::WholeFile | ContentAccess::Suffix { .. } => assert!(
                 bounded_read.is_none(),
-                "{kind}: whole-file metadata disagrees with a bounded per-file rule"
+                "{kind}: non-prefix content metadata disagrees with a prefix-bounded per-file rule"
             ),
             other => panic!(
                 "{kind}: per-file dispatch cannot declare non-content access metadata {other:?}"

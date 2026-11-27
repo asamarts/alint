@@ -118,16 +118,16 @@ impl PerFileRule for IndentStyleRule {
         if looks_binary(bytes) {
             return Ok(Vec::new());
         }
-        // The leading-indent scan inspects ASCII whitespace
-        // characters and uses `char_indices` to slice the prefix
-        // -- we keep the UTF-8 validation pass for parity with
-        // the rule-major path. Non-UTF-8 files silently skip.
-        let Ok(text) = std::str::from_utf8(bytes) else {
+        // Decode lossily so non-UTF-8 text (e.g. Latin-1 source) is still
+        // checked for wrong indentation instead of silently passing; keep
+        // reindent fixability restricted to valid UTF-8 so `check` and `fix`
+        // agree.
+        let text = String::from_utf8_lossy(bytes);
+        let is_utf8 = matches!(text, std::borrow::Cow::Borrowed(_));
+        let Some((line_no, reason, fixable)) = first_bad_line(&text, self.style, self.width) else {
             return Ok(Vec::new());
         };
-        let Some((line_no, reason, fixable)) = first_bad_line(text, self.style, self.width) else {
-            return Ok(Vec::new());
-        };
+        let fixable = fixable && is_utf8;
         let msg = self.message.clone().unwrap_or_else(|| match reason {
             BadReason::WrongChar => format!(
                 "line {line_no} indented with the wrong character (expected {})",
@@ -735,6 +735,28 @@ mod tests {
                 .as_deref()
                 .unwrap()
                 .starts_with(REINDENT_UNFIXABLE_PREFIX)
+        );
+    }
+
+    #[test]
+    fn non_utf8_latin1_file_with_wrong_indent_is_flagged_and_marked_unfixable() {
+        let rule = build(&spec_for(FIX_YAML)).unwrap();
+        let index = alint_core::FileIndex::from_entries(Vec::new());
+        let ctx = Context::new(Path::new("/"), &index);
+        let vs = rule
+            .as_per_file()
+            .unwrap()
+            .evaluate_file(&ctx, Path::new("latin1.c"), b"/* caf\xe9 */\n\treturn 0;\n")
+            .unwrap();
+        assert_eq!(vs.len(), 1, "Latin-1 file with tabs must be flagged");
+        assert_eq!(vs[0].line, Some(2));
+        assert!(
+            vs[0]
+                .baseline_key
+                .as_deref()
+                .unwrap()
+                .starts_with(REINDENT_UNFIXABLE_PREFIX),
+            "non-UTF-8 file must not claim reindent fixability"
         );
     }
 

@@ -9,7 +9,9 @@ alint is driven by a small declarative language. You describe the checks you wan
 
 <svg class="alint-config" viewBox="0 0 460 470" role="img" aria-labelledby="cfg-t cfg-d" xmlns="http://www.w3.org/2000/svg">
 <title id="cfg-t">alint assembles one effective config from many sources</title>
-<desc id="cfg-d">Four config sources (bundled, extends, root, drop-in) merge by rule id from low to high precedence into one effective config. The bundled ruleset sets readme-exists to warning; the drop-in overrides it to error, which wins. Nested configs add subtree-scoped rules.</desc>
+<!-- alint:since=0.23.0 -->
+<desc id="cfg-d">Four config sources (bundled, extends, root, drop-in) merge by rule id from low to high precedence into one effective config. The bundled ruleset sets oss-readme-exists to warning; the drop-in overrides it to error, which wins. Nested configs add subtree-scoped rules.</desc>
+<!-- /alint:since -->
 <style>
   .alint-config { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; display:block; margin-inline:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-config { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
@@ -28,17 +30,23 @@ alint is driven by a small declarative language. You describe the checks you wan
 <text class="ui ac" x="18" y="15">one effective config, from many sources</text>
 <text class="ui mut" x="18" y="32">low to high precedence &#8595;</text>
 <rect class="card" x="20" y="42"  width="420" height="48" rx="8"/><rect x="20" y="42"  width="6" height="44" rx="2" fill="#3b82f6"/>
-<text class="ui" x="36" y="60" fill="#3b82f6">bundled</text><text class="mono tx" x="36" y="78">oss-baseline@v1</text><text class="tag mut" x="424" y="69" text-anchor="end">readme-exists: warning</text>
+<!-- alint:since=0.23.0 -->
+<text class="ui" x="36" y="60" fill="#3b82f6">bundled</text><text class="mono tx" x="36" y="78">oss-baseline@v1</text><text class="tag mut" x="424" y="69" text-anchor="end">oss-readme-exists: warning</text>
+<!-- /alint:since -->
 <rect class="card" x="20" y="98"  width="420" height="48" rx="8"/><rect x="20" y="98"  width="6" height="44" rx="2" fill="#f59e0b"/>
 <text class="ui" x="36" y="116" fill="#f59e0b">extends</text><text class="mono tx" x="36" y="134">./team.yml</text><text class="tag mut" x="424" y="125" text-anchor="end">+ team rules</text>
 <rect class="card" x="20" y="154" width="420" height="48" rx="8"/><rect x="20" y="154" width="6" height="44" rx="2" fill="#4f46e5"/>
 <text class="ui ac" x="36" y="172">root</text><text class="mono tx" x="36" y="190">.alint.yml</text><text class="tag mut" x="424" y="181" text-anchor="end">+ your rules</text>
 <rect class="card" x="20" y="210" width="420" height="48" rx="8"/><rect x="20" y="210" width="6" height="44" rx="2" fill="#7c3aed"/>
-<text class="ui" x="36" y="228" fill="#7c3aed">drop-in</text><text class="mono tx" x="36" y="246">99-local.yml</text><text class="tag" x="424" y="237" text-anchor="end" fill="#7c3aed">readme-exists: error</text>
+<!-- alint:since=0.23.0 -->
+<text class="ui" x="36" y="228" fill="#7c3aed">drop-in</text><text class="mono tx" x="36" y="246">99-local.yml</text><text class="tag" x="424" y="237" text-anchor="end" fill="#7c3aed">oss-readme-exists: error</text>
+<!-- /alint:since -->
 <path class="flow" d="M 230 270 V 291"/><path fill="var(--ac)" d="M 225 291 L 230 298 L 235 291 Z"/><text class="ui mut" x="244" y="286">merge by id</text>
 <text class="ui ac" x="20" y="290">effective config</text>
 <rect class="eff" x="20" y="298" width="420" height="156" rx="12"/>
-<text class="mono ac" x="36" y="326" font-weight="700">readme-exists</text>
+<!-- alint:since=0.23.0 -->
+<text class="mono ac" x="36" y="326" font-weight="700">oss-readme-exists</text>
+<!-- /alint:since -->
 <text class="mono tx" x="36" y="352">kind: file_exists</text>
 <text class="mono tx" x="36" y="378">level: <tspan class="old">warning</tspan> <tspan class="tx">&#8594;</tspan> <tspan class="ac" font-weight="700">error</tspan></text>
 <line x1="36" y1="396" x2="424" y2="396" stroke="var(--bd)" stroke-width="1" opacity=".5"/>
@@ -48,7 +56,9 @@ alint is driven by a small declarative language. You describe the checks you wan
 
 ## A rule is a record
 
-The atom of the language is the rule record. Three fields are always required: `id` (a stable kebab-case name), `kind` (which built-in check to run), and `level` (`error`, `warning`, `info`, or `off`). The rest are optional: `paths` (which files, as a glob, a list, or an `{include, exclude}` pair), `when` (an expression that gates the rule on facts), `fix` (one of twelve repair ops), `message`, `scope_filter`, and any fields specific to the `kind`.
+<!-- alint:since=0.23.0 -->
+The atom of the language is the rule record. Three fields are always required: `id` (a stable kebab-case name), `kind` (which built-in check to run), and `level` (`error`, `warning`, `info`, or `off`). The rest are optional: `paths` (which files, as a glob, a list, or an `{include, exclude}` pair), `when` (an expression that gates the rule on facts), `fix` (one of twenty-six repair ops), `message`, `scope_filter`, and any fields specific to the `kind`.
+<!-- /alint:since -->
 
 ```yaml
 - id: readme-exists      # names it (stable; used to override or disable)
@@ -114,7 +124,9 @@ The drop-in supplied only `level`; `kind`, `paths`, and `message` came from the 
 
 ## Going deeper
 
-- [Configuration](/docs/configuration/) is the field-by-field reference for all twelve top-level fields, every rule field, and the JSON Schema.
+<!-- alint:since=0.23.0 -->
+- [Configuration](/docs/configuration/) is the field-by-field reference for all fifteen top-level v1 fields (seventeen in v2), every rule field, and the JSON Schema.
+<!-- /alint:since -->
 - [Drop-in configs](/docs/concepts/composition/config-layering/) covers `.alint.d/` layering and its trust posture in depth.
 - [Variable interpolation](/docs/configuration/variable-interpolation/) details the three interpolation timings and `{{env.X | default(...)}}`.
 - [How alint works](/docs/concepts/start-here/how-alint-works/) traces the assembly-then-evaluation pipeline end to end.

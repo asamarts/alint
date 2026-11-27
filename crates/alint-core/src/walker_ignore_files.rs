@@ -170,7 +170,7 @@ pub(super) fn read_by_path(path: PathBuf) -> IgnoreFileRead {
 /// Open `path` without blocking on a FIFO (using `O_NONBLOCK` on Unix so a
 /// TOCTOU swap between `read_dir`/`stat` and `open` never stalls).
 #[cfg(unix)]
-fn open_nonblocking(path: &Path) -> std::io::Result<std::fs::File> {
+pub(crate) fn open_nonblocking(path: &Path) -> std::io::Result<std::fs::File> {
     use std::os::unix::fs::OpenOptionsExt as _;
     std::fs::OpenOptions::new()
         .read(true)
@@ -179,7 +179,7 @@ fn open_nonblocking(path: &Path) -> std::io::Result<std::fs::File> {
 }
 
 #[cfg(not(unix))]
-fn open_nonblocking(path: &Path) -> std::io::Result<std::fs::File> {
+pub(crate) fn open_nonblocking(path: &Path) -> std::io::Result<std::fs::File> {
     std::fs::File::open(path)
 }
 

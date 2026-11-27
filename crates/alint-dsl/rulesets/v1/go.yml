@@ -29,10 +29,9 @@ rules:
   - id: go-mod-exists
     when: facts.has_go
     kind: file_exists
-    paths: go.mod
-    root_only: true
+    paths: ["go.mod", "**/go.mod"]
     level: error
-    message: "Go module: go.mod at the repo root is required."
+    message: "Go module: a go.mod manifest is required."
     policy_url: "https://go.dev/ref/mod#go-mod-file"
 
   - id: go-sum-exists
@@ -57,7 +56,7 @@ rules:
     # Every go.mod starts with `module <path>`. Absent or empty
     # module path means `go build` will refuse the module.
     kind: file_content_matches
-    paths: go.mod
+    paths: ["go.mod", "**/go.mod"]
     pattern: '(?m)^module\s+\S+'
     level: error
     message: "go.mod must declare a `module <path>` on its first directive."
@@ -68,7 +67,7 @@ rules:
     # floor. Missing it means the toolchain selects its default,
     # which changes across Go releases.
     kind: file_content_matches
-    paths: go.mod
+    paths: ["go.mod", "**/go.mod"]
     pattern: '(?m)^go\s+\d+\.\d+'
     level: warning
     message: >-
