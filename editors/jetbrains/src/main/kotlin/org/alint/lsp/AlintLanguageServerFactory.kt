@@ -38,7 +38,7 @@ class AlintLanguageServerFactory : LanguageServerFactory {
         AlintLanguageClient(project)
 }
 
-private class AlintConnectionProvider(private val project: Project) : ProcessStreamConnectionProvider() {
+internal class AlintConnectionProvider(private val project: Project) : ProcessStreamConnectionProvider() {
     val generation: Long = AlintTrustCoordinator.nextGeneration()
     private val hasBinary: Boolean
 

@@ -1,7 +1,7 @@
 package org.alint.lsp
 
 import com.intellij.openapi.fileChooser.FileChooser
-import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
+import com.intellij.openapi.fileChooser.FileChooserDescriptor
 import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
@@ -24,7 +24,7 @@ class AlintConfigurable : Configurable {
     override fun createComponent(): JComponent {
         val field = TextFieldWithBrowseButton()
         field.addActionListener {
-            val descriptor = FileChooserDescriptorFactory.createSingleFileNoJarsDescriptor()
+            val descriptor = FileChooserDescriptor(true, false, false, false, false, false)
                 .withTitle("Select alint Binary")
                 .withDescription("Choose the alint executable to run `alint lsp`.")
             val chosen = FileChooser.chooseFile(descriptor, null, null)

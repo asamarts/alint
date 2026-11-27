@@ -323,7 +323,9 @@ fn gitfile_preserves_non_utf8_unix_path_bytes() {
     std::fs::create_dir_all(&repo).unwrap();
     let target_name = std::ffi::OsStr::from_bytes(b"gitdir-\xff-store");
     let target_dir = tmp.path().join(target_name);
-    std::fs::create_dir_all(&target_dir).unwrap();
+    // Do not create `target_dir` on disk: APFS on macOS rejects non-UTF-8
+    // directory names with EILSEQ, while `read_gitfile` parses the raw path
+    // bytes from `.git` directly without stat-ing the target.
     let mut content = b"gitdir: ".to_vec();
     content.extend_from_slice(target_dir.as_os_str().as_bytes());
     content.push(b'\n');
